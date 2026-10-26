@@ -10,6 +10,19 @@
  * "on this day" list was tried first; it had four Indian names today, one
  * with the wrong year.
  *
+ * ONLY THE BIG NAMES (owner, 2026-10-26: "only the top celebrities …
+ * who has large audience base like actors"). The first week showed an
+ * archbishop, a Jain nun, judges and hurdlers beside the film stars. Now:
+ * people whose one line on Wikidata says they are known for the screen,
+ * music or cricket (an author or a minister once listed as an actor stays
+ * out), on 20+ Wikipedias. A day with fewer than two
+ * of those is topped up to two from the best known of the rest (12+), so
+ * the card is not empty on a quiet day. Measured over 21 days
+ * (19 Oct – 8 Nov 2026): no empty day, one day with a single name.
+ * Filtering on occupation (P106) inside the query chose exactly the same
+ * people on all 21 days and made a cold query up to 8x slower, so the
+ * query is the plain one and the line is checked here.
+ *
  * Fetched once per India day for everyone, kept in memory and on the data
  * volume (DATA_DIR/birthdays/<YYYY-MM-DD>.json), so a restart does not
  * query again. A failed fetch serves an empty list and retries after
@@ -24,8 +37,14 @@ const ROOT = path.resolve(
 );
 const ENDPOINT = "https://query.wikidata.org/sparql";
 const UA = "HariAssistant/1.0 (https://api.hariassistant.tech; myassistant658@gmail.com)";
-const LIMIT = 12;
-const MIN_SITELINKS = 8;
+const LIMIT = 8;
+const MIN_SITELINKS = 12; // the floor for topping up a quiet day
+const STAR_SITELINKS = 20; // a big name
+const MIN_SHOWN = 2;
+// A list saved under an older rule is fetched again, not served.
+const RULE = 2;
+// What they are known for, in their own description.
+const STAR_ROLE = /\b(actor|actress|singer|vocalist|playback|cricket(er)?|composer|music director|musician|rapper|comedian|film ?maker|film director|television (host|presenter|personality)|tv (host|presenter))\b/i;
 const RETRY_MS = 10 * 60_000;
 // Not for a family home screen.
 const UNSUITABLE = /porn|adult (film|actress|actor|model)|erotic|criminal|gangster|terrorist/i;
@@ -45,7 +64,7 @@ function query(month, day) {
   ?p rdfs:label ?name . FILTER(LANG(?name) = "en")
   OPTIONAL { ?p schema:description ?desc . FILTER(LANG(?desc) = "en") }
   OPTIONAL { ?p wdt:P18 ?pic }
-} GROUP BY ?p ?name ?desc ?born ?links ORDER BY DESC(?links) LIMIT ${LIMIT * 2}`;
+} GROUP BY ?p ?name ?desc ?born ?links ORDER BY DESC(?links) LIMIT 40`;
 }
 
 /** "Indian actor and politician (born 1957)" → "Actor and politician". */
@@ -78,7 +97,7 @@ async function fetchDay(date) {
     const name = b.name && b.name.value;
     const id = b.p.value.split("/").pop();
     const desc = (b.desc && b.desc.value) || "";
-    if (!name || /^Q\d+$/.test(name) || UNSUITABLE.test(desc)) continue;
+    if (!name || /^Q\d+$/.test(name) || UNSUITABLE.test(desc) || !STAR_ROLE.test(desc)) continue;
     const year = Number(String(b.born.value).slice(0, 4));
     const had = byId.get(id);
     if (had) {
@@ -92,10 +111,16 @@ async function fetchDay(date) {
       age: year ? y - year : null,
       photo: thumb(b.img && b.img.value),
       year,
+      links: Number(b.links.value),
     });
   }
-  const people = [...byId.values()].slice(0, LIMIT).map(({ year, ...p }) => p);
-  return { date, people };
+  // Best known first (the query's order): the big names, or on a quiet day
+  // the best known two.
+  const all = [...byId.values()];
+  const stars = all.filter((p) => p.links >= STAR_SITELINKS);
+  const picked = stars.length >= MIN_SHOWN ? stars : all.slice(0, MIN_SHOWN);
+  const people = picked.slice(0, LIMIT).map(({ year, links, ...p }) => p);
+  return { date, rule: RULE, people };
 }
 
 const cache = new Map(); // date → { date, people }
@@ -121,12 +146,12 @@ function save(day) {
   }
 }
 
-/** Today's list: { date, people: [{ id, name, role, age, photo }] }. */
+/** Today's list: { date, rule, people: [{ id, name, role, age, photo }] }. */
 async function today(now = new Date()) {
   const date = indiaDate(now);
   if (cache.has(date)) return cache.get(date);
   const saved = readSaved(date);
-  if (saved && Array.isArray(saved.people)) {
+  if (saved && saved.rule === RULE && Array.isArray(saved.people)) {
     cache.set(date, saved);
     return saved;
   }
