@@ -74,11 +74,17 @@ async function designFromWords(description, { mode = null, avoid = [] } = {}) {
     try {
       const r = await router.generateReply([{ role: "user", content: ask }], {
         system: DESIGNER_PROMPT, json: true, schema: THEME_SCHEMA,
-        model: process.env.DESIGN_MODEL || openai.models.smart(), timeoutMs: 25_000, noRetry: true,
+        // The chat model (gpt-5.4-nano): compared 2026-10-31 with gpt-4.1
+        // and gpt-4.1-mini on four looks — every palette readable on the
+        // first try, no worse to the eye, at the lowest price. A dropped
+        // connection is retried by the router (no noRetry here: the VPS
+        // loses one now and then, and that used to fail the whole tool).
+        model: process.env.DESIGN_MODEL || openai.models.chat(), timeoutMs: 20_000,
       });
       out = JSON.parse(r.reply || "{}");
     } catch (e) {
-      return { ok: false, error: "The design model did not answer — try again in a moment." };
+      console.warn(`design: model failed: ${String(e.message || e).slice(0, 160)}`);
+      return { ok: false, error: FAILED };
     }
     const look = {
       palette: out.palette,
@@ -93,6 +99,12 @@ async function designFromWords(description, { mode = null, avoid = [] } = {}) {
   }
   return { ok: false, error: "I could not make a readable version of that look — try describing it differently." };
 }
+
+// What the assistant is told when the design model could not answer: say
+// so and offer again — not call the tool again on its own (it did, twice,
+// and the owner watched the Design agent "keep running").
+const FAILED = "The design service did not answer this time. Nothing was changed. Tell the owner it " +
+  "did not work and ask if they want you to try again — do not call a design tool again in this reply.";
 
 const apply = (spec, summary, extra = {}) => ({
   ok: true,
@@ -133,7 +145,8 @@ function registerDesignTools(registry) {
       "Change how THIS app looks, any part of it, when the owner asks: colours ('make the cards darker', " +
       "'brand colour teal'), card style (glass|solid|outlined|flat) and corner radius (0-32), the font (" +
       S.FONTS.join(", ") + "), text size (scale 0.9-1.3), background (ambient|gradient|plain), dark/light, " +
-      "the header title. Pass ONLY what changes. Colours are #RRGGBB; a palette change may name just the " +
+      "the header title. 'Darker' / 'lighter' (the page and cards) is `shade`. Pass ONLY what changes. " +
+      "Colours are #RRGGBB; a palette change may name just the " +
       "keys that change (bg, surface, surfaceHigh, primary, partner, secondary, tertiary, textHi, textLo, " +
       "textDim). For a whole new look from words ('sunset', 'calm forest') use generate_theme instead.",
     inputSchema: {
@@ -141,6 +154,7 @@ function registerDesignTools(registry) {
       properties: {
         palette: { type: "object", description: "Colour keys to change, e.g. {\"surface\":\"#1E1E2E\"}." },
         mode: { type: "string", enum: S.MODES },
+        shade: { type: "string", enum: ["darker", "lighter"], description: "Make the page and cards darker or lighter." },
         cardStyle: { type: "string", enum: S.CARD_STYLES },
         radius: { type: "integer", description: "Card corner radius, 0 (square) to 32 (very round)." },
         font: { type: "string", enum: S.FONTS },
@@ -162,6 +176,21 @@ function registerDesignTools(registry) {
         patch.palette = { ...(cur.palette || APP_PALETTE[dark ? "dark" : "light"]), ...args.palette };
       }
       if (args.mode) patch.mode = args.mode;
+      // Dark/light with a palette of the other kind: the SAME colours, as a
+      // dark (or light) theme — the palette decides how the app looks, so
+      // a mode alone changed nothing (2026-10-31).
+      const pal = patch.palette || cur.palette;
+      if ((args.mode === "dark" || args.mode === "light") && pal && pal.dark !== (args.mode === "dark") && !args.palette) {
+        const made = await designFromWords(
+          `the same look as "${pal.name || "this"}" — brand ${pal.primary}, partner ${pal.partner}, ` +
+          `accents ${pal.secondary} and ${pal.tertiary} — as a ${args.mode} theme`, { mode: args.mode });
+        if (!made.ok) return made;
+        patch.palette = made.look.palette;
+      }
+      if (args.shade) {
+        const base = patch.palette || cur.palette || APP_PALETTE[cur.mode === "light" ? "light" : "dark"];
+        patch.palette = S.shade(base, args.shade);
+      }
       if (args.cardStyle || args.radius != null) {
         patch.shape = { ...(args.cardStyle ? { cardStyle: args.cardStyle } : {}), ...(args.radius != null ? { radius: args.radius } : {}) };
       }

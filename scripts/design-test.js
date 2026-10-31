@@ -191,6 +191,37 @@ const look = (palette, extra = {}) => ({ palette, cardStyle: "glass", radius: 24
     assert.ok(!(await run("pick_preview", { option: 9 })).ok);
   });
 
+  await test("darker / lighter move the page and cards, and stay readable", async () => {
+    await run("reset_design");
+    await run("design_app", { palette: { ...GOOD } });
+    const d = await run("design_app", { shade: "darker" });
+    assert.ok(d.ok, d.error);
+    assert.ok(S.contrast(d.deviceAction.spec.palette.bg, "#FFFFFF") > S.contrast(GOOD.bg, "#FFFFFF"), "darker page");
+    assert.strictEqual(d.deviceAction.spec.palette.primary, GOOD.primary, "the brand colour kept");
+  });
+  await test("light mode on a dark palette asks for the same colours as a light theme", async () => {
+    const LIGHT = { ...GOOD, name: "Sunset Light", bg: "#FFF6F0", surface: "#FFFFFF", surfaceHigh: "#FBE9DF",
+      textHi: "#2A1620", textLo: "#5C3A44", textDim: "#7A5A62" };
+    answers.push(look(LIGHT));
+    const r = await run("design_app", { mode: "light" });
+    assert.ok(r.ok, r.error);
+    assert.deepStrictEqual([r.deviceAction.spec.palette.dark, r.deviceAction.spec.palette.bg], [false, "#FFF6F0"]);
+  });
+  await test("a design model that does not answer: nothing changes, and no retry loop", async () => {
+    const before = await store.get(U);
+    const saved = router.generateReply;
+    router.generateReply = async () => { throw new Error("fetch failed"); };
+    const r = await run("generate_theme", { description: "anything" });
+    router.generateReply = saved;
+    assert.ok(!r.ok && /do not call a design tool again/.test(r.error), r.error);
+    assert.deepStrictEqual(await store.get(U), before);
+  });
+  await test("the agents get a map of the app", () => {
+    const g = require("../src/agents/appGuide").appGuide("Maya");
+    assert.ok(/Home, Hub/.test(g) && /Design/.test(g) && /Reset to the original look/.test(g));
+    assert.ok(g.length < 1600, "kept short");
+  });
+
   console.log("(d) generate_theme");
   await test("an unreadable first answer is sent back and fixed", async () => {
     answers.push(look(UNREADABLE), look(GOOD));

@@ -192,6 +192,43 @@ function validate(input) {
   return { ok: errors.length === 0, spec, errors };
 }
 
+function hsl(h) {
+  const n = parseInt(h.slice(1), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => c / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  const hue = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [hue / 6, s, l];
+}
+function fromHsl([h, s, l]) {
+  const f = (p, q, t) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const c = s === 0 ? [l, l, l] : [f(p, q, h + 1 / 3), f(p, q, h), f(p, q, h - 1 / 3)];
+  return "#" + c.map((x) => Math.round(x * 255).toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
+/**
+ * "Make it darker" / "lighter": the page, the cards and the chips moved
+ * together in lightness, the hue kept. The result is still validated.
+ */
+function shade(palette, dir) {
+  const out = { ...palette };
+  for (const k of ["bg", "surface", "surfaceHigh"]) {
+    const [h, s, l] = hsl(hex(palette[k]));
+    out[k] = fromHsl([h, s, dir === "darker" ? l * 0.68 : l + (1 - l) * 0.3]);
+  }
+  return out;
+}
+
 /** a deep-merged with b (b wins; arrays replace). */
 function merge(a, b) {
   if (b === undefined) return a;
@@ -220,6 +257,6 @@ function describe(spec) {
 }
 
 module.exports = {
-  defaults, validate, merge, describe, contrast, hex,
+  defaults, validate, merge, describe, contrast, hex, shade,
   SECTION_IDS, SECTION_LABELS, FONTS, CARD_STYLES, BACKGROUNDS, MODES, PALETTE_KEYS, SOURCES, BLOCKS,
 };
