@@ -377,7 +377,7 @@ test("the app resolves an unknown name against what is actually installed", () =
     "utf8"
   );
   assert.match(engine, /case 'open_any_app':/, "the engine must handle it");
-  assert.match(engine, /invokeMethod<String>\('launchApp'/,
+  assert.match(engine, /invokeMethod<String>\(\s*'launchApp'/,
     "and ask the phone to resolve the name");
   // A miss must be reported, or the assistant claims an app opened that did not.
   assert.match(engine, /no app by that name is installed/,
@@ -560,8 +560,10 @@ test("every screen open_app_screen offers is one the app can actually build", as
   const fs = require("fs");
   const registry = require("../src/tools/registry");
   const screens = registry.get("open_app_screen").inputSchema.properties.screen.enum;
-  // The four tabs live in the shell; the rest must have a builder entry.
-  const TABS = ["home", "hub", "chat", "settings"];
+  // The four tabs live in the shell (the third, Chats, answers to both
+  // "chat" and "meetings"); voice settings has its own opener; the rest
+  // must have a builder entry.
+  const TABS = ["home", "hub", "chat", "meetings", "settings", "voice_settings"];
   const engine = fs.readFileSync(
     APP_ROOT + "/lib/features/assistant/state/assistant_engine.dart",
     "utf8"
@@ -569,6 +571,12 @@ test("every screen open_app_screen offers is one the app can actually build", as
   const missing = screens
     .filter((s) => !TABS.includes(s))
     .filter((s) => !engine.includes(`'${s}' => (_)`));
+  // ...and every tab name the tool offers is in the shell's tab map.
+  const tabMap = (engine.match(/const tabs = \{([^}]*)\}/) || [])[1] || "";
+  for (const t of TABS.filter((x) => x !== "voice_settings" && screens.includes(x))) {
+    assert.ok(tabMap.includes(`'${t}':`), `open_app_screen offers '${t}' but the app's tab map lacks it`);
+  }
+  assert.ok(engine.includes("screen == 'voice_settings'"), "voice settings needs its opener");
   assert.deepStrictEqual(missing, [],
     `the tool offers screens the app cannot open: ${missing.join(", ")}`);
 });

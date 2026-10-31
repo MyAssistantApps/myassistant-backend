@@ -465,7 +465,9 @@ const RECIPE = (over = {}) => ({
     assert.match(t, /- Dolo 650 — 2 strips/);
     assert.match(t, /\n {2}https:\/\/www\.myntra\.com\/sneakers\/puma\/123\/buy/);
     assert.ok(!t.includes("Onions"), "the bought onion is not shared");
-    for (const i of items) assert.ok(!new RegExp(`\\b${i.id}\\b`).test(t), "no internal ids");
+    // An id would show as "#12" or "id 12"; a bare number is a quantity
+    // ("Milk — 2 L" matched id 2 on a fresh database).
+    for (const i of items) assert.ok(!new RegExp(`(#|\\bid\\s*[:=]?\\s*)${i.id}\\b`, "i").test(t), "no internal ids");
     assert.ok(t.indexOf("*Vegetables & fruit*") < t.indexOf("*Dairy & eggs*"), "grouped in category order");
     const one = await call(A, "GET", "/shopping/share-text?category=clothing");
     assert.ok(one.body.text.startsWith("*Shopping list: Clothing & footwear* (3 items)"), one.body.text);

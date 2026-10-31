@@ -127,8 +127,8 @@ const FAMILIES = [
       "try_a_look", "present_text", "draft_text", "edit_draft", "generate_image", "generate_video",
       // show_pictures pops a photo on the phone ("Here is X") — same claim.
       "show_pictures", "show_search_results",
-      // Poster Studio, photo edits and meeting prep open a screen (2026-09-30).
-      "create_event_poster", "edit_my_photo", "prepare_meeting",
+      // Photo edits and meeting prep open a screen (2026-09-30).
+      "edit_my_photo", "prepare_meeting",
       // Screens inside this app. "Opening your settings" is the same claim.
       "open_app_screen", "set_app_theme",
       // Bills by email opens its own screen ("Your address is on screen").
@@ -154,8 +154,6 @@ const FAMILIES = [
       "show_schedule", "show_news",
       // "Bringing up the second story" — its card comes to the front.
       "read_news_story",
-      // "Opening WhatsApp with the card" (photo cards, 2026-09-26).
-      "share_poster",
       // "Pulling up Ravi's address" — the address card (2026-09-30).
       "show_address",
     ],
@@ -277,17 +275,9 @@ const FAMILIES = [
     id: "create",
     tools: ["create_document", "save_web_document", "present_text",
             "generate_image", "generate_video", "capture_document",
-            // Photo cards (2026-09-26): "I've made your card", "the photo is
-            // done". Their follow-up [SYSTEM] turns run no tool; the app's
-            // own lines vouch for them instead (appNoteVouches below).
-            "make_greeting_poster", "change_poster", "improve_old_photo",
-            // Sharing saves the finished card to his documents first, so
-            // "the card is saved in your documents, WhatsApp is open" is
-            // true after it — and was being rewritten into "nothing was
-            // saved" (review, 2026-09-26).
-            "share_poster",
-            // "I've made your poster" / "your edited photo is ready" (2026-09-30).
-            "create_event_poster", "edit_my_photo"],
+            // "Your edited photo is ready" (2026-09-30). Cards and posters
+            // are generate_image since the photo-card tools went (ef0b34b).
+            "edit_my_photo"],
     // A "card" is a greeting card here, never a business, ID or bank
     // card: "done, the business card is in your contacts" belongs to the
     // scanner, and must not be read as a claim to have made something.
@@ -305,10 +295,6 @@ const FAMILIES = [
             "save_upi_id",
             // "Logged your water", "noted it down", "I've saved today's list".
             "plan_my_day", "complete_priority", "add_habit", "check_habit",
-            // "I've saved the clearer photo to your documents" — the keep
-            // step of improve_old_photo (2026-09-26); and the card a share
-            // saved first.
-            "improve_old_photo", "share_poster",
             // EVERY TOOL THAT SAVES WHAT THE USER TOLD IT (2026-09-27). "I've
             // saved your bike EMI" after add_finance_item was rewritten into
             // "that wasn't saved", and the live model was told to add it
@@ -324,7 +310,7 @@ const FAMILIES = [
             "create_shortcut", "update_shortcut", "delete_shortcut",
             // Pictures, cards and documents land in their documents (2 Oct:
             // a card that WAS saved was followed by "That wasn't saved").
-            "generate_image", "make_greeting_poster", "create_event_poster", "edit_my_photo",
+            "generate_image", "edit_my_photo",
             "create_document", "present_text", "deep_research"],
     claim: /\b(logged|recorded|noted it down|saved (it |that )?(to|in) your|saved (the|your) shortcut|filed under|i'?ve (written|saved)|written that down)\b/i,
     // सहेज/सेव/नोट कर…, ಉಳಿಸ/ಸೇವ್ ಮಾಡ…, சேமிக்க…, సేవ్ చేస…, സേവ് ചെയ്…

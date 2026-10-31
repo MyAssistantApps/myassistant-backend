@@ -218,7 +218,8 @@ const src = (f) => fs.readFileSync(__dirname + "/../src/" + f, "utf8");
 
     const set = await fetch(`${base}/feedback/${mine.id}`, {
       method: "POST",
-      headers: { "content-type": "application/json", cookie },
+      // The panel's CSRF header (routes/admin_web.js, 2026-10-09).
+      headers: { "content-type": "application/json", cookie, "X-Admin-Panel": "1" },
       body: JSON.stringify({ status: "done" }),
     });
     assert.strictEqual(set.status, 200);
@@ -227,7 +228,7 @@ const src = (f) => fs.readFileSync(__dirname + "/../src/" + f, "utf8");
 
     const bad = await fetch(`${base}/feedback/${mine.id}`, {
       method: "POST",
-      headers: { "content-type": "application/json", cookie },
+      headers: { "content-type": "application/json", cookie, "X-Admin-Panel": "1" },
       body: JSON.stringify({ status: "deleted" }),
     });
     assert.strictEqual(bad.status, 400);
@@ -272,7 +273,7 @@ const src = (f) => fs.readFileSync(__dirname + "/../src/" + f, "utf8");
 
   await atest("the panel has a Feedback page", () => {
     const js = src("routes/admin_panel/app.js");
-    assert.match(js, /\["#\/feedback", "Feedback"\]/);
+    assert.match(js, /\["#\/feedback", "Feedback"[,\]]/);
     assert.match(js, /viewFeedback\(\)/);
   });
 

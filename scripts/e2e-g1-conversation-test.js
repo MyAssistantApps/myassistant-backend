@@ -290,6 +290,9 @@ function isoLocal(ms, tz = 330) {
     await atest("a new session carries the profile, remembered facts and the earlier conversation — not its failures or titles", async () => {
       await registry.execute("remember_fact", { fact: "User is vegetarian" }, { userId: UID });
       const recent = require("../src/memory/recent");
+      // append() writes in the background and makes the table on first use:
+      // on a fresh database the count below could run before it exists.
+      await recent.migrate();
       const old = { source: "live", sessionId: "live:g1-earlier", appBuild: 118 };
       recent.append(UID, "user", "What's on my calendar tomorrow?", { ...old, turnId: "e1" });
       recent.append(UID, "assistant", "You have a meeting with Allen at 4 pm, Sir.", { ...old, turnId: "e1" });

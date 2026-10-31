@@ -373,7 +373,10 @@ function stubRuntime(reply = "Done.", impl = null) {
         const p = pushesTo();
         assert.strictEqual(p.length, 1, JSON.stringify(p));
         assert.strictEqual(p[0].title, "Scheduled task failed");
-        assert.match(p[0].body, /503/);
+        // The user's notification is plain words; the raw provider error
+        // stays in the log and the job's last_error (handlers.js, 2026-10-07).
+        assert.match(p[0].body, /went wrong on my side/);
+        assert.doesNotMatch(p[0].body, /503|gemini|high demand/i);
         assert.strictEqual(rt.calls.length, 3);
         // Tomorrow is queued from when today's run was DUE, not from the
         // last retry — and starts with a clean slate.
