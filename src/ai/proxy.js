@@ -45,8 +45,13 @@ const STRAY_TAG = /<\s*(?!tone\s*:)[A-Za-z][A-Za-z _,'&-]{0,58}>/gi;
 // A delivery note under another name — "<prompt: bright and sunny>",
 // "<style: warm>" (2026-10-07, seen on screen) — is still a tone note.
 const NOTE_ALIAS = /<\s*(?:prompt|style|voice|delivery|manner|mood|note)\s*:\s*([^<>\n]{1,100}?)\s*>/gi;
+// HTML-style notes (2026-10-31, on screen as "</tone><informative>"):
+// "<tone>informative</tone>" is the tone note; a closing tag never shows.
+const TONE_XML = /<\s*tone\s*>\s*([^<>\n]{1,80}?)\s*<\s*\/\s*tone\s*>/gi;
+const CLOSING_TAG = /<\s*\/\s*[A-Za-z][A-Za-z _,'&-]{0,58}>/g;
 function cleanText(text, atStart = true) {
   let out = String(text || "");
+  out = out.replace(TONE_XML, (m, t) => (atStart ? `<tone: ${t.trim()}>` : "")).replace(CLOSING_TAG, "");
   if (atStart) out = out.replace(/^(\s*)<\s*(?:prompt|style|voice|delivery|manner|mood|note)\s*:/i, "$1<tone:");
   out = out.replace(NOTE_ALIAS, "");
   if (atStart) {
@@ -70,6 +75,11 @@ function tagFilter() {
       const lt = pending.lastIndexOf("<");
       let cut = pending.length;
       if (lt >= 0 && pending.indexOf(">", lt) < 0 && pending.length - lt <= 64) cut = lt;
+      // "<tone>" opened and its "</tone>" not here yet: the words between
+      // are the tone, not the reply — held until the note closes.
+      const open = /<\s*tone\s*>/i.exec(pending);
+      if (open && !/<\s*\/\s*tone\s*>/i.test(pending.slice(open.index)) &&
+          pending.length - open.index <= 120) cut = Math.min(cut, open.index);
       const ready = pending.slice(0, cut);
       pending = pending.slice(cut);
       return ready ? run(ready) : "";

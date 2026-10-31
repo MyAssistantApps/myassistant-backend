@@ -76,7 +76,9 @@ const SPECIALISTS = {
     label: "Information",
     role: "You are handling INFORMATION: search, news, weather, places, maps, law and travel. " +
       "Use live tools for anything that can change; say where an answer came from.",
-    cues: /\b(what is|who is|who was|how (do|does|to|much|many)|why|search|google|look up|news|headlines|weather|rain|temperature|near (me|by)|nearby|directions?|navigate|route to|how far|law|act|section|judg(e)?ment|flight|fare|convert|exchange rate|horoscope|research|pdf of|forecast|cold|jacket|umbrella|sunny)\b/i,
+    // Not "what is / how / why": every question starts so, and "what is on
+    // my shopping list" is no lookup (seen in the app, 2026-10-31).
+    cues: /\b(who was|search|google|look up|news|headlines|weather|rain|temperature|near (me|by)|nearby|directions?|navigate|route to|how far|law|act|section|judg(e)?ment|flight|fare|convert|exchange rate|horoscope|research|pdf of|forecast|cold|jacket|umbrella|sunny)\b/i,
     tools: ["web_search", "deep_research", "read_webpage", "get_news", "show_news",
       "read_news_story", "get_weather", "find_places_nearby", "get_current_location",
       "start_navigation", "consult_knowledge", "indian_law", "indian_case_law", "convert_currency",

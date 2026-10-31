@@ -107,6 +107,11 @@ async function test(name, fn) {
       assert.strictEqual((await manager.decide({ text: t })).via, "none", t);
     }
   });
+  await test("a plain question is not an Information request (seen in the app)", () => {
+    const got = manager.byRules("What is on my shopping list and what do you remember about me");
+    assert.ok(!got.includes("info"), got.join(","));
+    assert.ok(got.includes("commerce") && got.includes("memory"), got.join(","));
+  });
   await test("small talk names no specialist", () => {
     assert.deepStrictEqual(manager.byRules("hello there"), []);
     assert.deepStrictEqual(manager.byRules("thanks a lot"), []);
