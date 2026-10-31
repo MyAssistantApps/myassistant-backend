@@ -96,10 +96,12 @@ check_tools() {
     have adb || missing+=("adb (Android platform-tools)")
     JAVA17="$(find_java17)" || missing+=("Java 17 JDK (e.g. apt install openjdk-17-jdk)")
   fi
+  # A user-level install (~/.local) needs no sudo.
+  case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
   if ! have bw; then
-    warn "Bitwarden CLI not found — installing it with npm"
-    npm install -g @bitwarden/cli >/dev/null 2>&1 \
-      || missing+=("Bitwarden CLI: npm install -g @bitwarden/cli (may need sudo)")
+    warn "Bitwarden CLI not found — installing it into ~/.local"
+    npm install -g --prefix "$HOME/.local" @bitwarden/cli --no-audit --no-fund --loglevel=error >/dev/null 2>&1 \
+      || missing+=("Bitwarden CLI: npm install -g --prefix ~/.local @bitwarden/cli")
   fi
   [ ${#missing[@]} -eq 0 ] || die "install these first:$(printf '\n  - %s' "${missing[@]}")"
   ok "all tools present"
