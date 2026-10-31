@@ -1,0 +1,78 @@
+# DEPLOY — every push to hardening updates the VPS (myassistant.wishme.today).
+#
+# Gate first (every module loads, the smoke test, the manager agent's
+# tests), then SSH to the server with a key that can do ONE thing: run
+# ~/app/deploy.sh (forced command in the server's authorized_keys). That
+# script pulls origin/hardening, installs, restarts and checks /health.
+#
+# ci.yml still runs the whole suite on every push; this does not wait for
+# it so a deploy takes a minute, not ten.
+#
+# Secrets (repo Settings → Secrets → Actions): VPS_SSH_KEY (the deploy
+# key's private half), VPS_KNOWN_HOSTS (ssh-keyscan of the server). With
+# them unset the deploy step says so and stops — nothing fails.
+name: deploy
+on:
+  push:
+    branches: [hardening]
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits for the running one.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # The smoke test boots the app, which needs a database (a throwaway one).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: myassistant
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: myassistant
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U myassistant -d myassistant"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgres://myassistant:ci@localhost:5432/myassistant
+      JWT_SECRET: ci-only-secret-not-used-in-prod-0123456789abcdef
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Every module loads
+        run: |
+          node -e "
+            const fs = require('fs');
+            for (const f of fs.readdirSync('./src/routes'))
+              if (f.endsWith('.js')) require('./src/routes/' + f);
+            require('./src/agents/runtime');
+            console.log('all modules load');"
+      - name: Smoke and manager tests
+        run: npm test && node scripts/manager-test.js
+      - name: Deploy to the VPS
+        env:
+          KEY: ${{ secrets.VPS_SSH_KEY }}
+          KNOWN: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$KEY" ] || [ -z "$KNOWN" ]; then
+            echo "::notice::VPS_SSH_KEY / VPS_KNOWN_HOSTS are not set — skipping the deploy."
+            exit 0
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
+          # The server's forced command runs ~/app/deploy.sh whatever is sent.
+          ssh -i ~/.ssh/deploy -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -p 22 myass620@168.119.64.101 deploy
+          curl -fsS -m 15 https://myassistant.wishme.today/health

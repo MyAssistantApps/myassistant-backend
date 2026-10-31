@@ -156,6 +156,9 @@ sync_repo() { # dir repo-name
   git -C "$dir" checkout -q -f -B "$BRANCH" "origin/$BRANCH"
   git -C "$dir" reset -q --hard "origin/$BRANCH"
   git -C "$dir" clean -q -fd   # untracked only; ignored files are kept
+  # The team's pre-push guard (.githooks/pre-push): never push over a
+  # teammate's commits. See CLAUDE.md.
+  [ -d "$dir/.githooks" ] && git -C "$dir" config core.hooksPath .githooks
   ok "$name at $(git -C "$dir" log --oneline -1)"
 }
 
