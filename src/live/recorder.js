@@ -43,7 +43,10 @@ const ENABLED = String(process.env.LIVE_RECORD ?? "1") !== "0";
  */
 const OPTED_OUT = new Error("help improve is off");
 const allowsReview = (uid) => require("../users/helpImprove").allowsReview(uid);
-const ROOT = process.env.LIVE_RECORD_DIR || "/app/data/recordings";
+// Under DATA_DIR (/app/data in the Docker image); a fixed "/app/data"
+// failed on a host without /app (the VPS, 2026-10-31).
+const ROOT = process.env.LIVE_RECORD_DIR ||
+  path.join(path.resolve(process.env.DATA_DIR || path.join(__dirname, "..", "..", "data")), "recordings");
 
 /** The two ends of the call arrive at different rates. */
 const USER_RATE = 16000; // mic, PCM16 mono, as the app captures it

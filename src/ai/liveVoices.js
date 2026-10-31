@@ -6,7 +6,7 @@
  * The 18 voices OpenAI accepts for gpt-live-1 on this account (checked
  * against the API 2026-10-03: juniper/breeze/vale/ember are refused), with
  * the playground's tags. A sample of each is recorded ONCE from GPT-Live
- * itself (it has no speech endpoint) and kept in /app/data/voice-samples,
+ * itself (it has no speech endpoint) and kept in DATA_DIR/voice-samples,
  * so the picker plays the real voice.
  *
  * The spoken fallback (gpt-4o-mini-tts) knows only the older ten; a
@@ -60,7 +60,11 @@ function ttsVoiceFor(id) {
 
 // ---------------------------------------------------------------- samples
 
-const DIR = process.env.VOICE_SAMPLE_DIR || "/app/data/voice-samples";
+// Under DATA_DIR like every other file the server keeps (/app/data in the
+// Docker image). A fixed "/app/data" broke the greeting and the samples on
+// a host without /app (the VPS, 2026-10-31: EACCES, mkdir '/app').
+const DIR = process.env.VOICE_SAMPLE_DIR ||
+  path.join(path.resolve(process.env.DATA_DIR || path.join(__dirname, "..", "..", "data")), "voice-samples");
 const making = new Map();
 const fileOf = (id) => path.join(DIR, `${id}.wav`);
 
