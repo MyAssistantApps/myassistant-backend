@@ -319,8 +319,6 @@ app.use("/reminders", appAuth, require("./reminders/routes"));
 app.use("/commitments", appAuth, require("./routes/commitments"));
 // MOMENTUM — Today's 3, habits, focus and the streak (momentum/routes.js).
 app.use("/momentum", appAuth, require("./momentum/routes"));
-// The person's UI spec: their look, kept on the server (src/design).
-app.use("/ui", appAuth, require("./design/routes"));
 app.use("/messages", appAuth, require("./routes/messages"));
 app.use("/usage", appAuth, require("./routes/usage").router);
 app.use("/finance", appAuth, require("./routes/finance").router);

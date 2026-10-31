@@ -79,13 +79,6 @@ async function test(name, fn) {
     ["uninstall candy crush", "device"],
     ["remember that my wife's birthday is 4 june", "memory"],
     ["show my documents that expire this month", "records"],
-    // the Design agent (2026-10-31)
-    ["make the app look like a sunset", "design"],
-    ["change the colours to green", "design"],
-    ["make the cards more rounded", "design"],
-    ["hide the born today card", "design"],
-    ["put my reminders first on the home screen", "design"],
-    ["undo that", "design"],
     // found by live testing with the real model, 2026-10-31
     ["can you sort out dinner for the kids tonight", "commerce"],
     ["my mother keeps asking about her pension papers", "records"],
@@ -118,11 +111,6 @@ async function test(name, fn) {
     const got = manager.byRules("What is on my shopping list and what do you remember about me");
     assert.ok(!got.includes("info"), got.join(","));
     assert.ok(got.includes("commerce") && got.includes("memory"), got.join(","));
-  });
-  await test("design words do not swallow ordinary requests", () => {
-    for (const t of ["show the weather in Pune", "show me the news", "call mom", "what's on my shopping list"]) {
-      assert.ok(!manager.byRules(t).includes("design"), t);
-    }
   });
   await test("small talk names no specialist", () => {
     assert.deepStrictEqual(manager.byRules("hello there"), []);
@@ -288,7 +276,7 @@ async function test(name, fn) {
     assert.deepStrictEqual(c.addressed, { id: "manager", label: "Manager" });
     const lv = manager.controlFor(null, ["get_weather", "set_alarm", "send_agent_message"], { all: true });
     assert.deepStrictEqual(lv.toolAgent, { get_weather: "info", set_alarm: "planner", send_agent_message: "comms" });
-    assert.strictEqual(lv.agents.length, 9);
+    assert.strictEqual(lv.agents.length, 8);
   });
   await test("talk_as_agent is registered, read-only, and answers with the label", async () => {
     assert.ok(registry.get("talk_as_agent"));

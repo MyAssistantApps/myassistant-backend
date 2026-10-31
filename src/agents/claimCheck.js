@@ -258,16 +258,6 @@ const FAMILIES = [
     honest: () => "I couldn't start the music.",
   },
   {
-    // THE DESIGN AGENT (2026-10-31): "I've changed the colours", "your
-    // cards are rounder now", "I put your reminders first", "back to the
-    // old look" — only true when a design tool ran.
-    id: "design",
-    tools: ["design_app", "generate_theme", "arrange_home", "add_home_card", "remove_home_card",
-            "undo_design", "reset_design", "apply_theme", "preview_designs", "pick_preview", "set_app_theme"],
-    claim: /\b(changed|updated|applied|switched|made|set|turned|gave|put|moved|hid|hidden|removed|added|rearranged|redesigned)\b[^.]{0,40}\b(colou?rs?|theme|look|design|cards?|corners?|font|text size|layout|home( screen)?|background|title|sections?)\b|\b(went back|undid|undone|reset)\b[^.]{0,30}\b(look|design|theme|colou?rs?)\b|\b(here are|showing( you)?)\b[^.]{0,20}\b(options|designs|looks)\b/i,
-    honest: () => "I couldn't change the app's look that time — nothing was changed.",
-  },
-  {
     // THINGS THE ASSISTANT PRODUCED. create_document hands back a real
     // .pdf/.pptx/.docx/.xlsx, and the model narrates that as "I've made
     // your deck" / "your report is ready" — words no existing family
@@ -285,8 +275,6 @@ const FAMILIES = [
     id: "create",
     tools: ["create_document", "save_web_document", "present_text",
             "generate_image", "generate_video", "capture_document",
-            // "I've made you a water card" (the Design agent, 2026-10-31).
-            "add_home_card",
             // "Your edited photo is ready" (2026-09-30). Cards and posters
             // are generate_image since the photo-card tools went (ef0b34b).
             "edit_my_photo"],
