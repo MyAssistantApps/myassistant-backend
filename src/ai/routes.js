@@ -194,7 +194,7 @@ router.post("/draft", express.json({ limit: "2mb" }), async (req, res) => {
 
 /** How she sounds on the fast voice (the owner, 2026-10-02: "there is no emotion in the voice"). */
 const VOICE_STYLE =
-  "VOICE: use Marin, a natural, clear, warm female voice. Speak with formal courtesy and deep respect, never curtly or over-familiarly; sound like a considerate person, not a reader — lively, natural intonation, real " +
+  "VOICE: a natural, clear, warm voice. Speak with formal courtesy and deep respect, never curtly or over-familiarly; sound like a considerate person, not a reader — lively, natural intonation, real " +
   "feeling that follows what they say (delight, concern, a smile in the voice, calm firmness when it " +
   "is serious). Short sentences, no filler, never read a list aloud. Match their language and energy.\n" +
   // The owner, 2026-10-03: never an American accent for Indian languages.
@@ -218,7 +218,10 @@ router.post("/realtime/secret", async (req, res) => {
     const out = await openai.realtimeClientSecret({
       language, silenceMs: cfg.liveBlock(uid).silenceMs, user: uid,
       parallelTools: (Number(req.get("X-App-Build")) || 0) >= PARALLEL_TOOLS_BUILD,
-      voice: require("./proxy").DEFAULT_VOICE,
+      // The phone's pick, else their saved one (a pick used to be ignored).
+      voice: typeof b.voice === "string" && require("./proxy").REALTIME_VOICES.includes(b.voice.trim().toLowerCase())
+        ? b.voice.trim().toLowerCase()
+        : require("./proxy").voiceOf(profile),
       instructions: (VOICE_STYLE + "\n\n" + String(b.instructions || "")).slice(0, 60_000),
       tools: Array.isArray(b.tools) ? b.tools : [],
     });
@@ -275,14 +278,12 @@ router.post("/live/session", async (req, res) => {
 router.get("/voices", (req, res) => {
   const uid = userOf(req, res);
   if (!uid) return;
+  // Only voices she can speak in right now, so a pick is what she uses:
+  // GPT-Live's natural voices, or the ten classic ones without it (all 22
+  // were listed before, most of which nothing could play or speak).
   const lv = require("./liveVoices");
-  if (require("./config").gptLiveOn()) {
-    // GPT-Live: only the natural voices, so a pick is what she speaks in.
-    const gptLive = require("./gptLive");
-    const natural = new Set(gptLive.NATURAL_VOICES);
-    return res.json({ voices: lv.CATALOG.filter((v) => natural.has(v.id)), default: gptLive.DEFAULT_VOICE });
-  }
-  res.json({ voices: lv.CATALOG, default: lv.DEFAULT_VOICE });
+  const def = require("./config").gptLiveOn() ? require("./gptLive").DEFAULT_VOICE : require("./proxy").DEFAULT_VOICE;
+  res.json({ voices: lv.offered(), default: def });
 });
 
 /** A voice's own sample (recorded once from GPT-Live, then kept). */

@@ -73,6 +73,27 @@ test("the default and every natural voice are gpt-live-1 voices", () => {
   for (const v of g.NATURAL_VOICES) assert.ok(g.LIVE_VOICE_IDS.has(v), v);
 });
 
+test("GPT-Live off: the picker offers only the ten voices she can speak in, and a pick is used", () => {
+  const saved = process.env.GPT_LIVE;
+  process.env.GPT_LIVE = "off";
+  try {
+    const lv = require("../src/ai/liveVoices");
+    const proxy = require("../src/ai/proxy");
+    const ids = lv.offered().map((v) => v.id);
+    assert.deepStrictEqual(ids, lv.CLASSIC_VOICES);
+    assert.ok(ids.length <= 12, "no more than twelve voices");
+    for (const v of lv.offered()) assert.ok(["male", "female"].includes(v.gender), v.id);
+    // Every one is a voice both OpenAI Realtime and gpt-4o-mini-tts speak.
+    for (const v of ids) assert.ok(["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"].includes(v), v);
+    assert.strictEqual(proxy.voiceFor("Cedar"), "cedar", "a pick is no longer forced to coral");
+    assert.strictEqual(proxy.voiceFor("gleam"), proxy.DEFAULT_VOICE, "a GPT-Live-only voice falls back");
+    assert.strictEqual(proxy.voiceOf({ assistant: { voice: "ash" } }), "ash");
+    assert.strictEqual(proxy.voiceOf(null), proxy.DEFAULT_VOICE);
+  } finally {
+    if (saved === undefined) delete process.env.GPT_LIVE; else process.env.GPT_LIVE = saved;
+  }
+});
+
 test("delegation: Responses on gpt-6-luna, low reasoning, parallel tools", () => {
   const saved = { m: process.env.GPT_LIVE_DELEGATE_MODEL, r: process.env.GPT_LIVE_DELEGATE_REASONING };
   delete process.env.GPT_LIVE_DELEGATE_MODEL;

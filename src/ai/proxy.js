@@ -20,15 +20,23 @@ const TTS_VOICES = {
   Zephyr: "alloy", Leda: "shimmer", Orus: "onyx", Autonoe: "nova", Enceladus: "ash",
 };
 
-/** One voice across the greeting, Realtime conversation, and spoken replies. */
+/**
+ * The voice when nobody picked one. A pick from Settings (the ten classic
+ * voices, ai/liveVoices.js CLASSIC_VOICES) is used everywhere she speaks:
+ * the greeting, the Realtime conversation and spoken replies.
+ */
 const DEFAULT_VOICE = "coral";
-const REALTIME_VOICES = [DEFAULT_VOICE];
+const REALTIME_VOICES = require("./liveVoices").CLASSIC_VOICES.slice();
 
-/** Compatibility mapper: legacy voice names all resolve to the one selected voice. */
+/** A voice name → the voice she speaks in: a classic voice as is, anything else the default. */
 function voiceFor(name) {
-  // Keep old client/profile preferences from splitting the spoken greeting
-  // and the Realtime session into different voices.
-  return DEFAULT_VOICE;
+  const v = String(name || "").trim().toLowerCase();
+  return REALTIME_VOICES.includes(v) ? v : DEFAULT_VOICE;
+}
+
+/** Their saved voice (Settings → Assistant voice), else the default. */
+function voiceOf(profile) {
+  return voiceFor(profile && profile.assistant && profile.assistant.voice);
 }
 
 const partsOf = (c) => (c && Array.isArray(c.parts) ? c.parts : []);
@@ -217,4 +225,4 @@ function servedModels() {
   };
 }
 
-module.exports = { generate, voiceFor, splitTone, servedModels, TTS_VOICES, REALTIME_VOICES, DEFAULT_VOICE, chunk, cleanText, tagFilter };
+module.exports = { generate, voiceFor, voiceOf, splitTone, servedModels, TTS_VOICES, REALTIME_VOICES, DEFAULT_VOICE, chunk, cleanText, tagFilter };

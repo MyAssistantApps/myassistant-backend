@@ -306,11 +306,11 @@ async function forUser(userId, { build, live } = {}) {
     out.models = {
       ...out.models,
       cloud: served.cloud, cloudFast: served.cloudFast, cloudFallback: served.cloudFallback,
-      tts: served.tts, ttsVoice: proxy.DEFAULT_VOICE,
+      tts: served.tts, ttsVoice: proxy.voiceOf(profile),
     };
     // The fast voice runs on OpenAI Realtime (Phase C): the phone opens the
     // socket itself with a key from POST /ai/realtime/secret.
-    if (out.live) out.live = { ...out.live, model: served.live, voice: proxy.DEFAULT_VOICE, voices: proxy.REALTIME_VOICES.slice() };
+    if (out.live) out.live = { ...out.live, model: served.live, voice: proxy.voiceOf(profile), voices: proxy.REALTIME_VOICES.slice() };
     // GPT-LIVE (the owner's agent, 2026-10-02): 154+ can opt in over WebRTC
     // through POST /ai/live/session. Keep it explicit: duration billing makes
     // it a poor default for a socket prewarmed on every app open.

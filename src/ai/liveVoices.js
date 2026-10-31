@@ -43,6 +43,21 @@ const CATALOG = [
 ].map((v) => ({ ...v, name: v.id[0].toUpperCase() + v.id.slice(1) }));
 
 const IDS = new Set(CATALOG.map((v) => v.id));
+
+/**
+ * THE VOICES THAT ACTUALLY SPEAK WITHOUT GPT-LIVE (owner, 2026-10-31: "more
+ * than 12 voices … when I click it's not playing … not even changing").
+ * With GPT_LIVE off (production) she talks through OpenAI Realtime and reads
+ * replies with gpt-4o-mini-tts, and only these ten exist in BOTH. The
+ * picker offers only these, so every pick is the voice she then speaks in.
+ */
+const CLASSIC_VOICES = ["marin", "cedar", "coral", "shimmer", "sage", "alloy", "ash", "ballad", "echo", "verse"];
+const gptLiveOn = () => require("./config").gptLiveOn();
+/** What the picker offers right now: GPT-Live's natural voices, or the classic ten. */
+function offered() {
+  const ids = gptLiveOn() ? require("./gptLive").NATURAL_VOICES : CLASSIC_VOICES;
+  return ids.map(byId).filter(Boolean);
+}
 const DEFAULT_VOICE = "coral";
 // What gpt-4o-mini-tts can say (the classic, typed-reply voice).
 const TTS_VOICES = new Set(["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"]);
@@ -135,10 +150,41 @@ async function record(v, { timeoutMs = 30_000, line = null } = {}) {
   });
 }
 
+/** A line in a classic voice, from gpt-4o-mini-tts (the voice replies are read in). */
+async function speakWav(v, line) {
+  const openai = require("../services/ai/openai");
+  const out = await openai.speak(line, { voice: v.id, format: "pcm" });
+  const pcm = Buffer.isBuffer(out) ? out : Buffer.from(out.buffer || out.audio || out);
+  if (pcm.length < 4800) throw new Error("no speech audio");
+  return openai.wavWrap(pcm, 24000);
+}
+
+/** Made once, kept on disk, shared by every phone; one maker per file. */
+async function kept(file, make) {
+  try {
+    return await fs.promises.readFile(file);
+  } catch (_) {}
+  if (!making.has(file)) {
+    making.set(file, (async () => {
+      const wav = await make();
+      await fs.promises.mkdir(DIR, { recursive: true });
+      await fs.promises.writeFile(file, wav);
+      return wav;
+    })().finally(() => making.delete(file)));
+  }
+  return making.get(file);
+}
+
 /** The voice's sample as a WAV, recorded the first time it is asked for. */
 async function sample(id) {
   const v = byId(id);
   if (!v) return null;
+  if (!gptLiveOn()) {
+    // Without GPT-Live the sample is the speech voice itself (recording one
+    // from GPT-Live failed: "fetch failed", nothing played).
+    if (!CLASSIC_VOICES.includes(v.id)) return null;
+    return kept(path.join(DIR, `tts-${v.id}.wav`), () => speakWav(v, sampleLine(v)));
+  }
   const file = fileOf(v.id);
   try {
     return await fs.promises.readFile(file);
@@ -241,6 +287,12 @@ async function greeting(id, line) {
   const v = byId(id);
   const text = String(line || "").trim();
   if (!v || !GREETING_LINE.test(text)) return null;
+  if (!gptLiveOn()) {
+    // The orb's hello in the voice she will then talk in.
+    const voice = CLASSIC_VOICES.includes(v.id) ? v : byId(require("./proxy").DEFAULT_VOICE);
+    const key = require("crypto").createHash("sha1").update(`tts-v1|${voice.id}|${text}`).digest("hex").slice(0, 16);
+    return kept(path.join(DIR, `greet-tts-${key}.wav`), () => speakWav(voice, text));
+  }
   // v5 (2026-10-06): RECORDED FROM GPT-LIVE ITSELF, not text-to-speech. The
   // TTS model has no gleam/willow/meridian…, so those came out in another
   // voice. Now the take is the live model saying the line in this voice, so
@@ -307,4 +359,4 @@ async function warmOpenings(voiceIds) {
   return { made, kept, failed };
 }
 
-module.exports = { OPENING_LINES, warmOpenings, CATALOG, DEFAULT_VOICE, has, byId, ttsVoiceFor, sample, greeting, record, sampleLine, openingOnly, voicedRuns };
+module.exports = { CLASSIC_VOICES, offered, OPENING_LINES, warmOpenings, CATALOG, DEFAULT_VOICE, has, byId, ttsVoiceFor, sample, greeting, record, sampleLine, openingOnly, voicedRuns };
