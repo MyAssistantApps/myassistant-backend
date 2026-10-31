@@ -35,6 +35,8 @@ registerBuiltins();
 require("./taskTools").registerTaskTools();
 // "Call your manager": the agent persona tool (agents/manager.js).
 require("./manager").registerAgentTools(require("../tools/registry"));
+// The Design agent: the app's look, edited by voice (src/design).
+require("../design/tools").registerDesignTools(require("../tools/registry"));
 
 const MAX_TOOL_ROUNDS = 3; // guards against a tool-calling loop
 

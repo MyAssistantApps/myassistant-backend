@@ -114,7 +114,7 @@ async function ensureEveryTable() {
     "routes/finance", "routes/usage", "services/email", "services/pendingPush",
     "studio/store", "tools/searchCache", "posters/store", "shortcuts/store",
     "shopping/store", "kitchen/store", "platform/store", "platform/console",
-    "memory/episodes", "services/pnv",
+    "memory/episodes", "services/pnv", "design/store",
   ]) {
     await require("../src/" + m).migrate();
   }

@@ -132,6 +132,18 @@ const SPECIALISTS = {
       "update_my_profile", "add_standing_instruction", "remove_standing_instruction",
       "configure_assistant", "recall_conversation"],
   },
+  design: {
+    scope: "how this app looks: colours, theme, cards, font, text size, Home layout, custom cards",
+    label: "Design",
+    role: "You are handling DESIGN: how this app itself looks. Change it with the design tools — " +
+      "generate_theme for a whole look from their words, design_app for one thing, arrange_home for " +
+      "the Home layout, add_home_card for a new card — then say in a few words what changed. If they " +
+      "do not like it, undo_design. Never claim a change the tool did not make.",
+    cues: /\b(colou?rs?|theme|dark mode|light mode|font|text size|bigger text|smaller text|cards?|corners?|rounded|layout|design|redesign|look(s)? (like|nicer|better)|make (it|the app) (look|feel)|background|home screen|wallpaper|undo that|go back to (the )?(old|previous|default) look|reset the (design|look)|save (this|the) look|(hide|show|remove) the [a-z ]{0,20}(card|section)|put [a-z ]{1,20} first)\b/i,
+    tools: ["generate_theme", "design_app", "arrange_home", "add_home_card", "remove_home_card",
+      "undo_design", "reset_design", "save_theme", "apply_theme", "list_themes", "preview_designs",
+      "pick_preview", "current_design", "set_app_theme"],
+  },
   records: {
     scope: "saved documents, record books, cases, clients, papers",
     label: "Records and documents",
@@ -167,6 +179,7 @@ const AGENT_WORDS = {
   "phone control": "device", phone: "device", device: "device",
   memory: "memory",
   records: "records", record: "records", documents: "records",
+  design: "design", designer: "design", "ui": "design",
 };
 const AGENT_ALT = Object.keys(AGENT_WORDS).sort((a, b) => b.length - a.length).join("|");
 const ADDRESS = new RegExp(

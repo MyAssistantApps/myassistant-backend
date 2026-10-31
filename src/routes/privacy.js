@@ -215,6 +215,10 @@ const USER_TABLES = [
   ["app_connections", "user_id"], // their own apps' credentials (encrypted)
   ["diag_reports", "user_id"], // self-checks from their phone, with its log
   ["diag_requests", "user_id"],
+  // The Design agent (2026-10-31): their look, its history, saved looks.
+  ["ui_specs", "user_id"],
+  ["ui_spec_history", "user_id"],
+  ["ui_themes", "user_id"],
 ];
 
 /**

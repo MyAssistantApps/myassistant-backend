@@ -466,6 +466,9 @@ test("one user's news history does not affect another's", () => {
  * ------------------------------------------------------------------ */
 
 test("every tool named in a claim family actually exists", () => {
+  // Every tool the server registers at boot, not only the builtins: the
+  // agent and design tools are registered by agents/runtime.
+  require("../src/agents/runtime");
   const registry = require("../src/tools/registry");
   const { FAMILIES } = require("../src/agents/claimCheck");
   const missing = [];
