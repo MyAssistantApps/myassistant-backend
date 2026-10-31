@@ -59,7 +59,8 @@ async function test(name, fn) {
     for (const [id, s] of Object.entries(manager.SPECIALISTS)) {
       assert.ok(s.role && s.role.length > 40, `${id} role`);
       assert.ok(s.cues instanceof RegExp, `${id} cues`);
-      assert.ok(s.tools.length >= 5, `${id} tools`);
+      // The Designer is one tool by design (ask_designer).
+      assert.ok(s.tools.length >= (id === "design" ? 1 : 5), `${id} tools`);
     }
   });
 
@@ -235,6 +236,29 @@ async function test(name, fn) {
     assert.deepStrictEqual(manager.controlFor({ agents: [], via: "none" }, ["web_search"]),
       { via: "none", agents: [], toolAgent: {} });
     assert.strictEqual(manager.controlFor(null).via, "skip");
+  });
+
+  console.log("(j) Maya first: the manager only when needed");
+  await test("one specialist's words: Maya handles it, no team note", async () => {
+    const p = await manager.decide({ text: "set an alarm for 6 am" });
+    assert.deepStrictEqual([p.via, p.agents.join(",")], ["maya", "planner"]);
+    assert.strictEqual(manager.briefFor(p), "");
+    assert.ok(manager.toolsFor(p, { base: [], live }).includes("set_alarm"), "its tools are still offered");
+  });
+  await test("design: Maya straight to the Designer", async () => {
+    const p = await manager.decide({ text: "make the card text red" });
+    assert.deepStrictEqual([p.via, p.agents.join(",")], ["maya", "design"]);
+    assert.ok(manager.toolsFor(p, { base: [], live }).includes("ask_designer"));
+    assert.ok(/ask_designer once/.test(manager.briefFor(p)));
+  });
+  await test("several specialists: the manager coordinates", async () => {
+    const p = await manager.decide({ text: "order biryani and tell Ravi I'm running late" });
+    assert.strictEqual(p.via, "rules");
+    assert.ok(p.agents.length >= 2);
+  });
+  await test("nothing matched: Maya answers, no model call by default", async () => {
+    const p = await manager.decide({ text: "can you sort out the thing we talked about" });
+    assert.deepStrictEqual([p.via, p.agents.length], ["none", 0]);
   });
 
   console.log("(i) speaking to an agent by name");

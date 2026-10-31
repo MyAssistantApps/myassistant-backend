@@ -135,14 +135,11 @@ const SPECIALISTS = {
   design: {
     scope: "how this app looks: colours, theme, cards, font, text size, Home layout, custom cards",
     label: "Design",
-    role: "You are handling DESIGN: how this app itself looks. Change it with the design tools — " +
-      "generate_theme for a whole look from their words, design_app for one thing, arrange_home for " +
-      "the Home layout, add_home_card for a new card — then say in a few words what changed. If they " +
-      "do not like it, undo_design. Never claim a change the tool did not make.",
-    cues: /\b(colou?rs?|theme|dark mode|light mode|font|text size|bigger text|smaller text|cards?|corners?|rounded|layout|design|redesign|look(s)? (like|nicer|better)|make (it|the app) (look|feel)|background|home screen|wallpaper|undo that|go back to (the )?(old|previous|default) look|reset the (design|look)|save (this|the) look|(hide|show|remove) the [a-z ]{0,20}(card|section)|put [a-z ]{1,20} first)\b/i,
-    tools: ["generate_theme", "design_app", "arrange_home", "add_home_card", "remove_home_card",
-      "undo_design", "reset_design", "save_theme", "apply_theme", "list_themes", "preview_designs",
-      "pick_preview", "current_design", "set_app_theme"],
+    role: "You are handling DESIGN: how this app itself looks. Hand the request to ask_designer once, " +
+      "in their words — the Designer agent changes the design — then confirm in one line what changed. " +
+      "Never claim a change it did not make.",
+    cues: /\b(colou?rs?|theme|dark mode|light mode|darker|lighter|gradient|font|text size|bigger text|smaller text|cards?|corners?|rounded|layout|design|redesign|look(s)? (like|nicer|better)|make (it|the app) (look|feel)|background|home screen|wallpaper|undo that|go back to (the )?(old|previous|default) look|reset the (design|look)|save (this|the) look|(hide|show|remove) the [a-z ]{0,20}(card|section)|put [a-z ]{1,20} first)\b/i,
+    tools: ["ask_designer", "set_app_theme"],
   },
   records: {
     scope: "saved documents, record books, cases, clients, papers",
@@ -234,7 +231,7 @@ const MANAGER_PROMPT =
 /** One small JSON call to the fast model; null on any failure or timeout. */
 async function byModel(text, historyLines) {
   const openai = require("../services/ai/openai");
-  if (!openai.ready() || /^(off|0|false|no)$/i.test(String(process.env.AI_MANAGER_MODEL || "on"))) return null;
+  if (!openai.ready() || !/^(on|1|true|yes)$/i.test(String(process.env.AI_MANAGER_MODEL || "off"))) return null;
   const recent = historyLines.slice(-2).join("\n").slice(0, 600);
   const content = (recent ? `Earlier:\n${recent}\n\n` : "") + `Now: ${String(text).slice(0, 600)}`;
   try {
@@ -284,13 +281,24 @@ async function decide({ text, owner = true, skip = false, session = null, histor
     ? session.manager.agents : null;
   if (prev && FOLLOW_UP.test(text)) return done(prev, "carry");
 
+  // MAYA FIRST (owner, 2026-10-31: "if Maya is able to take the decision,
+  // don't move to the manager"). One specialist's words: Maya does it
+  // herself, with that specialist's tools at hand and no hand-off. Design:
+  // Maya straight to the Designer. Only a request spanning two or more
+  // specialists goes through the manager.
   const ruled = byRules(text);
+  if (ruled.includes("design") && ruled.length <= 2) return done(["design"], "maya");
+  if (ruled.length === 1) return done(ruled, "maya");
   if (ruled.length) return done(ruled, "rules");
 
-  // Two words of chat ("hello", "thank you") need no specialist and no call.
+  // Nothing matched: Maya answers on her own. Asking a model which
+  // specialist to use cost a call and ~1 s on every such turn; it is opt-in
+  // now (AI_MANAGER_MODEL=on).
   if (SMALL_TALK.test(text) || String(text).trim().split(/\s+/).length < 3) return done([], "none");
-  const modelled = await byModel(text, history.map((h) => `${h.role || "user"}: ${h.text || h.content || ""}`));
-  if (modelled && modelled.length) return done(modelled, "model");
+  if (/^(on|1|true|yes)$/i.test(String(process.env.AI_MANAGER_MODEL || "off"))) {
+    const modelled = await byModel(text, history.map((h) => `${h.role || "user"}: ${h.text || h.content || ""}`));
+    if (modelled && modelled.length) return done(modelled, "model");
+  }
   return done([], "none");
 }
 
@@ -322,6 +330,12 @@ function toolsFor(plan, { base = [], must = [], live = null, cap = 40 } = {}) {
 function briefFor(plan, { assistant = "the assistant" } = {}) {
   if (plan && plan.addressed) return personaBrief(plan.addressed, assistant);
   if (!plan || !plan.agents.length) return "";
+  // Maya handles it herself: no team note (its tools are already offered).
+  if (plan.via === "maya") {
+    return plan.agents.includes("design")
+      ? `[DESIGN] Hand this to ask_designer once, in their words, then confirm in one line what changed.`
+      : "";
+  }
   const lines = plan.agents.map((id) => `- ${SPECIALISTS[id].role}`);
   if (plan.agents.length > 1) {
     lines.push("- This request has several parts: do each part with its own tools, then give " +

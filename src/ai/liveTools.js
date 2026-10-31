@@ -23,8 +23,8 @@ const LIVE_ORDER = [
   "stay_silent", "end_conversation",
   // "Call your manager" answered by the manager agent (agents/manager.js).
   "talk_as_agent",
-  // The Design agent by voice: "make it sunset orange", "undo that".
-  "generate_theme", "design_app", "undo_design",
+  // The Designer by voice: "card text red", "make it sunset", "undo that".
+  "ask_designer",
   "web_search", "get_weather", "find_places_nearby", "get_current_location",
   "create_reminder", "list_reminders", "schedule_task", "set_alarm", "set_timer",
   "place_phone_call", "phone_calls", "send_agent_message", "send_whatsapp_message",

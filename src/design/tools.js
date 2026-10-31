@@ -1,474 +1,251 @@
 /**
- * THE DESIGN AGENT'S TOOLS (2026-10-31). The owner says how the app should
- * look — "make it sunset orange", "rounder cards", "put my reminders
- * first", "add a card with my water habit", "undo that" — and these edit
- * their UI spec (design/spec.js), save it on the server (design/store.js)
- * and hand the phone the result to draw at once (deviceAction
- * apply_ui_spec). Nothing here writes code; everything is validated, and
- * every change can be undone.
+ * THE DESIGNER (2026-10-31, v2). Maya hands every request about how the
+ * app looks to ONE tool, ask_designer, in the owner's own words. The
+ * Designer agent — a model that knows the design document's shape
+ * (design.schema.json) and the person's current design — answers in JSON
+ * only: what to change, as a partial document. The server merges and
+ * validates it, saves it (undoable), and the phone draws it at once
+ * (deviceAction apply_ui_spec). Maya confirms in a line.
+ *
+ * No model at all for undo, reset, darker and lighter.
  */
 const S = require("./spec");
 const store = require("./store");
 
-// The app's own colours (lib/design/neon_tokens.dart), so a change to ONE
-// colour ("darker cards") has a whole palette to start from.
-const APP_PALETTE = {
-  dark: {
-    name: "Default dark", dark: true, bg: "#070B2B", surface: "#0C1440", surfaceHigh: "#121B4E",
-    primary: "#3D8BFF", partner: "#E04BF5", secondary: "#22E4FF", tertiary: "#BDF64B",
-    textHi: "#F3F6FF", textLo: "#BAC4E3", textDim: "#8E9AC2",
-  },
-  light: {
-    name: "Default light", dark: false, bg: "#F7F7FB", surface: "#FFFFFF", surfaceHigh: "#EEEFF6",
-    primary: "#2563EB", partner: "#C026D3", secondary: "#0891B2", tertiary: "#65A30D",
-    textHi: "#1B1D28", textLo: "#585E70", textDim: "#6B7185",
-  },
-};
-
-const PALETTE_SCHEMA = {
-  type: "object",
-  properties: {
-    name: { type: "string" },
-    bg: { type: "string" }, surface: { type: "string" }, surfaceHigh: { type: "string" },
-    primary: { type: "string" }, partner: { type: "string" },
-    secondary: { type: "string" }, tertiary: { type: "string" },
-    textHi: { type: "string" }, textLo: { type: "string" }, textDim: { type: "string" },
-  },
-  required: ["name", ...S.PALETTE_KEYS],
-  additionalProperties: false,
-};
-const THEME_SCHEMA = {
-  type: "object",
-  properties: {
-    palette: PALETTE_SCHEMA,
-    cardStyle: { type: "string", enum: S.CARD_STYLES },
-    radius: { type: "integer" },
-    font: { type: "string", enum: S.FONTS },
-    background: { type: "string", enum: S.BACKGROUNDS },
-  },
-  required: ["palette", "cardStyle", "radius", "font", "background"],
-  additionalProperties: false,
-};
-
 const DESIGNER_PROMPT =
-  "You design the colour scheme and feel of a mobile assistant app. Given the owner's words, return " +
-  "JSON: a palette of #RRGGBB colours — bg (the page), surface (cards), surfaceHigh (chips on cards), " +
-  "primary (brand: buttons, the orb, active tab) and partner (its gradient partner), secondary and " +
-  "tertiary (supporting accents), textHi (headings, body), textLo (secondary lines), textDim (hints) — " +
-  "plus cardStyle (glass|solid|outlined|flat), radius (0-32), font (" + S.FONTS.join("|") + ") and " +
-  "background (ambient|gradient|plain). RULES: words must be easy to read — textHi at least 7:1 " +
-  "against bg and surface, textLo at least 4.5:1; surface a little lighter (dark themes) or a little " +
-  "darker/whiter (light themes) than bg; primary clearly visible on bg. A dark theme has a dark bg " +
-  "and light text; a light theme the reverse. Make it beautiful and true to what they asked.";
+  "You are the Designer agent of a mobile assistant app. You change how the app looks by editing its " +
+  "DESIGN DOCUMENT, whose shape (every field explained) is:\n" + S.SCHEMA_TEXT + "\n\n" +
+  "You get the person's current design and their request. Answer with ONE JSON object and nothing else:\n" +
+  '{"action": "change" | "undo" | "reset" | "save" | "use_saved" | "none",\n' +
+  ' "changes": { only the fields that change, same shape as the document; null clears a field back to the app\'s own },\n' +
+  ' "name": "a name, for save / use_saved, or a short name for a new look",\n' +
+  ' "summary": "one short sentence for the owner saying what you changed"}\n' +
+  "RULES: change exactly what was asked and nothing else. Colours #RRGGBB. Keep text readable: pageText " +
+  "on page and cardText on card at least 4.5:1, muted text 3:1 — when you change a background, change " +
+  "its text too if needed. A colour asked for must still LOOK like that colour — on a dark card red is " +
+  "like #FF5A5F, blue #5AA9FF, green #4ADE80, yellow #FACC15; on a light card red is like #C62828, blue " +
+  "#1D4ED8, green #15803D — never a washed-out pastel. A whole new " +
+  "look (\"sunset\", \"black and gold\") sets page, card, cardRaised, pageText, pageMuted, pageFaint, " +
+  "cardText, cardMuted, primary, partner, secondary, tertiary together, plus background/cards/typography " +
+  "if it helps. \"Gradient background\" means background.style \"gradient\" with from and to colours that " +
+  "clearly differ. Dark theme = dark page and card with light text; light = the reverse. Moving or " +
+  "hiding Home parts is handled separately — do not send home and do not mention it. action \"none\" when " +
+  "the request is not about how the app looks.";
 
-/** One model call: a whole look from words. Retries with the checker's complaints. */
-async function designFromWords(description, { mode = null, avoid = [] } = {}) {
+/** The Designer's answer to [request], as a JSON object (or null). */
+async function askModel(request, cur, extra = "") {
   const openai = require("../services/ai/openai");
-  const router = require("../services/ai/router");
-  if (!openai.ready()) return { ok: false, error: "The design model is not available right now." };
-  let ask = `Owner asked for: "${String(description).slice(0, 300)}".` +
-    (mode ? ` It must be a ${mode} theme.` : "") +
-    (avoid.length ? ` Make it clearly different from: ${avoid.join("; ")}.` : "");
-  for (let attempt = 0; attempt < 3; attempt++) {
-    let out;
-    try {
-      const r = await router.generateReply([{ role: "user", content: ask }], {
-        system: DESIGNER_PROMPT, json: true, schema: THEME_SCHEMA,
-        // The chat model (gpt-5.4-nano): compared 2026-10-31 with gpt-4.1
-        // and gpt-4.1-mini on four looks — every palette readable on the
-        // first try, no worse to the eye, at the lowest price. A dropped
-        // connection is retried by the router (no noRetry here: the VPS
-        // loses one now and then, and that used to fail the whole tool).
-        model: process.env.DESIGN_MODEL || openai.models.chat(), timeoutMs: 20_000,
-      });
-      out = JSON.parse(r.reply || "{}");
-    } catch (e) {
-      console.warn(`design: model failed: ${String(e.message || e).slice(0, 160)}`);
-      return { ok: false, error: FAILED };
-    }
-    const look = {
-      palette: out.palette,
-      shape: { radius: out.radius, cardStyle: out.cardStyle },
-      type: { font: out.font },
-      background: out.background,
-      ...(mode && mode !== "adaptive" ? { mode } : {}),
-    };
-    const v = S.validate(look);
-    if (v.ok) return { ok: true, look, name: out.palette.name };
-    ask += `\nYour last answer was rejected: ${v.errors.join("; ")}. Fix exactly that.`;
+  if (!openai.ready()) return null;
+  const saved = await store.listThemes(cur._uid).catch(() => []);
+  const { _uid, ...doc } = cur;
+  const content =
+    `Current design: ${JSON.stringify(doc)}\nSaved looks: ${saved.length ? saved.join(", ") : "none"}\n` +
+    `Request: "${String(request).slice(0, 400)}"${extra}`;
+  try {
+    const r = await require("../services/ai/router").generateReply([{ role: "user", content }], {
+      system: DESIGNER_PROMPT, json: true,
+      // The chat model (gpt-5.4-nano): on design it matched gpt-4.1 at the
+      // lowest price (compared 2026-10-31). DESIGN_MODEL overrides. A
+      // dropped connection is retried by the router.
+      model: process.env.DESIGN_MODEL || openai.models.chat(), timeoutMs: 20_000,
+    });
+    const out = JSON.parse(r.reply || "{}");
+    return out && typeof out === "object" ? out : null;
+  } catch (e) {
+    console.warn(`design: designer failed: ${String(e.message || e).slice(0, 160)}`);
+    return null;
   }
-  return { ok: false, error: "I could not make a readable version of that look — try describing it differently." };
 }
 
-// What the assistant is told when the design model could not answer: say
-// so and offer again — not call the tool again on its own (it did, twice,
-// and the owner watched the Design agent "keep running").
-const FAILED = "The design service did not answer this time. Nothing was changed. Tell the owner it " +
-  "did not work and ask if they want you to try again — do not call a design tool again in this reply.";
+// Said when the Designer could not answer: say so, offer again — never loop.
+const FAILED = "The designer did not answer this time and nothing changed. Tell the owner it did not work " +
+  "and ask if they want you to try again — do not call ask_designer again in this reply.";
 
-const apply = (spec, summary, extra = {}) => ({
+const applied = (spec, summary, extra = {}) => ({
   ok: true,
   result: summary,
   design: S.describe(spec),
   ...extra,
   deviceAction: { type: "apply_ui_spec", spec },
 });
-const refused = (v) => ({ ok: false, error: `Not applied: ${v.errors.join("; ")}` });
 
 async function saveAndApply(uid, next, note, summary) {
   const v = await store.save(uid, next, note);
-  if (!v.ok) return refused(v);
+  if (!v.ok) return { ok: false, error: `Not applied: ${v.errors.join("; ")}` };
   require("./cards").forget(uid);
-  return apply(v.spec, summary);
+  return applied(v.spec, summary);
 }
 
-/** A section name as the owner says it, to the spec's id. */
-function sectionId(word, spec) {
-  const w = String(word || "").toLowerCase().trim();
-  if (S.SECTION_IDS.includes(w)) return w;
-  for (const [id, label] of Object.entries(S.SECTION_LABELS)) {
-    if (label.toLowerCase().includes(w) || w.includes(label.toLowerCase())) return id;
+// Requests that need no model.
+const UNDO = /^\s*(please\s+)?(undo( that| it| the last( change)?)?|go back( to the (last|previous|old) (look|design|one))?|i liked it (better )?before)\b/i;
+const RESET = /\b(reset|restore)\b.*\b(design|look|theme|colou?rs?|app)\b|\b(original|default) (look|design|theme)\b/i;
+const SHADE = /\b(darker|lighter|brighter)\b/i;
+
+async function designFor(uid, request) {
+  const cur = await store.get(uid);
+  const text = String(request || "").trim();
+
+  if (UNDO.test(text)) {
+    const spec = await store.undo(uid);
+    if (!spec) return { ok: false, error: "There is no earlier look to go back to." };
+    require("./cards").forget(uid);
+    return applied(spec, "Back to the previous look.");
   }
-  const card = (spec.customCards || []).find((c) => c.id === w.replace(/^card:/, "") || c.title.toLowerCase() === w);
-  return card ? `card:${card.id}` : null;
+  if (RESET.test(text)) return applied(await store.reset(uid), "Back to the app's original look.");
+  if (SHADE.test(text) && text.split(/\s+/).length <= 6) {
+    const dir = /darker/i.test(text) ? "darker" : "lighter";
+    return saveAndApply(uid, S.merge(cur, { colors: S.shade(cur, dir) }), `designer: ${dir}`,
+      `Made the page and cards ${dir}.`);
+  }
+
+  // Layout ("hide Born today", "reminders first") is asked separately,
+  // with a strict schema that can only name real sections.
+  const layout = LAYOUT.test(text) ? await layoutFor(text, cur) : null;
+  if (layout && !COLOURISH.test(text)) {
+    return saveAndApply(uid, { ...cur, home: { sections: arrange(cur.home.sections, layout) } },
+      `designer: ${text.slice(0, 120)}`, layoutSummary(layout, cur));
+  }
+  let out = await askModel(text, { ...cur, _uid: uid });
+  if (!out) return { ok: false, error: FAILED };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const action = String(out.action || "change");
+    if (action === "none") {
+      return { ok: false, error: `That isn't something the app's design can do${out.summary ? `: ${out.summary}` : "."}` };
+    }
+    if (action === "undo") return designFor(uid, "undo");
+    if (action === "reset") return applied(await store.reset(uid), "Back to the app's original look.");
+    if (action === "save") {
+      const r = await store.saveTheme(uid, out.name || "My look", cur);
+      return r.ok ? { ok: true, result: `Saved this look as "${r.name}".` } : r;
+    }
+    if (action === "use_saved") {
+      const t = await store.getTheme(uid, out.name);
+      if (!t) {
+        const names = await store.listThemes(uid);
+        return { ok: false, error: names.length ? `No saved look called "${out.name}". Saved: ${names.join(", ")}.` : "There are no saved looks yet." };
+      }
+      return saveAndApply(uid, t.spec, `designer: use ${t.name}`, `Switched to "${t.name}".`);
+    }
+    const changes = out.changes && typeof out.changes === "object" ? { ...out.changes } : {};
+    // Home's layout never comes from this free-form answer (a model
+    // rewriting the list moved the wrong things): layoutFor() below.
+    delete changes.home;
+    if (layout) changes.home = { sections: arrange(cur.home.sections, layout) };
+    if (!Object.keys(changes).length) return { ok: false, error: "The designer changed nothing — ask the owner what should look different." };
+    const next = S.merge(cur, { ...changes, ...(out.name && changes.colors ? { name: out.name } : {}) });
+    const v = S.validate(next);
+    const said = String(out.summary || "Changed the look.").slice(0, 200);
+    const summary = layout ? `${layoutSummary(layout, cur).replace(/\.$/, "")}; ${said[0].toLowerCase()}${said.slice(1)}` : said;
+    if (v.ok) return saveAndApply(uid, next, `designer: ${text.slice(0, 120)}`, summary);
+    if (attempt === 1) return { ok: false, error: `The designer's change was not readable, so nothing changed: ${v.errors.join("; ")}` };
+    out = await askModel(text, { ...cur, _uid: uid },
+      `\nYour last answer was rejected: ${v.errors.join("; ")}. Answer again with that fixed.`);
+    if (!out) return { ok: false, error: FAILED };
+  }
+  return { ok: false, error: FAILED };
 }
 
-const SECTION_HELP = Object.entries(S.SECTION_LABELS).map(([id, l]) => `${id} (${l})`).join(", ");
+const LAYOUT = /\b(hide|show|unhide|remove|move|put|first|top|last|bottom|order|rearrange|above|below)\b/i;
+const COLOURISH = /\b(colou?rs?|red|blue|green|black|white|gold|purple|pink|orange|yellow|grey|gray|theme|dark|light|gradient|font|text|bigger|smaller|rounded|corners?|style|background|title|card (with|for|showing)|add a card|new card)\b/i;
+
+/** The layout ops for [request], from a strict schema (only real section ids). */
+async function layoutFor(request, cur) {
+  const openai = require("../services/ai/openai");
+  if (!openai.ready()) return null;
+  const ids = cur.home.sections.map((x) => x.id);
+  const label = (id) => (S.SECTION_LABELS[id] ||
+    ((cur.customCards.find((c) => `card:${c.id}` === id) || {}).title) || id);
+  const list = { type: "array", items: { type: "string", enum: ids } };
+  try {
+    const r = await require("../services/ai/router").generateReply([{
+      role: "user",
+      content: `Home sections, top to bottom now: ${cur.home.sections.map((x) => `${x.id} = ${label(x.id)}${x.visible ? "" : " (hidden)"}`).join("; ")}.
+` +
+        `Request: "${String(request).slice(0, 300)}"`,
+    }], {
+      system: "You rearrange the Home screen of an app. Answer with the sections to put FIRST (the very top, in " +
+        "order), LAST (the very end, in order), to HIDE and to SHOW. Leave a list empty when nothing goes in " +
+        "it. 'My reminders', 'my day', 'agenda', 'calendar' are the section today. Only what was asked.",
+      json: true,
+      schema: { type: "object", properties: { first: list, last: list, hide: list, show: list },
+        required: ["first", "last", "hide", "show"], additionalProperties: false },
+      model: process.env.DESIGN_MODEL || openai.models.chat(), timeoutMs: 15_000,
+    });
+    const out = JSON.parse(r.reply || "{}");
+    const any = ["first", "last", "hide", "show"].some((k) => Array.isArray(out[k]) && out[k].length);
+    return any ? out : null;
+  } catch (e) {
+    console.warn(`design: layout failed: ${String(e.message || e).slice(0, 160)}`);
+    return null;
+  }
+}
+
+/** What actually changed — not every id the model listed. */
+function layoutSummary(ops, cur) {
+  const name = (id) => S.SECTION_LABELS[id] || ((cur.customCards.find((c) => `card:${c.id}` === id) || {}).title) || id;
+  const before = cur.home.sections;
+  const after = arrange(before, ops);
+  const was = (id) => before.findIndex((x) => x.id === id);
+  const now = (id) => after.findIndex((x) => x.id === id);
+  const vis = (list, id) => (list.find((x) => x.id === id) || {}).visible;
+  const parts = [];
+  // Only what moved UP: the others were just pushed down by it.
+  const top = (ops.first || []).filter((id) => now(id) < was(id));
+  if (top.length) parts.push(`put ${top.map(name).join(", ")} at the top`);
+  const end = (ops.last || []).filter((id) => was(id) !== now(id));
+  if (end.length) parts.push(`moved ${end.map(name).join(", ")} to the end`);
+  const hid = (ops.hide || []).filter((id) => vis(before, id) && !vis(after, id));
+  if (hid.length) parts.push(`hid ${hid.map(name).join(", ")}`);
+  const shown = (ops.show || []).filter((id) => !vis(before, id) && vis(after, id));
+  if (shown.length) parts.push(`brought back ${shown.map(name).join(", ")}`);
+  const t = parts.join(", ");
+  return t ? `${t[0].toUpperCase()}${t.slice(1)}.` : "Rearranged Home.";
+}
+
+/** Home's sections after {first, last, hide, show} (ids; unknown ones ignored). */
+function arrange(sections, ops = {}) {
+  const ids = (v) => (Array.isArray(v) ? v : v ? [v] : []).map(String);
+  let list = sections.map((x) => ({ ...x }));
+  const known = (id) => list.some((x) => x.id === id);
+  const first = ids(ops.first).filter(known);
+  const last = ids(ops.last).filter(known);
+  if (first.length || last.length) {
+    list = [
+      ...first.map((id) => list.find((x) => x.id === id)),
+      ...list.filter((x) => !first.includes(x.id) && !last.includes(x.id)),
+      ...last.map((id) => list.find((x) => x.id === id)),
+    ];
+  }
+  for (const id of ids(ops.hide)) { const x = list.find((y) => y.id === id); if (x) x.visible = false; }
+  for (const id of ids(ops.show)) { const x = list.find((y) => y.id === id); if (x) x.visible = true; }
+  return list;
+}
 
 function registerDesignTools(registry) {
-  const base = { risk: "low", effects: ["write:record"], deviceAction: true, timeoutMs: 60_000 };
-
   registry.register({
-    ...base,
-    name: "design_app",
-    description:
-      "Change how THIS app looks, any part of it, when the owner asks: colours ('make the cards darker', " +
-      "'brand colour teal'), card style (glass|solid|outlined|flat) and corner radius (0-32), the font (" +
-      S.FONTS.join(", ") + "), text size (scale 0.9-1.3), background (ambient|gradient|plain), dark/light, " +
-      "the header title. 'Darker' / 'lighter' (the page and cards) is `shade`. Pass ONLY what changes. " +
-      "Colours are #RRGGBB; a palette change may name just the " +
-      "keys that change (bg, surface, surfaceHigh, primary, partner, secondary, tertiary, textHi, textLo, " +
-      "textDim). For a whole new look from words ('sunset', 'calm forest') use generate_theme instead.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        palette: { type: "object", description: "Colour keys to change, e.g. {\"surface\":\"#1E1E2E\"}." },
-        mode: { type: "string", enum: S.MODES },
-        shade: { type: "string", enum: ["darker", "lighter"], description: "Make the page and cards darker or lighter." },
-        cardStyle: { type: "string", enum: S.CARD_STYLES },
-        radius: { type: "integer", description: "Card corner radius, 0 (square) to 32 (very round)." },
-        font: { type: "string", enum: S.FONTS },
-        textScale: { type: "number", description: "0.9 to 1.3; 1 is normal." },
-        background: { type: "string", enum: S.BACKGROUNDS },
-        title: { type: "string", description: "The words at the top of Home (default MyAssistant)." },
-        showDate: { type: "boolean" },
-        showQuote: { type: "boolean" },
-      },
-    },
-    async execute(args = {}, ctx = {}) {
-      const uid = ctx.userId;
-      if (!uid) return { ok: false, error: "not signed in" };
-      const cur = await store.get(uid);
-      const patch = {};
-      if (args.palette && typeof args.palette === "object") {
-        const dark = args.mode === "light" ? false : args.mode === "dark" ? true
-          : cur.palette ? cur.palette.dark : cur.mode !== "light";
-        patch.palette = { ...(cur.palette || APP_PALETTE[dark ? "dark" : "light"]), ...args.palette };
-      }
-      if (args.mode) patch.mode = args.mode;
-      // Dark/light with a palette of the other kind: the SAME colours, as a
-      // dark (or light) theme — the palette decides how the app looks, so
-      // a mode alone changed nothing (2026-10-31).
-      const pal = patch.palette || cur.palette;
-      if ((args.mode === "dark" || args.mode === "light") && pal && pal.dark !== (args.mode === "dark") && !args.palette) {
-        const made = await designFromWords(
-          `the same look as "${pal.name || "this"}" — brand ${pal.primary}, partner ${pal.partner}, ` +
-          `accents ${pal.secondary} and ${pal.tertiary} — as a ${args.mode} theme`, { mode: args.mode });
-        if (!made.ok) return made;
-        patch.palette = made.look.palette;
-      }
-      if (args.shade) {
-        const base = patch.palette || cur.palette || APP_PALETTE[cur.mode === "light" ? "light" : "dark"];
-        patch.palette = S.shade(base, args.shade);
-      }
-      if (args.cardStyle || args.radius != null) {
-        patch.shape = { ...(args.cardStyle ? { cardStyle: args.cardStyle } : {}), ...(args.radius != null ? { radius: args.radius } : {}) };
-      }
-      if (args.font || args.textScale != null) {
-        patch.type = { ...(args.font ? { font: args.font } : {}), ...(args.textScale != null ? { scale: args.textScale } : {}) };
-      }
-      if (args.background) patch.background = args.background;
-      if (args.title != null || args.showDate != null || args.showQuote != null) {
-        patch.header = {
-          ...(args.title != null ? { title: args.title } : {}),
-          ...(args.showDate != null ? { showDate: args.showDate } : {}),
-          ...(args.showQuote != null ? { showQuote: args.showQuote } : {}),
-        };
-      }
-      if (!Object.keys(patch).length) return { ok: false, error: "Nothing to change — say what should look different." };
-      return saveAndApply(uid, S.merge(cur, patch), "design_app", "Changed the look.");
-    },
-  });
-
-  registry.register({
-    ...base,
-    name: "generate_theme",
-    description:
-      "Make a WHOLE new look for the app from the owner's words — 'make it feel like a sunset', 'calm " +
-      "and green', 'black and gold, luxury', 'something cheerful'. Designs the full colour scheme, card " +
-      "style, corners, font and background together, checked to stay readable, and applies it.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        description: { type: "string", description: "The look in their words." },
-        mode: { type: "string", enum: ["dark", "light"], description: "Only if they said dark or light." },
-      },
-      required: ["description"],
-    },
-    async execute(args = {}, ctx = {}) {
-      const uid = ctx.userId;
-      if (!uid) return { ok: false, error: "not signed in" };
-      const made = await designFromWords(args.description, { mode: args.mode || null });
-      if (!made.ok) return made;
-      const cur = await store.get(uid);
-      return saveAndApply(uid, S.merge(cur, made.look), `generate_theme: ${args.description}`,
-        `Applied a new look, "${made.name}".`);
-    },
-  });
-
-  registry.register({
-    ...base,
-    name: "arrange_home",
-    description:
-      "Arrange the Home screen: which sections show and in what order — 'put my reminders first', " +
-      "'hide Born today', 'show the tips again'. Sections: " + SECTION_HELP + ", and their own custom " +
-      "cards by title. `order` lists sections to go first, in that order; `hide` and `show` toggle them.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        order: { type: "array", items: { type: "string" } },
-        hide: { type: "array", items: { type: "string" } },
-        show: { type: "array", items: { type: "string" } },
-      },
-    },
-    async execute(args = {}, ctx = {}) {
-      const uid = ctx.userId;
-      if (!uid) return { ok: false, error: "not signed in" };
-      const cur = await store.get(uid);
-      let sections = cur.home.sections.map((s) => ({ ...s }));
-      const unknown = [];
-      const ids = (list) => (Array.isArray(list) ? list : []).map((w) => {
-        const id = sectionId(w, cur);
-        if (!id) unknown.push(w);
-        return id;
-      }).filter(Boolean);
-      const first = ids(args.order);
-      if (first.length) {
-        sections = [...first.map((id) => sections.find((s) => s.id === id)).filter(Boolean),
-          ...sections.filter((s) => !first.includes(s.id))];
-      }
-      for (const id of ids(args.hide)) sections.find((s) => s.id === id).visible = false;
-      for (const id of ids(args.show)) sections.find((s) => s.id === id).visible = true;
-      if (unknown.length) {
-        return { ok: false, error: `I don't know these sections: ${unknown.join(", ")}. There are: ${SECTION_HELP}.` };
-      }
-      return saveAndApply(uid, { ...cur, home: { sections } }, "arrange_home", "Rearranged Home.");
-    },
-  });
-
-  registry.register({
-    ...base,
-    name: "add_home_card",
-    description:
-      "Add a NEW card to Home that the owner describes — 'a card with my reminders today', 'a weather " +
-      "card', 'a card with a button to plan my day'. Built from blocks: text {value}, list {source, " +
-      "limit 1-5}, stat {source, label}, button {label, ask: what tapping it asks the assistant}. Sources " +
-      "(their own data, refreshed live): " + S.SOURCES.join(", ") + ". `position`: 'top' or a section to " +
-      "go after. At most 8 custom cards.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        title: { type: "string" },
-        blocks: { type: "array", items: { type: "object" } },
-        accent: { type: "string", description: "Optional #RRGGBB for the card's accent." },
-        position: { type: "string" },
-      },
-      required: ["title", "blocks"],
-    },
-    async execute(args = {}, ctx = {}) {
-      const uid = ctx.userId;
-      if (!uid) return { ok: false, error: "not signed in" };
-      const cur = await store.get(uid);
-      if (cur.customCards.length >= 8) return { ok: false, error: "There are already 8 custom cards — remove one first." };
-      const id = `c${Date.now().toString(36)}`;
-      const card = { id, title: args.title, accent: args.accent, blocks: args.blocks };
-      const sections = cur.home.sections.filter((s) => s.id !== `card:${id}`);
-      const after = args.position && args.position !== "top" ? sectionId(args.position, cur) : null;
-      const at = args.position === "top" ? 0 : after ? sections.findIndex((s) => s.id === after) + 1 : sections.length;
-      sections.splice(Math.max(0, at), 0, { id: `card:${id}`, visible: true });
-      return saveAndApply(uid, { ...cur, customCards: [...cur.customCards, card], home: { sections } },
-        `add_home_card: ${args.title}`, `Added the "${String(args.title).slice(0, 40)}" card to Home.`);
-    },
-  });
-
-  registry.register({
-    ...base,
-    name: "remove_home_card",
-    description: "Remove one of the owner's custom Home cards, by its title.",
-    inputSchema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] },
-    async execute(args = {}, ctx = {}) {
-      const uid = ctx.userId;
-      if (!uid) return { ok: false, error: "not signed in" };
-      const cur = await store.get(uid);
-      const t = String(args.title || "").toLowerCase();
-      const card = cur.customCards.find((c) => c.title.toLowerCase() === t)
-        || cur.customCards.find((c) => c.title.toLowerCase().includes(t));
-      if (!card) {
-        return { ok: false, error: cur.customCards.length
-          ? `No custom card called "${args.title}". There are: ${cur.customCards.map((c) => c.title).join(", ")}.`
-          : "There are no custom cards on Home." };
-      }
-      return saveAndApply(uid, {
-        ...cur,
-        customCards: cur.customCards.filter((c) => c.id !== card.id),
-        home: { sections: cur.home.sections.filter((s) => s.id !== `card:${card.id}`) },
-      }, `remove_home_card: ${card.title}`, `Removed the "${card.title}" card.`);
-    },
-  });
-
-  registry.register({
-    ...base,
-    name: "undo_design",
-    description: "Undo the last change to how the app looks — 'undo that', 'go back', 'I liked it before'.",
-    inputSchema: { type: "object", properties: {} },
-    async execute(_args, ctx = {}) {
-      if (!ctx.userId) return { ok: false, error: "not signed in" };
-      const spec = await store.undo(ctx.userId);
-      if (!spec) return { ok: false, error: "There is no earlier look to go back to." };
-      require("./cards").forget(ctx.userId);
-      return apply(spec, "Went back to the previous look.");
-    },
-  });
-
-  registry.register({
-    ...base,
-    name: "reset_design",
-    description: "Put the app back to its original look — 'reset the design', 'back to default'. Undoable.",
-    inputSchema: { type: "object", properties: {} },
-    async execute(_args, ctx = {}) {
-      if (!ctx.userId) return { ok: false, error: "not signed in" };
-      return apply(await store.reset(ctx.userId), "Back to the app's original look.");
-    },
-  });
-
-  registry.register({
-    ...base,
+    name: "ask_designer",
+    risk: "low",
     effects: ["write:record"],
-    deviceAction: false,
-    name: "save_theme",
-    description: "Save the app's current look under a name — 'save this as Office', 'keep this look as Night'.",
-    inputSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
-    async execute(args = {}, ctx = {}) {
-      if (!ctx.userId) return { ok: false, error: "not signed in" };
-      const r = await store.saveTheme(ctx.userId, args.name, await store.get(ctx.userId));
-      return r.ok ? { ok: true, result: `Saved this look as "${r.name}".` } : r;
-    },
-  });
-
-  registry.register({
-    ...base,
-    name: "apply_theme",
-    description: "Switch to a look the owner saved by name — 'use my Office look', 'switch to Night'.",
-    inputSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
-    async execute(args = {}, ctx = {}) {
-      if (!ctx.userId) return { ok: false, error: "not signed in" };
-      const t = await store.getTheme(ctx.userId, args.name);
-      if (!t) {
-        const names = await store.listThemes(ctx.userId);
-        return { ok: false, error: names.length ? `No saved look called "${args.name}". Saved: ${names.join(", ")}.` : "There are no saved looks yet." };
-      }
-      return saveAndApply(ctx.userId, t.spec, `apply_theme: ${t.name}`, `Switched to "${t.name}".`);
-    },
-  });
-
-  registry.register({
-    risk: "low",
-    effects: ["read"],
-    name: "list_themes",
-    description: "The looks the owner has saved by name, and what the app looks like now.",
-    inputSchema: { type: "object", properties: {} },
-    async execute(_args, ctx = {}) {
-      if (!ctx.userId) return { ok: false, error: "not signed in" };
-      const [names, cur] = await Promise.all([store.listThemes(ctx.userId), store.get(ctx.userId)]);
-      return { ok: true, saved: names, now: S.describe(cur),
-        result: `${names.length ? `Saved looks: ${names.join(", ")}.` : "No saved looks yet."} Now: ${S.describe(cur)}.` };
-    },
-  });
-
-  registry.register({
-    ...base,
-    name: "preview_designs",
+    deviceAction: true,
+    timeoutMs: 60_000,
     description:
-      "Show the owner a few OPTIONS to choose from — 'show me some designs', 'give me three options for " +
-      "a calm look'. Makes 2-3 different looks from their words and shows each on the phone for a few " +
-      "seconds, then returns to the current look. They pick one with pick_preview ('the second one').",
+      "The Designer agent: for ANY request about how THIS app looks — colours of anything (\"card text red\", " +
+      "\"blue buttons\"), a whole new look (\"sunset\", \"black and gold\"), dark/light, darker/lighter, a " +
+      "gradient background, card style and corners, font, text size, the Home title, showing, hiding or " +
+      "moving Home sections, new Home cards, undo, reset, saving or using a named look. Pass the owner's " +
+      "request in their own words. It changes the design and the phone shows it at once; then confirm in " +
+      "one short line what changed (its `result`). Call it ONCE per request.",
     inputSchema: {
       type: "object",
-      properties: {
-        description: { type: "string" },
-        count: { type: "integer", description: "2 or 3." },
-      },
-      required: ["description"],
+      properties: { request: { type: "string", description: "What they want, in their words." } },
+      required: ["request"],
     },
     async execute(args = {}, ctx = {}) {
-      const uid = ctx.userId;
-      if (!uid) return { ok: false, error: "not signed in" };
-      const n = Math.min(3, Math.max(2, Number(args.count) || 3));
-      const cur = await store.get(uid);
-      const options = [];
-      for (let i = 0; i < n; i++) {
-        const made = await designFromWords(args.description, { avoid: options.map((o) => o.label) });
-        if (made.ok) options.push({ label: made.name || `Option ${i + 1}`, spec: S.validate(S.merge(cur, made.look)).spec });
-      }
-      if (!options.length) return { ok: false, error: "I could not make any options just now — try again." };
-      store.setPreviews(uid, options);
-      return {
-        ok: true,
-        result: `Showing ${options.length} options: ${options.map((o, i) => `${i + 1}. ${o.label}`).join(", ")}. ` +
-          "Ask which one they want; pick_preview applies it.",
-        deviceAction: { type: "preview_ui_specs", seconds: 4, current: cur, options },
-      };
-    },
-  });
-
-  registry.register({
-    ...base,
-    name: "pick_preview",
-    description: "Apply one of the options preview_designs just showed — 'the second one', 'keep option 1'.",
-    inputSchema: { type: "object", properties: { option: { type: "integer" } }, required: ["option"] },
-    async execute(args = {}, ctx = {}) {
       if (!ctx.userId) return { ok: false, error: "not signed in" };
-      const p = store.getPreview(ctx.userId, Number(args.option));
-      if (!p) return { ok: false, error: "Those options have expired — I can show new ones." };
-      return saveAndApply(ctx.userId, p.spec, `pick_preview: ${p.label}`, `Applied "${p.label}".`);
-    },
-  });
-
-  registry.register({
-    risk: "low",
-    effects: ["read"],
-    name: "current_design",
-    description: "What the app looks like now (colours, cards, font, Home layout, custom cards).",
-    inputSchema: { type: "object", properties: {} },
-    async execute(_args, ctx = {}) {
-      if (!ctx.userId) return { ok: false, error: "not signed in" };
-      const cur = await store.get(ctx.userId);
-      return { ok: true, result: S.describe(cur), sections: cur.home.sections, cards: cur.customCards.map((c) => c.title) };
+      if (!String(args.request || "").trim()) return { ok: false, error: "Say what should look different." };
+      return designFor(ctx.userId, args.request);
     },
   });
 }
 
-module.exports = { registerDesignTools, designFromWords, APP_PALETTE, DESIGN_TOOLS: [
-  "design_app", "generate_theme", "arrange_home", "add_home_card", "remove_home_card", "undo_design",
-  "reset_design", "save_theme", "apply_theme", "list_themes", "preview_designs", "pick_preview", "current_design",
-] };
+module.exports = { registerDesignTools, designFor, askModel, arrange, DESIGNER_PROMPT, DESIGN_TOOLS: ["ask_designer"] };

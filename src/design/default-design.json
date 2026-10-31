@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "mode": null,
+  "colors": {},
+  "background": { "style": null, "from": null, "to": null },
+  "cards": { "style": null, "radius": null },
+  "typography": { "font": null, "scale": 1 },
+  "header": { "title": "MyAssistant", "showDate": true, "showQuote": true },
+  "home": {
+    "sections": [
+      { "id": "play", "visible": true },
+      { "id": "agents", "visible": true },
+      { "id": "today", "visible": true },
+      { "id": "born", "visible": true },
+      { "id": "extras", "visible": true },
+      { "id": "asks", "visible": true },
+      { "id": "shortcuts", "visible": true },
+      { "id": "whatsnew", "visible": true }
+    ]
+  },
+  "customCards": []
+}

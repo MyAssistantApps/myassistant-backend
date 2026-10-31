@@ -1,0 +1,47 @@
+{
+  "$comment": "THE APP'S DESIGN, AS ONE JSON DOCUMENT (v2, 2026-10-31). The Designer agent reads this to know what it can change, and answers with a partial document of the same shape that is deep-merged into the person's current design. The phone draws every field here. Colours are #RRGGBB; null or absent = the app's own value. Text must stay readable: pageText on page and cardText on card at least 4.5:1, muted text 3:1.",
+  "version": 2,
+  "mode": "dark | light | adaptive — the app's light/dark setting (null = leave as is). A colour set is dark or light by its page colour.",
+  "colors": {
+    "page": "the page background behind everything",
+    "pageText": "headings and body text on the page (the Home title area, lists outside cards)",
+    "pageMuted": "secondary text on the page (the date, hints)",
+    "pageFaint": "the faintest text on the page (timestamps)",
+    "card": "every card's background",
+    "cardRaised": "chips, fields and tiles that sit on a card",
+    "cardBorder": "the card's outline (null = the app's soft edge)",
+    "cardText": "the main text inside cards (titles, items)",
+    "cardMuted": "secondary text inside cards",
+    "primary": "the brand colour: buttons, the mic orb, the active tab, links, the selected state",
+    "partner": "the brand colour's gradient partner (orb, buttons, gradients)",
+    "secondary": "a supporting accent (messages, weather, info)",
+    "tertiary": "a third accent (variety in icon tiles)",
+    "headerTitle": "the big title at the top of Home (null = the brand gradient)",
+    "success": "positive states",
+    "warning": "warnings",
+    "error": "errors"
+  },
+  "background": {
+    "style": "ambient (the app's moving light) | gradient | plain",
+    "from": "gradient start colour, top-left (null = from primary) — must clearly differ from `to`",
+    "to": "gradient end colour, bottom-right (null = from partner)"
+  },
+  "cards": {
+    "style": "glass (the app's own) | solid | outlined | flat",
+    "radius": "corner radius 0 (square) to 32 (very round); null = 24"
+  },
+  "typography": {
+    "font": "Space Grotesk | Manrope | Roboto (the fonts the app carries); null = the app's pairing",
+    "scale": "text size 0.9 to 1.3; 1 = normal"
+  },
+  "header": {
+    "title": "the words at the top of Home, max 24 characters (default MyAssistant)",
+    "showDate": "true | false",
+    "showQuote": "true | false — today's quote under the date"
+  },
+  "home": {
+    "sections": "ordered list of {id, visible}: ids play (Play my day button), agents (Your agents row), today (Today's cards: the person's reminders, agenda, calendar, missed calls — 'my reminders'/'my day' mean this), born (Born today), extras (Tips and extra cards), asks (Try asking chips), shortcuts (Quick tools), whatsnew (What's new), and card:<id> for custom cards.",
+    "$change": "To rearrange Home answer changes.home = {\"first\": [ids for the very top, in order], \"last\": [ids for the end], \"hide\": [ids], \"show\": [ids]}"
+  },
+  "customCards": "up to 8 of {id, title (max 40), accent (#RRGGBB), blocks: up to 8 of {type: text, value} | {type: list, source, label, limit 1-5} | {type: stat, source, label} | {type: button, label, ask (what tapping it asks the assistant)}}. Sources (the person's own data): reminders, calendar, shopping, habits, weather, news, brief."
+}
