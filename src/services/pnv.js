@@ -122,4 +122,4 @@ async function claimOnce(hash, expiresAt, now = Date.now()) {
   return !!row;
 }
 
-module.exports = { verify, claimOnce, configured, issuer, DEFAULT_PROJECT_NUMBER };
+module.exports = { verify, claimOnce, configured, issuer, DEFAULT_PROJECT_NUMBER, migrate: ensureTable };

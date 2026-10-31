@@ -210,6 +210,11 @@ const USER_TABLES = [
   ["conversation_state", "user_id"], // a rolling summary of their conversation
   ["did_agents", "user_id"], // 2026-08-05 to 08-11: D-ID agent id
   ["did_briefings", "user_id"], // briefing scripts and D-ID video links
+  // 2026-10-31, found by the erase suite's schema guard: tables added
+  // after the list was last checked.
+  ["app_connections", "user_id"], // their own apps' credentials (encrypted)
+  ["diag_reports", "user_id"], // self-checks from their phone, with its log
+  ["diag_requests", "user_id"],
 ];
 
 /**
@@ -226,6 +231,13 @@ const SHARED_TABLES = {
   // stays for the others, and goes (messages and all) once nobody is left,
   // the same as when the last member leaves (routes/chatGroups.js).
   chat_groups: "created_by",
+  // A group's task list belongs to the group the same way: it stays for
+  // the other members and goes with the group once nobody is left.
+  chat_task_lists: "created_by",
+  // What the AI cost (ops/spend.js) is the service's own accounting: the
+  // rows stay, so the totals stay right, but are no longer theirs —
+  // user_id is cleared, which leaves nothing that points back at them.
+  ai_spend: "user_id",
 };
 
 /**
@@ -554,8 +566,20 @@ async function deleteUserEverywhere(userId, { reason = "" } = {}) {
         `DELETE FROM chat_group_messages WHERE group_id IN
            (SELECT g.id FROM chat_groups g WHERE ${mine})`, [groups, uid]);
       count("chat_group_messages", msgs.rowCount);
+      // Their task lists have no foreign key to the group: removed with
+      // it (chat_task_items follow by ON DELETE CASCADE).
+      if (cols.has("chat_task_lists.group_id")) {
+        const lists = await client.query(
+          `DELETE FROM chat_task_lists WHERE group_id IN
+             (SELECT g.id FROM chat_groups g WHERE ${mine})`, [groups, uid]);
+        count("chat_task_lists (nobody left)", lists.rowCount);
+      }
       const g = await client.query(`DELETE FROM chat_groups g WHERE ${mine}`, [groups, uid]);
       count("chat_groups (nobody left)", g.rowCount);
+    }
+    if (cols.has("ai_spend.user_id")) {
+      const r = await client.query(`UPDATE ai_spend SET user_id = NULL WHERE user_id = $1`, [uid]);
+      count("ai_spend (unlinked)", r.rowCount);
     }
     if (cols.has("chat_group_messages.deleted")) {
       const r = await client.query(

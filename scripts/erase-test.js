@@ -114,6 +114,7 @@ async function ensureEveryTable() {
     "routes/finance", "routes/usage", "services/email", "services/pendingPush",
     "studio/store", "tools/searchCache", "posters/store", "shortcuts/store",
     "shopping/store", "kitchen/store", "platform/store", "platform/console",
+    "memory/episodes", "services/pnv",
   ]) {
     await require("../src/" + m).migrate();
   }
@@ -461,8 +462,10 @@ const tell = (from, toPhone, message) => db.one(
     body: JSON.stringify({ key: process.env.ADMIN_KEY }),
   });
   const cookie = login.headers.get("set-cookie").split(";")[0];
+  // X-Admin-Panel: every admin write needs it since the CSRF fix of
+  // 2026-10-09 (routes/admin_web.js), as the panel's own page sends it.
   const admin = (p, opts = {}) => fetch(`${base}/admin-panel/api${p}`,
-    { ...opts, headers: { ...(opts.headers || {}), cookie } });
+    { ...opts, headers: { ...(opts.headers || {}), cookie, "X-Admin-Panel": "1" } });
 
   console.log("\nDelete user in the admin panel");
 
