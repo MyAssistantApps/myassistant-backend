@@ -310,6 +310,40 @@ function isWorldAction(name) {
 }
 
 /**
+ * Tools that declare no `effects` but only ever READ — checked one by one
+ * against what they do. A tool that declares effects is judged by them
+ * instead; anything not here and undeclared is treated as a write.
+ */
+const READ_ONLY_LEGACY = new Set([
+  "get_weather", "get_news", "web_search", "deep_research", "consult_knowledge", "indian_law",
+  "indian_case_law", "convert_currency", "search_flights", "get_horoscope", "recall_memory",
+  "lookup_person", "list_reminders", "list_calendar_events", "list_scheduled_tasks",
+  "search_documents", "find_document", "get_last_document", "list_person_documents",
+  "list_expiring_documents", "get_finance_plan", "list_entries", "recall_conversation",
+  "recall_meeting", "list_my_commitments", "check_recent_actions", "check_task_outcomes",
+  "list_my_errands", "check_payments", "check_patient_dues", "check_my_calls", "call_recall",
+  "get_current_location", "momentum_status", "get_app_usage",
+]);
+
+/**
+ * May the phone run this call at the same time as the others in its
+ * round (2026-10-31)? Only a pure read: nothing on the device, nothing in
+ * the world or in memory, no dedupe guard, no confirmation, nothing that
+ * brings someone else's words into the session (its taint must land in
+ * order). Anything unsure is run in order, as before.
+ */
+function isParallelSafe(name) {
+  const t = REGISTRY.get(name);
+  if (!t || t.deviceAction || t.risk === "high") return false;
+  if (EFFECTIVE.world.has(name) || EFFECTIVE.memoryWrites.has(name)) return false;
+  if (EFFECTIVE.repeatGuarded.has(name) || EFFECTIVE.durableGuarded.has(name)) return false;
+  if (UNTRUSTED_SOURCES.has(name)) return false;
+  const effects = Array.isArray(t.effects) ? t.effects : [];
+  if (effects.length) return effects.every((e) => e === "read");
+  return READ_ONLY_LEGACY.has(name);
+}
+
+/**
  * Does this call only edit an undoable draft on the user's own screen?
  * A tool says so with `draftEdit: true`, or a function of the call's
  * arguments (make_greeting_poster continuing a card, not starting one).
@@ -1286,6 +1320,8 @@ module.exports = {
   limitsFor,
   limitsBlock,
   isWorldAction,
+  isParallelSafe,
+  READ_ONLY_LEGACY,
   isDraftEdit,
   WORLD_ACTIONS: SEED_WORLD,
   seal,

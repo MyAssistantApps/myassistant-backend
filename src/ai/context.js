@@ -26,7 +26,9 @@
  * owner's words through the same gates, a turnId for /ai/tool and
  * /ai/turn, and `notes` (this turn's instructions) instead of a prompt.
  *
- * No model is called here.
+ * One model call at most: the manager agent (agents/manager.js) asks the
+ * fast model which specialists a turn belongs to when its cue words find
+ * none, capped at ~1.2 s. Everything else here is code.
  */
 const registry = require("../tools/registry");
 const sessionState = require("../agents/sessionState");
@@ -39,6 +41,9 @@ const MODES = new Set(["voice", "live", "chat"]);
 // A Live session opening has no words to choose memories by: it gets the
 // most important and recent ones, a few more than a turn's ~15.
 const LIVE_MEMORIES = 20;
+// How long past the personal layer a turn waits for the manager agent's
+// model (agents/manager.js) before going on without it.
+const MANAGER_GRACE_MS = Number(process.env.AI_MANAGER_GRACE_MS) || 300;
 const timingOn = () => !/^(off|0|false|no)$/i.test(String(process.env.AI_CONTEXT_TIMING || "on").trim());
 
 /**
@@ -305,6 +310,8 @@ async function prepare(uid, body) {
   turnRec.untrusted = relayed || body.untrusted === true;
   const notes = [];
   let shortcut = null;
+  // Read by the manager agent: a garbled transcript is not routed.
+  let garbled = false;
 
   const shortcutKeys = Number(build) >= 120 && process.env.SHORTCUTS !== "off"
     ? await require("../shortcuts/match").keysFor(uid).catch(() => [])
@@ -382,7 +389,8 @@ async function prepare(uid, body) {
 
     // ── GARBLED IN, CLARIFICATION OUT ── nothing is worth generating from
     // a transcript this poor: the model is told to ask, in its own voice.
-    if (turnQuality.quality === "garbled" && !shortcut) {
+    garbled = turnQuality.quality === "garbled";
+    if (garbled && !shortcut) {
       const ask = inputQuality.clarificationFor(turnQuality, { language: preferred || "" });
       notes.push(
         `[SYSTEM] That transcript was not usable ("${turnQuality.heard}" — ` +
@@ -459,6 +467,34 @@ async function prepare(uid, body) {
     return { sessionId: s.id, turnId, route, system: "", tools: [], history: [], notes: notes.join("\n") };
   }
 
+  // ── THE PERSONAL LAYER, STARTED NOW ── profile, memory, the earlier
+  // conversation: none of it depends on which tools are offered, so it is
+  // fetched while the manager agent decides (which may ask a model).
+  const fix = s.promptFix || {};
+  // Memories chosen by the owner's own words (an app note has none).
+  const words = owner ? text : "";
+  const memOpts = mode === "live" && !words.trim() ? { words, limit: LIVE_MEMORIES } : { words };
+  const lastResults = tm.timed("last", require("./lastResults").block(uid, s, turnId).catch(() => ""));
+  const personal = mode === "voice" || mode === "live"
+    ? Promise.all([
+      tm.timed("context", require("../users/context").contextBlock(uid, {
+        lat: fix.lat, lng: fix.lng, tz, at: fix.at, appBuild: build,
+      }).catch(() => "")),
+      tm.timed("memory", require("../agents/memory").memoryBlock(uid, memOpts).catch(() => "")),
+      tm.timed("recent", require("../memory/recent").recentBlock(uid, { excludeSessionId: s.id }).catch(() => "")),
+      lastResults,
+      // Earlier DAYS, summarised (memory/episodes.js) — what recent's 48 h
+      // window forgot.
+      tm.timed("episodes", require("../memory/episodes").block(uid).catch(() => "")),
+    ])
+    : Promise.all([
+      tm.timed("personal", require("../agents/runtime").contextExtra({
+        userId: uid, lat: fix.lat, lng: fix.lng, tzOffsetMin: tz, appBuild: build,
+        sessionId: s.id, deviceCaps: s.device.caps || null, memoryWords: words,
+      }, s.state).catch(() => "")),
+      lastResults,
+    ]);
+
   // ── TOOLS: what this turn plausibly needs (tools/relevance.js), gated
   // by availability, build and permissions (registry.declarations).
   const history = await historyFor(uid, s.id);
@@ -478,6 +514,8 @@ async function prepare(uid, body) {
     if (wants) must.push("connected_apps");
   }
   let decls;
+  // Who has control of this turn, for the phone to show (agents/manager.js).
+  let plan = null;
   if (mode === "live" && body.transport === "gpt-live") {
     // GPT-Live delegates to a Responses model, which takes the whole
     // gated catalogue: every tool this user may use, priority order first.
@@ -497,11 +535,31 @@ async function prepare(uid, body) {
     // Never the whole catalogue: measured through AI Logic on 2026-09-29, a
     // spoken "hello" with all 143 tools took 72 s to start answering and
     // with the core set 3 s (relevance.selectForPhone).
-    const only = require("../tools/relevance").selectForPhone(registry.list(), text, {
+    const relevance = require("../tools/relevance");
+    const base = relevance.selectForPhone(registry.list(), text, {
       history: history.map((h) => ({ content: h.text })),
       sessionId: s.id,
     });
-    for (const n of must) if (!only.includes(n)) only.push(n);
+    for (const n of must) if (!base.includes(n)) base.push(n);
+    // THE MANAGER AGENT (agents/manager.js) hands the turn to specialists:
+    // their toolkits go first, their role notes into THIS TURN.
+    // Its model step (when the cue words found nothing) may wait only as
+    // long as the personal layer takes, plus MANAGER_GRACE_MS: a late
+    // answer is dropped and the turn keeps the old selection.
+    const manager = require("../agents/manager");
+    const started = Date.now();
+    const late = personal.then(() => new Promise((res) => setTimeout(res, MANAGER_GRACE_MS)))
+      .then(() => ({ agents: [], via: "late", ms: Date.now() - started }));
+    plan = await tm.timed("manager", Promise.race([manager.decide({
+      text, owner, skip: !!shortcut || garbled, session: s, history,
+    }), late]));
+    const only = manager.toolsFor(plan, {
+      base, must, live: new Set(registry.list().map((t) => t.name)), cap: relevance.PHONE_MAX,
+    });
+    const brief = manager.briefFor(plan);
+    if (brief) notes.push(brief);
+    turnRec.agents = plan.agents;
+    if (plan.via !== "skip") console.log(`ai: manager ${plan.via} -> ${plan.agents.join("+") || "none"} (${plan.ms}ms)`);
     decls = registry.declarations({ userId: uid, deviceCaps: s.device.caps || null, only });
   }
   const tools = decls.map((d) => ({ name: d.name, description: d.description, parameters: jsonSchema(d.parameters) }));
@@ -511,11 +569,7 @@ async function prepare(uid, body) {
   // turn to turn, what changes LAST (2026-09-30): Gemini caches a prompt's
   // unchanged prefix, and a clock or a memory list near the top meant it
   // never could. Content as before; only the order moved.
-  const fix = s.promptFix || {};
   const thisTurn = notes.length ? "\n\nTHIS TURN:\n" + notes.join("\n") : "";
-  // Memories chosen by the owner's own words (an app note has none).
-  const words = owner ? text : "";
-  const memOpts = mode === "live" && !words.trim() ? { words, limit: LIVE_MEMORIES } : { words };
   // The phone will SPEAK this reply and can read delivery marks (it asks
   // only when both are true; an older build would show them). Never Live:
   // it speaks natively, and a mark would be read out.
@@ -530,22 +584,11 @@ async function prepare(uid, body) {
   if (owner) require("../memory/episodes").ensure(uid, tz);
   // Once a day: tidy, decay and learn habits (memory/learning.js).
   if (owner) require("../memory/learning").ensureDaily(uid, tz);
-  const lastResults = tm.timed("last", require("./lastResults").block(uid, s, turnId).catch(() => ""));
   let system;
   if (mode === "voice" || mode === "live") {
     // The same personal layer the live socket gave its model: profile,
     // standing rules, memory, the earlier conversation.
-    const [ctxBlock, memBlock, recentBlock, last, episodeBlock] = await Promise.all([
-      tm.timed("context", require("../users/context").contextBlock(uid, {
-        lat: fix.lat, lng: fix.lng, tz, at: fix.at, appBuild: build,
-      }).catch(() => "")),
-      tm.timed("memory", require("../agents/memory").memoryBlock(uid, memOpts).catch(() => "")),
-      tm.timed("recent", require("../memory/recent").recentBlock(uid, { excludeSessionId: s.id }).catch(() => "")),
-      lastResults,
-      // Earlier DAYS, summarised (memory/episodes.js) — what recent's 48 h
-      // window forgot.
-      tm.timed("episodes", require("../memory/episodes").block(uid).catch(() => "")),
-    ]);
+    const [ctxBlock, memBlock, recentBlock, last, episodeBlock] = await personal;
     tm.reset();
     let personalContext = [ctxBlock, memBlock, episodeBlock, recentBlock].filter(Boolean).join("\n");
     if (recentBlock) personalContext += NEW_CONVERSATION;
@@ -567,13 +610,7 @@ async function prepare(uid, body) {
       thisTurn;
   } else {
     const runtime = require("../agents/runtime");
-    const [extra, last] = await Promise.all([
-      tm.timed("personal", runtime.contextExtra({
-        userId: uid, lat: fix.lat, lng: fix.lng, tzOffsetMin: tz, appBuild: build,
-        sessionId: s.id, deviceCaps: s.device.caps || null, memoryWords: words,
-      }, s.state).catch(() => "")),
-      lastResults,
-    ]);
+    const [extra, last] = await personal;
     tm.reset();
     const notion = /\bnotion\b/i.test(text)
       ? require("../connectors/notion/tools").notionHintFor(uid, build) : "";
@@ -593,6 +630,10 @@ async function prepare(uid, body) {
     system,
     tools,
     history,
+    // Which of these tools the phone may run at the same time as the rest
+    // of their round (registry.isParallelSafe); every other call in order.
+    parallelSafe: tools.map((t) => t.name).filter((n) => registry.isParallelSafe(n)),
+    manager: require("../agents/manager").controlFor(plan, tools.map((t) => t.name)),
   };
 }
 

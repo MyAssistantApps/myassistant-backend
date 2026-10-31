@@ -275,7 +275,7 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       const r = await context(A, { text: "what should I cook for dinner tonight?" });
       assert.strictEqual(r.status, 200, r.text);
       chat = r.json;
-      assert.deepStrictEqual(Object.keys(chat).sort(), ["history", "route", "sessionId", "system", "tools", "turnId"]);
+      assert.deepStrictEqual(Object.keys(chat).sort(), ["history", "manager", "parallelSafe", "route", "sessionId", "system", "tools", "turnId"]);
       assert.match(chat.sessionId, /^ai:[0-9a-f-]{36}$/);
       assert.match(chat.turnId, /^[0-9a-f-]{36}$/);
       assert.deepStrictEqual(chat.route, { shortcut: null });
@@ -687,7 +687,7 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       let c = await cfg("?build=135");
       assert.deepStrictEqual(c.live, {
         on: true, model: "gemini-3.8-live", voice: "Sulafat", silenceMs: 800, prefixMs: 100,
-        startSensitivity: "low", endSensitivity: "high", idleCloseSec: 180, affectiveDialog: false,
+        startSensitivity: "low", endSensitivity: "high", idleCloseSec: 900, affectiveDialog: false,
         vadHangoverMs: 700, fragmentGuard: true,
         voices: ["Sulafat", "Callirrhoe", "Achernar", "Aoede", "Vindemiatrix", "Kore", "Charon", "Achird"],
       });
