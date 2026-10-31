@@ -33,6 +33,8 @@ registerBuiltins();
 // path and not the other, which is the exact bug the comment in server.js
 // records about registerBuiltins itself.
 require("./taskTools").registerTaskTools();
+// "Call your manager": the agent persona tool (agents/manager.js).
+require("./manager").registerAgentTools(require("../tools/registry"));
 
 const MAX_TOOL_ROUNDS = 3; // guards against a tool-calling loop
 

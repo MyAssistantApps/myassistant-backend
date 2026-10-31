@@ -225,6 +225,65 @@ async function test(name, fn) {
     assert.strictEqual(manager.controlFor(null).via, "skip");
   });
 
+  console.log("(i) speaking to an agent by name");
+  for (const [text, want] of [
+    ["call your manager", "manager"], ["I want to talk with your manager", "manager"],
+    ["let me speak to the planning agent", "planner"], ["connect me to your memory team", "memory"],
+    ["get me the shopping agent", "commerce"], ["talk to your boss please", "manager"],
+    ["call the manager at the bank", null], ["call my manager Ravi", null], ["call mom", null],
+  ]) {
+    await test(`"${text}" -> ${want || "no agent (a real call)"}`, () => {
+      assert.strictEqual(manager.addressedIn(text), want);
+    });
+  }
+  await test("an addressed turn is answered by that agent, and not carried", async () => {
+    const session = {};
+    const p = await manager.decide({ text: "call your manager", session });
+    assert.strictEqual(p.via, "addressed");
+    assert.strictEqual(p.addressed, "manager");
+    assert.deepStrictEqual(p.agents, []);
+    assert.strictEqual(session.manager, undefined, "the next turn is the assistant's again");
+    const s2 = await manager.decide({ text: "let me speak to the planning agent", session });
+    assert.deepStrictEqual([s2.addressed, ...s2.agents], ["planner", "planner"]);
+  });
+  await test("the agent keeps the conversation while it waits on an answer", async () => {
+    const session = {};
+    await manager.decide({ text: "call your manager", session });
+    session.lastReply = "Manager here. What would you like the team to do?";
+    const next = await manager.decide({ text: "set up my week", session });
+    assert.deepStrictEqual([next.via, next.addressed], ["addressed", "manager"]);
+    session.lastReply = "Done — I've set it up. Handing you back to Maya.";
+    const after = await manager.decide({ text: "what's the weather tomorrow", session });
+    assert.notStrictEqual(after.via, "addressed", "handed back: the assistant again");
+    assert.strictEqual(session.persona, null);
+  });
+  await test("talk_as_agent is never offered on an ordinary turn", async () => {
+    const plan = await manager.decide({ text: "call mom" });
+    assert.ok(!plan.addressed);
+    const out = manager.toolsFor(plan, { base: ["place_phone_call", "web_search"], live, cap: 40 });
+    assert.ok(!out.includes("talk_as_agent") && out.includes("place_phone_call"));
+  });
+  await test("the persona: talk_as_agent offered, named, and never a phone call", () => {
+    const out = manager.toolsFor({ agents: [], addressed: "manager" }, { base: ["web_search"], live, cap: 40 });
+    assert.ok(out.includes("talk_as_agent"));
+    const brief = manager.briefFor({ agents: [], addressed: "manager" }, { assistant: "Maya" });
+    assert.ok(/you ARE the Manager agent/.test(brief) && /Manager here/.test(brief), brief);
+    assert.ok(/handing them back to Maya/.test(brief) && /do NOT place a phone call/.test(brief));
+    assert.ok(/talk_as_agent/.test(manager.personaRule("Maya")));
+  });
+  await test("the phone is told who answers, and Live gets every owner", () => {
+    const c = manager.controlFor({ agents: [], via: "addressed", addressed: "manager" }, ["talk_as_agent"]);
+    assert.deepStrictEqual(c.addressed, { id: "manager", label: "Manager" });
+    const lv = manager.controlFor(null, ["get_weather", "set_alarm", "send_agent_message"], { all: true });
+    assert.deepStrictEqual(lv.toolAgent, { get_weather: "info", set_alarm: "planner", send_agent_message: "comms" });
+    assert.strictEqual(lv.agents.length, 8);
+  });
+  await test("talk_as_agent is registered, read-only, and answers with the label", async () => {
+    assert.ok(registry.get("talk_as_agent"));
+    const r = await registry.get("talk_as_agent").execute({ agent: "planner" });
+    assert.deepStrictEqual([r.ok, r.agent, r.label], [true, "planner", "Planning"]);
+  });
+
   console.log("(g) parallel-safe tools (registry.isParallelSafe)");
   registry.seal({ strict: false });
   await test("the read-only allowlist names real tools", () => {
