@@ -221,7 +221,7 @@ const MANAGER_PROMPT =
 /** One small JSON call to the fast model; null on any failure or timeout. */
 async function byModel(text, historyLines) {
   const openai = require("../services/ai/openai");
-  if (!openai.ready() || /^(off|0|false|no)$/i.test(String(process.env.AI_MANAGER_MODEL || "on"))) return null;
+  if (!openai.ready() || !/^(on|1|true|yes)$/i.test(String(process.env.AI_MANAGER_MODEL || "off"))) return null;
   const recent = historyLines.slice(-2).join("\n").slice(0, 600);
   const content = (recent ? `Earlier:\n${recent}\n\n` : "") + `Now: ${String(text).slice(0, 600)}`;
   try {
@@ -271,13 +271,22 @@ async function decide({ text, owner = true, skip = false, session = null, histor
     ? session.manager.agents : null;
   if (prev && FOLLOW_UP.test(text)) return done(prev, "carry");
 
+  // MAYA FIRST (owner, 2026-10-31: "if Maya is able to take the decision,
+  // don't move to the manager"). One specialist's words: Maya does it
+  // herself, with that specialist's tools at hand and no hand-off. Only a
+  // request spanning two or more specialists goes through the manager.
   const ruled = byRules(text);
+  if (ruled.length === 1) return done(ruled, "maya");
   if (ruled.length) return done(ruled, "rules");
 
-  // Two words of chat ("hello", "thank you") need no specialist and no call.
+  // Nothing matched: Maya answers on her own. Asking a model which
+  // specialist to use cost a call and ~1 s on every such turn; it is opt-in
+  // now (AI_MANAGER_MODEL=on).
   if (SMALL_TALK.test(text) || String(text).trim().split(/\s+/).length < 3) return done([], "none");
-  const modelled = await byModel(text, history.map((h) => `${h.role || "user"}: ${h.text || h.content || ""}`));
-  if (modelled && modelled.length) return done(modelled, "model");
+  if (/^(on|1|true|yes)$/i.test(String(process.env.AI_MANAGER_MODEL || "off"))) {
+    const modelled = await byModel(text, history.map((h) => `${h.role || "user"}: ${h.text || h.content || ""}`));
+    if (modelled && modelled.length) return done(modelled, "model");
+  }
   return done([], "none");
 }
 
@@ -309,6 +318,8 @@ function toolsFor(plan, { base = [], must = [], live = null, cap = 40 } = {}) {
 function briefFor(plan, { assistant = "the assistant" } = {}) {
   if (plan && plan.addressed) return personaBrief(plan.addressed, assistant);
   if (!plan || !plan.agents.length) return "";
+  // Maya handles it herself: no team note (its tools are already offered).
+  if (plan.via === "maya") return "";
   const lines = plan.agents.map((id) => `- ${SPECIALISTS[id].role}`);
   if (plan.agents.length > 1) {
     lines.push("- This request has several parts: do each part with its own tools, then give " +

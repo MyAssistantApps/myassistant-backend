@@ -225,6 +225,28 @@ async function test(name, fn) {
     assert.strictEqual(manager.controlFor(null).via, "skip");
   });
 
+  console.log("(j) Maya first: the manager only when needed");
+  await test("one specialist's words: Maya handles it, no team note", async () => {
+    const p = await manager.decide({ text: "set an alarm for 6 am" });
+    assert.deepStrictEqual([p.via, p.agents.join(",")], ["maya", "planner"]);
+    assert.strictEqual(manager.briefFor(p), "");
+    assert.ok(manager.toolsFor(p, { base: [], live }).includes("set_alarm"), "its tools are still offered");
+  });
+  await test("several specialists: the manager coordinates", async () => {
+    const p = await manager.decide({ text: "order biryani and tell Ravi I'm running late" });
+    assert.strictEqual(p.via, "rules");
+    assert.ok(p.agents.length >= 2);
+  });
+  await test("nothing matched: Maya answers, no model call by default", async () => {
+    const p = await manager.decide({ text: "can you sort out the thing we talked about" });
+    assert.deepStrictEqual([p.via, p.agents.length], ["none", 0]);
+  });
+  await test("the agents get a map of the app", () => {
+    const g = require("../src/agents/appGuide").appGuide("Maya");
+    assert.ok(/Home, Hub/.test(g) && /manager coordinates/.test(g) && !/Design/.test(g));
+    assert.ok(g.length < 1600);
+  });
+
   console.log("(i) speaking to an agent by name");
   for (const [text, want] of [
     ["call your manager", "manager"], ["I want to talk with your manager", "manager"],

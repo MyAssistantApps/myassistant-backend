@@ -215,6 +215,12 @@ const USER_TABLES = [
   ["app_connections", "user_id"], // their own apps' credentials (encrypted)
   ["diag_reports", "user_id"], // self-checks from their phone, with its log
   ["diag_requests", "user_id"],
+  // The Design agent's tables (2026-10-31; the feature is on the
+  // feature/custom-ui branch). They exist on the live server, so an
+  // account's rows there still go with the account.
+  ["ui_specs", "user_id"],
+  ["ui_spec_history", "user_id"],
+  ["ui_themes", "user_id"],
 ];
 
 /**
