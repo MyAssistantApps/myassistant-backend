@@ -606,7 +606,6 @@ async function prepare(uid, body) {
       (expressive ? "\n\n" + EXPRESSIVE_SPEECH : "") +
       (decls.some((d) => d.name === "talk_as_agent")
         ? "\n\n" + require("../agents/manager").personaRule(assistantName) : "") +
-      "\n\n" + require("../agents/appGuide").appGuide(assistantName) +
       (limits ? "\n\n" + limits : "") +
       (notion ? "\n\n" + notion : "") +
       voiceTail({ unreadMessages: unread, personalContext, tzOffsetMin: tz, languageAsk }) +
@@ -619,7 +618,6 @@ async function prepare(uid, body) {
       ? require("../connectors/notion/tools").notionHintFor(uid, build) : "";
     system = runtime.systemPrompt(
       "\n\n" + [expressive ? EXPRESSIVE_SPEECH : "",
-        require("../agents/appGuide").appGuide(assistantName),
         decls.some((d) => d.name === "talk_as_agent") ? require("../agents/manager").personaRule(assistantName) : "",
         extra, notion, last, languageAsk,
         unreadBlock(unread).trim()].filter(Boolean).join("\n"),
