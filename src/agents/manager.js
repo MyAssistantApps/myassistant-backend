@@ -121,7 +121,7 @@ const SPECIALISTS = {
     role: "You are handling THE PHONE ITSELF: settings, apps, the camera, screenshots and " +
       "shortcuts. Say exactly what changed; if the phone refused, say so.",
     cues: /\b(turn (on|off)|switch (on|off)|wifi|wi-fi|bluetooth|torch|flashlight|volume|brightness|silent|dnd|do not disturb|open (the )?\w+( app)?|launch|uninstall|install|update the app|dark mode|light mode|theme|screen time|camera|scan|screenshot|what('?s| is) (this|on my screen)|translat\w*|interpreter|shortcuts?)\b/i,
-    tools: ["phone_control", "open_app", "open_named_app", "open_app_screen", "open_webpage",
+    tools: ["phone_control", "do_in_app", "open_app", "open_named_app", "open_app_screen", "open_webpage",
       "uninstall_app", "update_app", "set_app_theme", "get_app_usage", "enable_usage_tracking",
       "analyze_camera", "look_at_screenshot", "capture_document", "scan_business_card",
       "translator_mode", "start_interpreter_mode", "stop_interpreter_mode", "run_shortcut",
@@ -169,7 +169,7 @@ const ASK_MANAGER = /\b(?:talk|speak|chat|connect|put me through|transfer|call|g
 const BACK_TO_ASSISTANT = /\b(?:back to (?:maya|the assistant|my assistant|you)|(?:let me |i want to |can i )?(?:talk|speak) to maya|bye,? manager|thanks?,? manager|thank you,? manager|done with (?:the |you,? )?manager|that'?s all,? manager)\b/i;
 const askedManager = (text) => ASK_MANAGER.test(String(text || ""));
 // The Manager's reach: the internet, any app, the phone, then every team's tools.
-const MANAGER_FIRST = ["web_search", "read_webpage", "open_named_app", "open_app_screen", "phone_control",
+const MANAGER_FIRST = ["do_in_app", "web_search", "read_webpage", "open_named_app", "open_app_screen", "phone_control",
   "show_search_results", "show_pictures", "hand_back_to_assistant"];
 
 // Thanks, greetings, goodbyes: no specialist, and never worth a model call.

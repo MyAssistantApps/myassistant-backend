@@ -35,6 +35,8 @@ registerBuiltins();
 require("./taskTools").registerTaskTools();
 // "Talk to your manager" in the live voice (agents/manager.js).
 require("./manager").registerManagerTools(require("../tools/registry"));
+// Tasks inside other apps, step by step on the screen (ai/screenTask.js).
+require("../ai/screenTask").registerScreenTaskTools(require("../tools/registry"));
 
 const MAX_TOOL_ROUNDS = 3; // guards against a tool-calling loop
 

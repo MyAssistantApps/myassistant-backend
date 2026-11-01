@@ -22,7 +22,7 @@ const LIVE_MAX = 40;
 const LIVE_ORDER = [
   "stay_silent", "end_conversation",
   // "Talk to your manager" (agents/manager.js): the switch, and the way back.
-  "hand_to_manager", "hand_back_to_assistant", "read_webpage",
+  "hand_to_manager", "hand_back_to_assistant", "read_webpage", "do_in_app",
   "web_search", "get_weather", "find_places_nearby", "get_current_location",
   "create_reminder", "list_reminders", "schedule_task", "set_alarm", "set_timer",
   "place_phone_call", "phone_calls", "send_agent_message", "send_whatsapp_message",

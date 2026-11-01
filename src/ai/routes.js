@@ -202,6 +202,23 @@ const VOICE_STYLE =
 
 // From this build the phone answers all of a response's tool calls together.
 const PARALLEL_TOOLS_BUILD = 154;
+/**
+ * THE NEXT STEP OF A TASK IN ANOTHER APP (ai/screenTask.js): the phone sends
+ * the goal, its screen and the steps so far; one step comes back.
+ */
+router.post("/screen/step", async (req, res) => {
+  const uid = userOf(req, res);
+  if (!uid) return;
+  const b = req.body || {};
+  try {
+    const step = await require("./screenTask").nextStep({ goal: b.goal, screen: b.screen, history: b.history });
+    console.log(`ai: screen step uid=${uid} ${step.action}${step.node != null ? " #" + step.node : ""}${step.sensitive ? " (needs yes)" : ""}`);
+    res.json(step);
+  } catch (e) {
+    res.status(e.status === 400 ? 400 : 502).json({ error: String(e.message || e).slice(0, 200) });
+  }
+});
+
 /** A short-lived key for the phone's own realtime voice session (Phase C). */
 router.post("/realtime/secret", async (req, res) => {
   const uid = userOf(req, res);

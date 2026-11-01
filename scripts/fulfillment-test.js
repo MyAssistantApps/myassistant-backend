@@ -467,6 +467,7 @@ test("one user's news history does not affect another's", () => {
 
 test("every tool named in a claim family actually exists", () => {
   const registry = require("../src/tools/registry");
+  require("../src/agents/runtime"); // registers the runtime's own tools (do_in_app, hand_to_manager)
   const { FAMILIES } = require("../src/agents/claimCheck");
   const missing = [];
   for (const f of FAMILIES) {
