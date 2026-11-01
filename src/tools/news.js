@@ -350,6 +350,18 @@ async function feed({ topic = "", count = 12, sort = "relevance" } = {}) {
       console.warn(`news: index failed, using RSS: ${String(e.message).slice(0, 120)}`);
     }
   }
+  // The News tabs from the newspapers' own feeds, with pictures, summaries
+  // and times (services/tools/newsFeeds.js) — Google News RSS has none of
+  // them, so its cards were bare headlines (owner, 2026-11-01).
+  try {
+    const papers = await require("../services/tools/newsFeeds").feed(topic, { count: n, storyId });
+    if (papers && papers.length >= 3) {
+      return { ok: true, topic: topic || "today", sort: sort === "recent" ? "recent" : "relevance",
+        items: papers, cached: false, fallback: "papers" };
+    }
+  } catch (e) {
+    console.warn(`news: papers failed, using RSS: ${String(e.message).slice(0, 120)}`);
+  }
   const rss = require("../services/tools/news");
   const q = queryFor(topic);
   const rows = await rss.getHeadlines({
