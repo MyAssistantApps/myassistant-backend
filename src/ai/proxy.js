@@ -57,9 +57,9 @@ const NOTE_ALIAS = /<\s*(?:prompt|style|voice|delivery|manner|mood|note)\s*:\s*(
 // HTML-style notes (2026-10-31, on screen as "</tone><informative>"):
 // "<tone>informative</tone>" is the tone note; a closing tag never shows.
 const TONE_XML = /<\s*tone\s*>\s*([^<>\n]{1,80}?)\s*<\s*\/\s*tone\s*>/gi;
-// "</tone:>" too (2026-11-01, seen at the end of a reply in review), and an
-// empty "<tone:>".
-const CLOSING_TAG = /<\s*\/\s*[A-Za-z][A-Za-z _,'&-]{0,58}\s*:?\s*>|<\s*tone\s*:\s*>/gi;
+// ANY closing tag, whatever is inside it: "</tone:>" and "</tone: warm and
+// reassuring>" both ended replies on screen (2026-11-01); and an empty "<tone:>".
+const CLOSING_TAG = /<\s*\/[^<>\n]{0,100}>|<\s*tone\s*:\s*>/gi;
 function cleanText(text, atStart = true) {
   let out = String(text || "");
   out = out.replace(TONE_XML, (m, t) => (atStart ? `<tone: ${t.trim()}>` : "")).replace(CLOSING_TAG, "");
@@ -69,6 +69,10 @@ function cleanText(text, atStart = true) {
     out = out.replace(/^(\s*)<\s*(?!tone\s*:)([A-Za-z][A-Za-z ,'&-]{2,58}?)\s*>/i,
       (m, sp, inner) => (/\s/.test(inner) || /^(warm|calm|bright|gentle|sincere|cheerful|firm|playful|serious)/i.test(inner) ? `${sp}<tone: ${inner.trim()}>` : sp));
   }
+  // A tone note anywhere but the very start is never shown (the model put
+  // "<tone: warm and reassuring>" at the END of a reply, 2026-11-01).
+  out = out.replace(/<\s*tone\s*:[^<>\n]{0,100}>/gi,
+    (m, off, all) => (atStart && all.slice(0, off).trim() === "" ? m : ""));
   return out.replace(STRAY_TAG, "").replace(/[ \t]{2,}/g, " ");
 }
 /** The same for a reply that streams: a tag split across pieces is held until it closes. */
