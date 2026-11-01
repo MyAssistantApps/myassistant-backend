@@ -691,6 +691,10 @@ require("./db")
 
     const server = app.listen(port, () => {
       console.log(`MYASSISTANT backend on :${port} (postgres ready)`);
+      // Every voice's sample and opening, made ahead so no tap waits.
+      if (require("./services/ai/openai").ready() && process.env.NODE_ENV !== "test") {
+        setTimeout(() => require("./ai/liveVoices").warmAll().catch(() => {}), 5000).unref();
+      }
       // A key defined TWICE in .env silently keeps the LAST value, which is
       // a brutal way to lose an afternoon: the file looks right at a glance
       // but the app runs the other value. Call it out loudly at boot.

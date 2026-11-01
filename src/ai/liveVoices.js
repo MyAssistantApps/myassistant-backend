@@ -90,4 +90,26 @@ async function greeting(id, line) {
   return kept(path.join(DIR, `greet-tts-${key}.wav`), () => speakWav(v, text));
 }
 
-module.exports = { CATALOG, CLASSIC_VOICES, offered, byId, sample, greeting, sampleLine };
+/**
+ * EVERY SAMPLE AND OPENING MADE AHEAD (owner, 2026-11-01: "for new voices
+ * it's taking too much time"). At boot, in the background, each voice's
+ * sample and its "Hello Sir." / "Hello Madam." are made once (about 2 s
+ * each, ~$0.0005 each) and kept on disk, so no tap in the picker or on the
+ * orb ever waits for speech to be made. What is already on disk is skipped.
+ */
+const OPENING_LINES = ["Hello Sir.", "Hello Madam."];
+async function warmAll() {
+  let made = 0, failed = 0;
+  for (const v of CATALOG) {
+    for (const job of [() => sample(v.id), ...OPENING_LINES.map((l) => () => greeting(v.id, l))]) {
+      try { await job(); made++; } catch (e) {
+        failed++;
+        console.warn(`voices: warm ${v.id} failed: ${String(e.message || e).slice(0, 120)}`);
+      }
+    }
+  }
+  console.log(`voices: ${made} samples and openings ready, ${failed} failed`);
+  return { made, failed };
+}
+
+module.exports = { CATALOG, CLASSIC_VOICES, OPENING_LINES, offered, byId, sample, greeting, sampleLine, warmAll };
