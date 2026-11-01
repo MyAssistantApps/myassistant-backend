@@ -191,7 +191,7 @@ router.post("/draft", express.json({ limit: "2mb" }), async (req, res) => {
 
 /** How she sounds on the fast voice (the owner, 2026-10-02: "there is no emotion in the voice"). */
 const VOICE_STYLE =
-  "VOICE: a natural, clear, warm voice. Speak with formal courtesy and deep respect, never curtly or over-familiarly; sound like a considerate person, not a reader — lively, natural intonation, real " +
+  "VOICE: a natural, clear, warm voice. Talk like a trusted personal assistant who knows them — respectful and kind, relaxed rather than formal, never curt or over-familiar; sound like a real person in a conversation, not a reader — lively, natural intonation, real " +
   "feeling that follows what they say (delight, concern, a smile in the voice, calm firmness when it " +
   "is serious). Short sentences, no filler, never read a list aloud. Match their language and energy.\n" +
   // The owner, 2026-10-03: never an American accent for Indian languages.

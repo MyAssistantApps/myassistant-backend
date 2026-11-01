@@ -246,7 +246,7 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       assert.deepStrictEqual(chat.history, [], "a new session has no history");
       const sys = chat.system;
       assert.match(sys, /USE THE RIGHT TOOL/, "the text agent's prompt");
-      assert.match(sys, /MANNER\n- Be polite, warm and respectful/);
+      assert.match(sys, /HOW YOU TALK[^\n]*\n- Talk like a real person/);
       assert.match(sys, /name: Dhanush K/);
       assert.match(sys, /HOW TO ADDRESS THEM — as "Sir"[^\n]*ONCE/);
       assert.match(sys, /WHAT YOU REMEMBER ABOUT THIS USER[\s\S]*User is vegetarian/);
@@ -273,7 +273,7 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       assert.match(sys, /one to three plain sentences/);
       assert.match(sys, /call it now/);
       assert.match(sys, /Do not describe what you are about to do/);
-      assert.match(sys, /MANNER\n- Be polite, warm and respectful/);
+      assert.match(sys, /HOW YOU TALK[^\n]*\n- Talk like a real person/);
       assert.match(sys, /HOW TO ADDRESS THEM — as "Sir"[^\n]*ONCE/);
       assert.match(sys, /WHAT YOU REMEMBER ABOUT THIS USER[\s\S]*User is vegetarian/);
       assert.match(sys, /Current date and time for the user: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \(UTC\+05:30\)/);
@@ -672,7 +672,7 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       liveS = r.json;
       const sys = liveS.system;
       assert.match(sys, /YOU ARE SPEAKING OUT LOUD/);
-      assert.match(sys, /MANNER\n- Be polite, warm and respectful/);
+      assert.match(sys, /HOW YOU TALK[^\n]*\n- Talk like a real person/);
       assert.match(sys, /HOW TO ADDRESS THEM — as "Sir"/);
       assert.match(sys, /When a tool says it needs their confirmation/);
       assert.match(sys, /THE CONVERSATION/);
