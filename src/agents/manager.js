@@ -154,6 +154,24 @@ const SPECIALISTS = {
 };
 const NAMES = Object.keys(SPECIALISTS);
 
+/**
+ * THE MANAGER, ON REQUEST (owner, 2026-11-01: "if user says I want to talk
+ * to your manager agent the manager agent should pop up ... access to the
+ * internet and much more tools ... open any app I asked for and do task").
+ * Everything else stays Maya's and invisible; only an explicit ask brings
+ * the Manager, who keeps the conversation for follow-ups until they want
+ * the assistant back (or MANAGER_MS of quiet). "Your" or "agent" is
+ * required: "call the manager at the bank" is a phone call to a person.
+ */
+const MANAGER_MS = 5 * 60_000;
+const MANAGER_CAP = 100; // OpenAI takes up to 128 functions
+const ASK_MANAGER = /\b(?:talk|speak|chat|connect|put me through|transfer|call|get|bring|switch|hand|pass|want|need)\b[^.?!]{0,30}?(?:\byour\s+(?:manager|boss|supervisor)\b|\bmanager\s+agent\b)/i;
+const BACK_TO_ASSISTANT = /\b(?:back to (?:maya|the assistant|my assistant|you)|(?:let me |i want to |can i )?(?:talk|speak) to maya|bye,? manager|thanks?,? manager|thank you,? manager|done with (?:the |you,? )?manager|that'?s all,? manager)\b/i;
+const askedManager = (text) => ASK_MANAGER.test(String(text || ""));
+// The Manager's reach: the internet, any app, the phone, then every team's tools.
+const MANAGER_FIRST = ["web_search", "read_webpage", "open_named_app", "open_app_screen", "phone_control",
+  "show_search_results", "show_pictures", "hand_back_to_assistant"];
+
 // Thanks, greetings, goodbyes: no specialist, and never worth a model call.
 const SMALL_TALK = /^\s*(thanks?|thank you|thanks a lot|ok(ay)?|cool|great|nice|awesome|good (morning|afternoon|evening|night)|hi|hello|hey|bye|goodbye|see you)\b[\w\s.,!?']{0,30}$/i;
 
@@ -224,6 +242,19 @@ async function decide({ text, owner = true, skip = false, session = null, histor
   };
   if (!enabled() || skip || !owner || !String(text || "").trim()) return { agents: [], via: "skip", ms: 0 };
 
+  // The Manager, asked for or still holding the conversation.
+  const held = session && session.persona && session.persona.id === "manager" &&
+    Date.now() - session.persona.at < MANAGER_MS;
+  if (held && BACK_TO_ASSISTANT.test(text) && !askedManager(text)) {
+    session.persona = null;
+    return { agents: [], via: "handback", handback: true, ms: Date.now() - t0 };
+  }
+  if (askedManager(text) || held) {
+    if (session) session.persona = { id: "manager", at: Date.now() };
+    return { agents: NAMES.slice(), via: "manager", addressed: "manager", ms: Date.now() - t0 };
+  }
+  if (session && session.persona) session.persona = null;
+
   const prev = session && session.manager && Date.now() - session.manager.at < CARRY_MS
     ? session.manager.agents : null;
   if (prev && FOLLOW_UP.test(text)) return done(prev, "carry");
@@ -256,6 +287,12 @@ async function decide({ text, owner = true, skip = false, session = null, histor
 function toolsFor(plan, { base = [], must = [], live = null, cap = 40 } = {}) {
   if (!plan || !plan.agents.length) return base;
   const has = (n) => !live || live.has(n);
+  if (plan.addressed === "manager") {
+    // Every team's whole kit, the internet and apps first.
+    const all = NAMES.flatMap((id) => SPECIALISTS[id].tools);
+    const out = [...new Set([...must, ...ESSENTIAL, ...MANAGER_FIRST, ...base, ...all])].filter(has);
+    return out.slice(0, Math.max(cap, MANAGER_CAP));
+  }
   const packs = plan.agents.map((id) => SPECIALISTS[id].tools.filter(has));
   const picked = new Set(base);
   // The toolkits share the room fairly: first what the word scorer ALSO
@@ -276,7 +313,12 @@ function toolsFor(plan, { base = [], must = [], live = null, cap = 40 } = {}) {
  * request — no hand-off, no team. Nothing for a single kind of work (its
  * tools are already offered).
  */
-function briefFor(plan) {
+function briefFor(plan, { assistant = "the assistant" } = {}) {
+  if (plan && plan.addressed === "manager") return managerBrief(assistant, plan.first);
+  if (plan && plan.handback) {
+    return `They are back with you from your Manager. You are ${assistant} again: say one short, warm line ` +
+      "that you're back, then carry on with whatever they asked.";
+  }
   if (!plan || plan.agents.length < 2) return "";
   const lines = plan.agents.map((id) => `- ${SPECIALISTS[id].role}`);
   lines.push("- This request has several parts: do each part yourself with its own tools, then give " +
@@ -284,13 +326,72 @@ function briefFor(plan) {
   return "This request needs several kinds of work:\n" + lines.join("\n");
 }
 
+/** THIS TURN's note while the Manager has the conversation. */
+function managerBrief(assistant) {
+  return `[THE MANAGER] The owner asked to talk to your manager. For this conversation you ARE the Manager — ` +
+    `the senior assistant above ${assistant}, who leads her team and can do everything she can, and more. ` +
+    `Speak as the Manager, never as ${assistant}: calm, confident, warm and to the point. Start your first reply ` +
+    `with "Manager here." and not again after that. You have every tool: the internet (search, and reading a page ` +
+    `in full), opening any app on the phone, the phone's settings, calls, messages, reminders, calendar, documents, ` +
+    `shopping and the rest. Use them to actually get the job done, several in a row when it takes several steps, ` +
+    `and tell them plainly what you did. When the job is done or they ask for ${assistant}, say one short line ` +
+    `handing them back to ${assistant}.`;
+}
+
 /**
- * What the phone is told about agents: nothing. Maya is the only one the
- * owner sees (owner, 2026-11-01). The shape stays so installed builds,
- * which draw the agent strip from it, simply show none.
+ * What the phone is told about agents: nothing, except while the Manager
+ * has the conversation (it shows the Manager panel) and on the turn that
+ * hands back. The shape stays for installed builds.
  */
-function controlFor() {
+function controlFor(plan = null) {
+  if (plan && plan.addressed === "manager") {
+    return { via: "manager", agents: [], toolAgent: {}, addressed: { id: "manager", label: "Manager" } };
+  }
+  if (plan && plan.handback) return { via: "handback", agents: [], toolAgent: {} };
   return { via: "maya", agents: [], toolAgent: {} };
 }
 
-module.exports = { decide, toolsFor, briefFor, controlFor, byRules, SPECIALISTS, ESSENTIAL, FOLLOW_UP, SMALL_TALK, enabled };
+/**
+ * The live voice fixes its tools when the session opens, so the switch is
+ * a tool there: the model calls hand_to_manager when they ask for the
+ * Manager, and hand_back_to_assistant when the Manager is done. The phone
+ * shows and hides the Manager panel on these calls.
+ */
+function registerManagerTools(registry) {
+  if (registry.get("hand_to_manager")) return; // loaded twice (tests reload the runtime)
+  registry.register({
+    name: "hand_to_manager",
+    description:
+      "ONLY when the owner asks to talk to YOUR manager ('I want to talk to your manager', 'connect me to " +
+      "your boss', 'manager agent'). Then speak as the Manager — start with 'Manager here.' — until the job " +
+      "is done. NEVER for calling or messaging a person: 'call the manager at the bank' is place_phone_call.",
+    risk: "low",
+    effects: ["read"],
+    inputSchema: { type: "object", properties: {}, required: [] },
+    async execute() {
+      return { ok: true, agent: "manager", label: "Manager",
+        result: "You are the Manager now: speak as the Manager, use every tool you need, and hand back when done." };
+    },
+  });
+  registry.register({
+    name: "hand_back_to_assistant",
+    description: "The Manager is done, or the owner asked for the assistant back: hand the conversation back.",
+    risk: "low",
+    effects: ["read"],
+    inputSchema: { type: "object", properties: {}, required: [] },
+    async execute() {
+      return { ok: true, agent: "assistant", result: "Handed back: you are the assistant again." };
+    },
+  });
+}
+
+/** For the live prompt: how the switch works there. */
+function managerRule(assistant = "the assistant") {
+  return `YOUR MANAGER: you are ${assistant}. Never mention agents or a team — except this: when the owner asks ` +
+    `to talk to your manager, call hand_to_manager and from then on speak as the Manager ("Manager here."), ` +
+    `a calm, senior, capable voice who gets the job done with every tool you have (search the internet, open any ` +
+    `app, phone settings, messages, reminders and the rest). When the job is done or they ask for ${assistant}, ` +
+    `call hand_back_to_assistant and say one short line as ${assistant} again.`;
+}
+
+module.exports = { decide, toolsFor, briefFor, controlFor, registerManagerTools, managerRule, askedManager, ASK_MANAGER, BACK_TO_ASSISTANT, MANAGER_CAP, byRules, SPECIALISTS, ESSENTIAL, FOLLOW_UP, SMALL_TALK, enabled };

@@ -33,6 +33,8 @@ registerBuiltins();
 // path and not the other, which is the exact bug the comment in server.js
 // records about registerBuiltins itself.
 require("./taskTools").registerTaskTools();
+// "Talk to your manager" in the live voice (agents/manager.js).
+require("./manager").registerManagerTools(require("../tools/registry"));
 
 const MAX_TOOL_ROUNDS = 3; // guards against a tool-calling loop
 
