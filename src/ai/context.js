@@ -516,16 +516,7 @@ async function prepare(uid, body) {
   let decls;
   // Who has control of this turn, for the phone to show (agents/manager.js).
   let plan = null;
-  if (mode === "live" && body.transport === "gpt-live") {
-    // GPT-Live delegates to a Responses model, which takes the whole
-    // gated catalogue: every tool this user may use, priority order first.
-    const live = require("./liveTools");
-    const all = registry.list().map((t) => t.name);
-    const names = [...new Set([...live.liveNames(registry.list(), { must }), ...all])];
-    decls = live.capDeclarations(
-      registry.declarations({ userId: uid, deviceCaps: s.device.caps || null, only: names }), names,
-      require("./gptLive").MAX_TOOLS);
-  } else if (mode === "live") {
+  if (mode === "live") {
     // Live fixes its tools when the session opens: one set, at most 32.
     const live = require("./liveTools");
     const names = live.liveNames(registry.list(), { must });

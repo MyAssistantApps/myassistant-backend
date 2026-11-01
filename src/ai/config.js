@@ -1,35 +1,18 @@
 /**
- * GET /ai/config — what the app needs to run its own models (Firebase AI
- * Logic): which cloud, fast, speech and live models, which voice and
- * speech language, whether Gemini Nano may be used on the phone, and the
- * words its router uses to decide between Nano, the cloud with tools,
- * the cloud with Google Search, and a shortcut.
+ * GET /ai/config — how the app runs its assistant: the models our server
+ * answers with (ai/proxy.js, OpenAI behind it), the voice for spoken
+ * replies and for the realtime conversation, the speech language, and the
+ * words the app's router uses to pick a route.
  *
- * Models come from env, defaulting to what the server itself already
- * runs; nothing here is secret (the app never sees an API key — Firebase
- * AI Logic holds it, behind App Check and the user's Firebase sign-in).
+ * ONE PATH (2026-11-01). It used to build a Gemini config for Firebase AI
+ * Logic and then overwrite most of it with OpenAI's names, with build
+ * gates for apps older than 146. Production runs OpenAI and only builds
+ * 175+ reach it, so only that path is left; scripts/production-config-test.js
+ * snapshots exactly what the phone receives.
+ *
+ * Nothing here is secret: the app never sees an API key.
  */
 const { envModel } = require("../services/ai/router");
-
-// Gemini's prebuilt voices (the names SpeechConfig accepts). A stored
-// voice outside this list is ignored rather than handed to the phone.
-const VOICES = new Set([
-  "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
-  "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
-  "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
-  "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
-  "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
-]);
-
-// Voices from Gemini TTS's extended voice library, which only the
-// expressive speech model (3.8 Flash TTS) takes; the Live API does not.
-// Fola is the assistant's own voice (the owner's choice, 2026-09-29).
-const LIBRARY_VOICES = new Set(["Fola"]);
-
-// From this build the phone speaks with the expressive model: it reads a
-// WAV reply, acts on the tone note and vocal tags the model writes, and
-// strips them from what is shown (context.js adds the guide when asked).
-const EXPRESSIVE_BUILD = 126;
 
 // The languages the assistant speaks (agents/language.js), as BCP-47 for
 // the speech engine. Tulu is written in Kannada script; Konkani is left
@@ -63,13 +46,6 @@ const FRESH_WORDS = [
   "stock", "share price", "gold rate", "petrol price",
 ];
 
-// The phone's conversation model. Not the server's GEMINI_MODEL: measured
-// through AI Logic on 2026-09-29 with the real voice prompt and tools, the
-// Flash models took 10–110 s and threw 5xx (3.5 Flash never answered in
-// 110 s; 3 Flash 9–63 s), the Flash-Lite ones 2–4 s. 3.5 Flash-Lite at low
-// thinking calls tools reliably (at minimal it claimed a reminder it never
-// set). The fallback answers when the first fails or stalls.
-const cloudModel = () => envModel("AI_CLOUD_MODEL", "gemini-3.5-flash-lite");
 // Google Search grounding through AI Logic (the app's "search" route). Off
 // unless AI_GROUNDING=on since 2026-09-29: the project's grounding quota
 // ran out (429 on every fresh question) while the server's own web_search
@@ -78,8 +54,6 @@ const cloudModel = () => envModel("AI_CLOUD_MODEL", "gemini-3.5-flash-lite");
 // what switches the route off.
 const NO_GROUNDING = "__grounding_off__";
 const groundingOn = () => /^(on|1|true|yes)$/i.test(String(process.env.AI_GROUNDING || "off").trim());
-const cloudFastModel = () => envModel("AI_CLOUD_FAST_MODEL", "gemini-flash-lite-latest");
-const cloudFallbackModel = () => envModel("AI_CLOUD_FALLBACK_MODEL", "gemini-flash-lite-latest");
 // How hard the conversation model thinks before answering (minimal, low,
 // medium, high). Gemini 3's own default is high, far too slow to talk to.
 const THINKING = new Set(["minimal", "low", "medium", "high"]);
@@ -87,55 +61,8 @@ const thinkingLevel = () => {
   const v = envModel("AI_CLOUD_THINKING", "low").toLowerCase();
   return THINKING.has(v) ? v : "low";
 };
-const ttsModel = () =>
-  envModel("AI_TTS_MODEL", envModel("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts"));
-const expressiveTtsModel = () => envModel("AI_TTS_EXPRESSIVE_MODEL", "gemini-3.8-flash-tts");
 // The delivery a spoken reply gets when its model gave no tone of its own.
 const ttsStyle = () => envModel("AI_TTS_STYLE", "warm, friendly and natural");
-// The old Live socket's model (models.live / liveVoice): no app reads them
-// since 2026-09-29; still sent, unchanged, so nothing that parses them breaks.
-const liveModel = () =>
-  envModel("AI_LIVE_MODEL", envModel("GEMINI_LIVE_MODEL", "gemini-live-2.5-flash-preview"));
-
-// GEMINI LIVE ON THE PHONE (2026-09-30): from build 135 (or an app that
-// says it can, ?live=1) the conversation may run through the Live API —
-// the phone streams the mic and plays Live's own voice. The `live` block
-// is how it is set up: model, prebuilt voice, the voice-activity settings
-// (how long a pause ends their turn, how much audio before speech is kept,
-// how readily speech starts and ends a turn) and how long an idle session
-// stays open. AI_LIVE=off turns it off (the app keeps the cascade);
-// AI_LIVE_MODEL, AI_LIVE_VOICE and AI_LIVE_SILENCE_MS override.
-const LIVE_BUILD = 135;
-// From this build the phone takes OpenAI's names and our server's model port.
-const OPENAI_BUILD = 146;
-// From this build the phone can hold a GPT-Live conversation over WebRTC.
-// 163 since 2026-10-06: the server builds each user's agent from the
-// instruction and tools the phone sends, and plays a recorded opening;
-// builds 154-162 send neither and would get an agent with no app tools.
-// 164 since 2026-10-06 (production): 163 sent tool results with a
-// delegation_id GPT-Live refuses, so every tool turn went silent after
-// "one moment". 163 stays on Realtime, which answers.
-const GPT_LIVE_BUILD = 164;
-// Realtime WebSocket is the cost-aware default: app-open prewarming costs
-// no session duration by itself. GPT-Live remains an explicit opt-in because
-// its connected sessions are billed by elapsed time, including silence.
-const gptLiveOn = () => !/^(off|0|false|no)$/i.test(String(process.env.GPT_LIVE || "off").trim());
-// How long a connected GPT-Live session waits unused, microphone closed,
-// before it is closed (GPT_LIVE_IDLE_SEC, 15-900, default 60): it bills
-// $0.05 a minute while nobody speaks (an unused warm-up ~$0.05). Creating
-// one pre-bills 15 s. 60 since 2026-10-06 (the owner: "much more faster"):
-// at 30 a look round Home outlasted it and the tap connected from nothing.
-function gptLiveIdleSec() {
-  const n = Math.round(Number(process.env.GPT_LIVE_IDLE_SEC));
-  return Number.isFinite(n) && n >= 15 && n <= 900 ? n : 60;
-}
-// Connect GPT-Live when the app comes to the front, so the orb tap is
-// answered at once instead of after ~5 s of setup (GPT_LIVE_PREWARM=off
-// connects only at the tap). Costs about $0.025 per unused warm-up.
-const gptLivePrewarm = () => !/^(off|0|false|no)$/i.test(String(process.env.GPT_LIVE_PREWARM || "on").trim());
-// Sulafat first (the client, 2026-09-30: "best voice as default" — the
-// warm one); the rest as before.
-const LIVE_VOICES = ["Sulafat", "Callirrhoe", "Achernar", "Aoede", "Vindemiatrix", "Kore", "Charon", "Achird"];
 const liveOn = () => !/^(off|0|false|no)$/i.test(String(process.env.AI_LIVE || "on").trim());
 function liveSilenceMs() {
   const n = Math.round(Number(process.env.AI_LIVE_SILENCE_MS));
@@ -149,31 +76,6 @@ function liveHangoverMs() {
   return Number.isFinite(n) && n >= 200 && n <= 3000 ? n : 700;
 }
 /**
- * WHICH LIVE MODEL A GIVEN USER GETS (the owner, 2026-10-01: "set the
- * higher live model for Hariraj for now, and for other users the current
- * one"). AI_LIVE_MODEL is everyone's; AI_LIVE_MODEL_USERS pins people:
- *   AI_LIVE_MODEL_USERS="56:gemini-3.8-live,54:gemini-3.8-live"
- * The phone falls back to the cascade (models.cloudFast + TTS) by itself
- * when Live fails, whatever the model.
- */
-function liveModelFor(userId) {
-  const base = envModel("AI_LIVE_MODEL", "gemini-3.8-live");
-  const uid = Number(userId);
-  if (!(uid > 0)) return base;
-  const pins = String(process.env.AI_LIVE_MODEL_USERS || "")
-    .split(",").map((p) => p.trim()).filter(Boolean);
-  for (const p of pins) {
-    const i = p.indexOf(":");
-    if (i <= 0) continue;
-    if (Number(p.slice(0, i)) === uid) {
-      const m = p.slice(i + 1).trim();
-      if (/^[a-z0-9.-]+$/i.test(m)) return m;
-    }
-  }
-  return base;
-}
-
-/**
  * HOW THE CLASSIC (non-Live) VOICE HEARS. "device" = the phone's own
  * recogniser (fast captions, one locale, "Kannada" heard as "Canada");
  * "record" = the phone records the turn and Gemini transcribes it in
@@ -185,59 +87,36 @@ function cloudSttMode() {
   return process.env.AI_CLOUD_STT === "device" ? "device" : "record";
 }
 
-function liveBlock(userId) {
-  const v = envModel("AI_LIVE_VOICE", "");
+/**
+ * The realtime conversation (OpenAI Realtime, opened by the phone with a
+ * key from POST /ai/realtime/secret): model, voice, and how it hears —
+ * how long a pause ends their turn, how much audio before speech is kept,
+ * how readily speech starts and ends a turn, how long an idle session
+ * stays open. AI_LIVE=off turns it off (the app keeps the cascade).
+ */
+function liveBlock(userId, profile = null) {
+  const proxy = require("./proxy");
   return {
     on: liveOn(),
-    model: liveModelFor(userId),
-    // Live takes prebuilt voices only (never the library's Fola).
-    voice: VOICES.has(v) ? v : "Sulafat",
+    model: proxy.servedModels().live,
+    voice: proxy.voiceOf(profile),
     silenceMs: liveSilenceMs(),
     prefixMs: 100,
     // LOW since 2026-10-01 (client: "other persons' voice should not
-    // interfere"): the model stops opening a turn on faint background
-    // speech. End stays high, so the user's own pause still ends a turn.
+    // interfere"): faint background speech does not open a turn. End
+    // stays high, so the user's own pause still ends one.
     startSensitivity: "low",
     endSensitivity: "high",
-      idleCloseSec: 900, // keep the prewarmed live session ready across app use
-    // Live's affective dialog: her tone follows the feeling in their voice
-    // and her words (the client, 2026-09-30). OFF: the Firebase Live
-    // endpoint refused the setup with it on (2026-09-30, "closed before
-    // setup"); the feeling comes from LIVE_RULES instead. Flip when the
-    // endpoint takes it — the app sends whatever is here.
+    idleCloseSec: 900, // keep the prewarmed session ready across app use
     affectiveDialog: false,
     // The phone's own end-of-speech hangover and the half-sentence guard
-    // (2026-10-01, the client's cut-off think-pauses). Served so either
+    // (2026-10-01, the client's cut-off think-pauses), served so either
     // can be taken back without a release: AI_LIVE_VAD_HANGOVER_MS,
     // AI_LIVE_FRAGMENT_GUARD=off.
     vadHangoverMs: liveHangoverMs(),
     fragmentGuard: process.env.AI_LIVE_FRAGMENT_GUARD !== "off",
-    voices: LIVE_VOICES.slice(),
+    voices: proxy.REALTIME_VOICES.slice(),
   };
-}
-/** Does this app get the live block: build 135+, or it says it can. */
-function liveCapable(build, flag) {
-  const b = Number(build);
-  return (Number.isFinite(b) && b >= LIVE_BUILD) || flag === true || /^(1|true|yes|on)$/i.test(String(flag || ""));
-}
-
-/**
- * The voice a user hears: theirs, their avatar's, or the deployment's. A
- * library voice (Fola) only reaches a phone that speaks with the
- * expressive model; an older one keeps a prebuilt voice.
- */
-function voiceFor(profile, { expressive = false } = {}) {
-  const ok = (v) => Boolean(v) && (VOICES.has(v) || (expressive && LIBRARY_VOICES.has(v)) ||
-    require("./liveVoices").has(v));
-  const chosen = profile && profile.assistant && profile.assistant.voice;
-  if (ok(chosen)) return chosen;
-  try {
-    const face = require("../avatar/heygen").voiceForFace(profile && profile.assistant && profile.assistant.avatar_id);
-    if (ok(face)) return face;
-  } catch (_) {}
-  const env = envModel("AI_TTS_VOICE", expressive ? "Fola" : "Kore");
-  if (ok(env)) return env;
-  return expressive ? "Fola" : "Kore";
 }
 
 /** BCP-47 for a stored preferred language ("Kannada", "ಕನ್ನಡ", "kn"…). */
@@ -253,91 +132,40 @@ function speechLanguage(preferred) {
   return BCP47[name] || "en-IN";
 }
 
-async function forUser(userId, { build, live } = {}) {
+async function forUser(userId) {
   const uid = Number(userId);
   const profile = await require("../users/context").getProfile(uid).catch(() => null);
   const registry = require("../tools/registry");
+  const proxy = require("./proxy");
   const offered = registry.declarations({ userId: uid });
   const toolWords = require("../tools/relevance").triggerWords(offered, TOOL_VERBS);
   // Names as match.js keys them (the app normalises what was said the
-  // same way). A build that predates shortcuts is not given them.
-  let shortcutNames = [];
-  const b = Number(build);
-  if (process.env.SHORTCUTS !== "off" && !(Number.isFinite(b) && b > 0 && b < 120)) {
-    shortcutNames = [...new Set(await require("../shortcuts/match").keysFor(uid).catch(() => []))];
-  }
-  const expressive = Number.isFinite(b) && b >= EXPRESSIVE_BUILD;
-  const voice = voiceFor(profile, { expressive });
+  // same way).
+  const shortcutNames = process.env.SHORTCUTS === "off" ? []
+    : [...new Set(await require("../shortcuts/match").keysFor(uid).catch(() => []))];
+  const served = proxy.servedModels();
+  const voice = proxy.voiceOf(profile);
   const out = {
     models: {
-      cloud: cloudModel(),
-      cloudFast: cloudFastModel(),
-      cloudFallback: cloudFallbackModel(),
+      cloud: served.cloud,
+      cloudFast: served.cloudFast,
+      cloudFallback: served.cloudFallback,
       thinking: thinkingLevel(),
-      tts: expressive ? expressiveTtsModel() : ttsModel(),
+      tts: served.tts,
       ttsVoice: voice,
       ttsStyle: ttsStyle(),
       ttsLanguage: speechLanguage(profile && profile.user && profile.user.preferred_language),
-      live: liveModel(),
-      // The Live API takes prebuilt voices only.
-      liveVoice: (() => {
-        const v = envModel("AI_LIVE_VOICE", "");
-        if (v && VOICES.has(v)) return v;
-        return VOICES.has(voice) ? voice : "Kore";
-      })(),
     },
     routing: { toolWords, freshWords: groundingOn() ? FRESH_WORDS.slice() : [NO_GROUNDING], shortcutNames },
     limits: { maxToolRounds: 6 },
+    live: liveBlock(uid, profile),
+    listen: { cloudStt: cloudSttMode() },
   };
-  if (liveCapable(build, live)) out.live = liveBlock(uid);
-  out.listen = { cloudStt: cloudSttMode() };
-  // OPENAI IS THE PROVIDER (2026-10-02): the phone talks to our server
-  // (ai/proxy.js) instead of Firebase AI Logic; the names it sends are
-  // OpenAI's, the voice the nearest OpenAI one. The fast voice keeps its
-  // Gemini name until the realtime port ships (Phase C), so the app's Live
-  // path is unchanged until then.
-  // Only an app that knows the server port (build 146+) is told so: an
-  // older build would hand these names to Firebase AI Logic and break.
-  const openai = require("../services/ai/openai");
-  if (openai.ready() && process.env.AI_PROVIDER !== "gemini" && Number.isFinite(b) && b >= OPENAI_BUILD) {
-    const proxy = require("./proxy");
-    const served = proxy.servedModels();
-    out.provider = "openai";
-    out.models = {
-      ...out.models,
-      cloud: served.cloud, cloudFast: served.cloudFast, cloudFallback: served.cloudFallback,
-      tts: served.tts, ttsVoice: proxy.voiceOf(profile),
-    };
-    // The fast voice runs on OpenAI Realtime (Phase C): the phone opens the
-    // socket itself with a key from POST /ai/realtime/secret.
-    if (out.live) out.live = { ...out.live, model: served.live, voice: proxy.voiceOf(profile), voices: proxy.REALTIME_VOICES.slice() };
-    // GPT-LIVE (the owner's agent, 2026-10-02): 154+ can opt in over WebRTC
-    // through POST /ai/live/session. Keep it explicit: duration billing makes
-    // it a poor default for a socket prewarmed on every app open.
-    if (out.live && gptLiveOn() && b >= GPT_LIVE_BUILD) {
-      // The natural gpt-live-1 voices; the phone sends its pick and the
-      // server validates it again (ai/gptLive.js). A connected session is
-      // billed per second, silence included, so an idle one closes soon.
-      const gptLive = require("./gptLive");
-      out.live = {
-        ...out.live, transport: "gpt-live", model: gptLive.MODEL,
-        // Their saved voice, or the offered one of its gender when it was
-        // retired: a phone holding "tempo" falls back to THIS, not to gleam.
-        voice: gptLive.voiceFor(profile && profile.assistant && profile.assistant.voice),
-        voices: gptLive.NATURAL_VOICES.slice(),
-        idleCloseSec: gptLiveIdleSec(),
-        prewarm: gptLivePrewarm(),
-      };
-    }
-  } else {
-    out.provider = "gemini";
-  }
+  out.provider = "openai";
   return out;
 }
 
 module.exports = {
-  forUser, voiceFor, speechLanguage, cloudModel, cloudFastModel, cloudFallbackModel,
-  thinkingLevel, ttsModel, expressiveTtsModel, ttsStyle, liveModel, liveModelFor, cloudSttMode,
-  liveBlock, liveCapable, liveOn, gptLiveOn, LIVE_BUILD, OPENAI_BUILD, LIVE_VOICES,
-  VOICES, LIBRARY_VOICES, EXPRESSIVE_BUILD, TOOL_VERBS, FRESH_WORDS, NO_GROUNDING, groundingOn,
+  forUser, speechLanguage, thinkingLevel, ttsStyle, cloudSttMode, liveBlock, liveOn,
+  TOOL_VERBS, FRESH_WORDS, NO_GROUNDING, groundingOn,
 };

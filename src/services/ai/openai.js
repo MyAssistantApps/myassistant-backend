@@ -607,23 +607,6 @@ async function realtimeClientSecret({ voice, instructions = "", tools = [], mode
 
 // ---------------------------------------------------------------- GPT-Live
 
-/**
- * Starts a GPT-Live conversation for the phone's WebRTC offer. The key
- * stays here: GPT-Live has no client secret, the server creates the
- * session and hands back OpenAI's SDP answer. `session` is built per user
- * by ai/gptLive.js (voice, opening, delegated model and tools).
- * Returns { session: { id }, transport: { type, sdp } } as OpenAI sent it.
- */
-async function liveSession({ sdp, session, user = "" } = {}) {
-  if (typeof sdp !== "string" || !sdp.trim()) throw new OpenAIError("gpt-live: an SDP offer is required", 400, "");
-  if (!session || typeof session !== "object") throw new OpenAIError("gpt-live: a session config is required", 400, "");
-  return call("/live/sessions", {
-    body: { session, transport: { type: "webrtc", sdp } },
-    ...(user ? { headers: { "OpenAI-Safety-Identifier": safetyId(user) } } : {}),
-    timeoutMs: 20_000,
-  });
-}
-
 /** One person to OpenAI's abuse checks, never their id itself. */
 function safetyId(user) {
   return require("crypto").createHash("sha256").update(String(user)).digest("hex").slice(0, 32);
@@ -703,7 +686,7 @@ const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); 
 
 module.exports = {
   ready, key, models, VOICES, OpenAIError, isBusy, busy: () => Date.now() < busyUntil,
-  chat, transcribe, speak, speakStream, imageGenerate, imageEdit, realtimeClientSecret, liveSession, ACCENT, webSearch, plausibleTranscript,
+  chat, transcribe, speak, speakStream, imageGenerate, imageEdit, realtimeClientSecret, ACCENT, webSearch, plausibleTranscript,
   // for tests
   fromSimple, fromContents, toTools, wavWrap, imageSize,
 };

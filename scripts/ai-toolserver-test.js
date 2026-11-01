@@ -163,19 +163,19 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       const r = await api("GET", "/ai/config", { token: A.token });
       assert.strictEqual(r.status, 200, r.text);
       const c = r.json;
-      assert.deepStrictEqual(Object.keys(c).sort(), ["limits", "listen", "models", "provider", "routing"], "no Nano any more");
+      const openai = require(path.join(BACKEND, "src/services/ai/openai"));
+      assert.deepStrictEqual(Object.keys(c).sort(), ["limits", "listen", "live", "models", "provider", "routing"]);
+      assert.strictEqual(c.provider, "openai", "the phone always talks to our server");
       assert.deepStrictEqual(Object.keys(c.models).sort(),
-        ["cloud", "cloudFallback", "cloudFast", "live", "liveVoice", "thinking", "tts", "ttsLanguage", "ttsStyle", "ttsVoice"]);
-      assert.strictEqual(c.models.cloud, "gemini-3.5-flash-lite", "the phone's own conversation model");
-      assert.strictEqual(c.models.cloudFallback, "gemini-flash-lite-latest");
+        ["cloud", "cloudFallback", "cloudFast", "thinking", "tts", "ttsLanguage", "ttsStyle", "ttsVoice"]);
+      assert.strictEqual(c.models.cloud, openai.models.chat());
+      assert.strictEqual(c.models.cloudFast, openai.models.fast());
+      assert.strictEqual(c.models.cloudFallback, openai.models.fallback());
+      assert.strictEqual(c.models.tts, openai.models.tts());
       assert.strictEqual(c.models.thinking, "low");
       assert.strictEqual(c.models.ttsStyle, "warm, friendly and natural");
-      assert.strictEqual(c.models.cloudFast, "gemini-flash-lite-latest");
-      assert.strictEqual(c.models.tts, "gemini-2.5-flash-preview-tts");
-      assert.strictEqual(c.models.ttsVoice, "Kore");
+      assert.strictEqual(c.models.ttsVoice, "coral");
       assert.strictEqual(c.models.ttsLanguage, "en-IN");
-      assert.strictEqual(c.models.live, "gemini-live-2.5-flash-preview");
-      assert.strictEqual(c.models.liveVoice, "Kore", "the same voice as speech");
       assert.deepStrictEqual(c.limits, { maxToolRounds: 6 });
       for (const w of ["remind", "call", "alarm", "weather", "my", "email", "reminder", "shortcut"]) {
         assert.ok(c.routing.toolWords.includes(w), `toolWords has ${w}`);
@@ -196,64 +196,28 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       assert.deepStrictEqual(c.routing.shortcutNames, []);
     });
 
-    await atest("env and the user's own choices: models, voice, speech language, live model", async () => {
-      Object.assign(process.env, {
-        GEMINI_MODEL: "gemini-3.5-flash", AI_CLOUD_FAST_MODEL: "gemini-3.5-flash-lite",
-        GEMINI_TTS_MODEL: "gemini-3-tts", GEMINI_LIVE_MODEL: "gemini-3.1-flash-live-preview", AI_NANO: "off",
-      });
+    await atest("env and the user's own choices: models, voice, speech language, thinking", async () => {
+      Object.assign(process.env, { OPENAI_MODEL: "gpt-test-chat", OPENAI_TTS_MODEL: "gpt-test-tts" });
       try {
         let c = (await api("GET", "/ai/config", { token: A.token })).json;
-        assert.strictEqual(c.models.cloud, "gemini-3.5-flash-lite", "GEMINI_MODEL is the server's own, not the phone's");
-        assert.strictEqual(c.models.cloudFast, "gemini-3.5-flash-lite");
-        assert.strictEqual(c.models.tts, "gemini-3-tts", "GEMINI_TTS_MODEL is the default");
-        assert.strictEqual(c.models.live, "gemini-3.1-flash-live-preview", "GEMINI_LIVE_MODEL is the default");
-        Object.assign(process.env, { AI_CLOUD_MODEL: "gemini-4-flash", AI_TTS_MODEL: "gemini-4-tts",
-          AI_LIVE_MODEL: "gemini-4-live", AI_TTS_VOICE: "Charon", AI_LIVE_VOICE: "Puck" });
+        assert.strictEqual(c.models.cloud, "gpt-test-chat");
+        assert.strictEqual(c.models.tts, "gpt-test-tts");
         await db.run(`UPDATE users SET preferred_language='Kannada' WHERE id=$1`, [A.id]);
+        await require(path.join(BACKEND, "src/users/context")).setAssistantProfile(A.id, { voice: "ash" });
         c = (await api("GET", "/ai/config", { token: A.token })).json;
-        assert.strictEqual(c.models.cloud, "gemini-4-flash", "AI_CLOUD_MODEL wins");
-        assert.strictEqual(c.models.tts, "gemini-4-tts");
-        assert.strictEqual(c.models.live, "gemini-4-live");
-        assert.strictEqual(c.models.ttsVoice, "Charon");
-        assert.strictEqual(c.models.liveVoice, "Puck");
         assert.strictEqual(c.models.ttsLanguage, "kn-IN");
-        await require(path.join(BACKEND, "src/users/context")).setAssistantProfile(A.id, { voice: "Aoede" });
-        delete process.env.AI_LIVE_VOICE;
+        assert.strictEqual(c.models.ttsVoice, "ash", "the voice they chose in Settings");
+        assert.strictEqual(c.live.voice, "ash", "the conversation speaks in it too");
+        await require(path.join(BACKEND, "src/users/context")).setAssistantProfile(A.id, { voice: "Fola" });
         c = (await api("GET", "/ai/config", { token: A.token })).json;
-        assert.strictEqual(c.models.ttsVoice, "Aoede", "the voice they chose in Settings");
-        assert.strictEqual(c.models.liveVoice, "Aoede");
-      } finally {
-        for (const k of ["GEMINI_MODEL", "AI_CLOUD_FAST_MODEL", "GEMINI_TTS_MODEL", "GEMINI_LIVE_MODEL", "AI_NANO",
-          "AI_CLOUD_MODEL", "AI_TTS_MODEL", "AI_LIVE_MODEL", "AI_TTS_VOICE", "AI_LIVE_VOICE"]) delete process.env[k];
-        await db.run(`UPDATE users SET preferred_language='' WHERE id=$1`, [A.id]);
-        await db.run(`UPDATE assistant_profiles SET voice='' WHERE user_id=$1`, [A.id]).catch(() => {});
-      }
-    });
-
-    await atest("build 126+: Fola on the expressive speech model; Live and older builds keep prebuilt voices", async () => {
-      const cfg = async (build) => (await api("GET", `/ai/config?build=${build}`, { token: A.token })).json.models;
-      let m = await cfg(126);
-      assert.strictEqual(m.tts, "gemini-3.8-flash-tts");
-      assert.strictEqual(m.ttsVoice, "Fola");
-      assert.strictEqual(m.liveVoice, "Kore", "the Live API takes prebuilt voices only");
-      m = await cfg(125);
-      assert.strictEqual(m.tts, "gemini-2.5-flash-preview-tts", "an older build keeps the model it can play");
-      assert.strictEqual(m.ttsVoice, "Kore");
-      const profiles = require(path.join(BACKEND, "src/users/context"));
-      await profiles.setAssistantProfile(A.id, { voice: "Fola" });
-      try {
-        assert.strictEqual((await cfg(126)).ttsVoice, "Fola", "chosen in Settings");
-        assert.strictEqual((await cfg(125)).ttsVoice, "Kore", "a library voice never reaches an older build");
-        await profiles.setAssistantProfile(A.id, { voice: "Aoede" });
-        assert.strictEqual((await cfg(126)).ttsVoice, "Aoede", "their own prebuilt choice still wins");
+        assert.strictEqual(c.models.ttsVoice, "coral", "a voice she cannot speak in falls back");
         process.env.AI_CLOUD_THINKING = "HIGH";
-        assert.strictEqual((await cfg(126)).thinking, "high");
+        assert.strictEqual((await api("GET", "/ai/config", { token: A.token })).json.models.thinking, "high");
         process.env.AI_CLOUD_THINKING = "loud";
-        assert.strictEqual((await cfg(126)).thinking, "low", "an unknown level falls back");
-        process.env.AI_TTS_EXPRESSIVE_MODEL = "gemini-4-tts";
-        assert.strictEqual((await cfg(126)).tts, "gemini-4-tts");
+        assert.strictEqual((await api("GET", "/ai/config", { token: A.token })).json.models.thinking, "low", "an unknown level falls back");
       } finally {
-        for (const k of ["AI_CLOUD_THINKING", "AI_TTS_EXPRESSIVE_MODEL"]) delete process.env[k];
+        for (const k of ["OPENAI_MODEL", "OPENAI_TTS_MODEL", "AI_CLOUD_THINKING"]) delete process.env[k];
+        await db.run(`UPDATE users SET preferred_language='' WHERE id=$1`, [A.id]);
         await db.run(`UPDATE assistant_profiles SET voice='' WHERE user_id=$1`, [A.id]).catch(() => {});
       }
     });
@@ -412,12 +376,11 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       assert.strictEqual(sessions.get(B.id, never.sessionId).device.lat, undefined, "a location was invented");
     });
 
-    await atest("a shortcut's name, said whole, is routed; a question about it is not; old builds are not", async () => {
+    await atest("a shortcut's name, said whole, is routed; a question about it is not", async () => {
       await store.create(A.id, { name: "torch mode", steps: S.validate([
         { tool: "phone_control", args: { action: "flashlight_on" }, said: "torch" }]).steps });
       const cfg = (await api("GET", "/ai/config", { token: A.token })).json;
       assert.deepStrictEqual(cfg.routing.shortcutNames, ["torch mode"]);
-      assert.deepStrictEqual((await api("GET", "/ai/config?build=119", { token: A.token })).json.routing.shortcutNames, []);
       const hit = (await context(A, { text: "start torch mode please" })).json;
       assert.deepStrictEqual(hit.route, { shortcut: "Torch mode" });
       assert.deepStrictEqual((await context(A, { text: "what is torch mode?" })).json.route, { shortcut: null });
@@ -682,21 +645,18 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       return lines;
     };
 
-    await atest("config: build 135+ gets the live block; AI_LIVE=off turns it off; older builds get none", async () => {
-      const cfg = async (q) => (await api("GET", `/ai/config${q}`, { token: A.token })).json;
-      let c = await cfg("?build=135");
+    await atest("config: the realtime block; AI_LIVE=off turns it off", async () => {
+      const proxy = require(path.join(BACKEND, "src/ai/proxy"));
+      let c = (await api("GET", "/ai/config", { token: A.token })).json;
       assert.deepStrictEqual(c.live, {
-        on: true, model: "gemini-3.8-live", voice: "Sulafat", silenceMs: 800, prefixMs: 100,
+        on: true, model: proxy.servedModels().live, voice: "coral", silenceMs: 800, prefixMs: 100,
         startSensitivity: "low", endSensitivity: "high", idleCloseSec: 900, affectiveDialog: false,
-        vadHangoverMs: 700, fragmentGuard: true,
-        voices: ["Sulafat", "Callirrhoe", "Achernar", "Aoede", "Vindemiatrix", "Kore", "Charon", "Achird"],
+        vadHangoverMs: 700, fragmentGuard: true, voices: proxy.REALTIME_VOICES,
       });
-      assert.ok(c.models.live && c.models.liveVoice, "the old fields stay, harmless");
-      assert.strictEqual((await cfg("?build=134")).live, undefined);
       process.env.AI_LIVE = "off";
       process.env.AI_LIVE_SILENCE_MS = "650";
       try {
-        c = await cfg("?build=140");
+        c = (await api("GET", "/ai/config", { token: A.token })).json;
         assert.strictEqual(c.live.on, false, "the kill switch");
         assert.strictEqual(c.live.silenceMs, 650);
       } finally {

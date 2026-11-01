@@ -1,0 +1,37 @@
+# THE SETTINGS PRODUCTION RUNS WITH (the VPS's .env), WITHOUT SECRETS.
+#
+# scripts/production-config-test.js runs the server with exactly these, so
+# CI tests the combination users actually get (2026-11-01: the voice picker
+# offered GPT-Live voices while production ran without GPT-Live, and nobody
+# noticed until the owner did). deploy.sh warns when the VPS's .env
+# drifts from this file.
+#
+# KEY=<secret> means "set on the server, value never stored here"; the
+# test fills it with a dummy. Change this file in the same PR as the .env.
+NODE_ENV=production
+LOG_LEVEL=info
+GEMINI_MODEL=gemini-3.5-flash
+GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-preview
+GEMINI_TTS_MODEL=gemini-2.5-flash-preview-tts
+PLIVO_FROM_NUMBER=
+PLIVO_VOICE=Polly.Aditi
+PLIVO_ASR_LANG=en-IN
+AGENT_CALL_DAILY_LIMIT=20
+PORT=38231
+DATA_DIR=/home/myass620/app/data
+PUBLIC_BASE_URL=https://myassistant.wishme.today
+ALLOW_APP_KEY=false
+AUTH_DISABLED=false
+# Empty on the server (2026-11-01): no Gemini key, and Plivo calls are off.
+GEMINI_API_KEY=
+PLIVO_AUTH_ID=
+PLIVO_AUTH_TOKEN=
+# On for demos only. MUST be false before a public release (anyone could
+# sign in as any phone number). The test prints a warning while it is on.
+ALLOW_DEV_PHONE_VERIFY=true
+ADMIN_KEY=<secret>
+APP_API_KEY=<secret>
+DATABASE_URL=<secret>
+GOOGLE_WEB_CLIENT_ID=<secret>
+JWT_SECRET=<secret>
+OPENAI_API_KEY=<secret>

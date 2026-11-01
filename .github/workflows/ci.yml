@@ -55,18 +55,9 @@ jobs:
           cache: npm
           cache-dependency-path: myassistant-backend/package-lock.json
       - run: npm ci
-      # Every route module must at least LOAD (catches typos/bad requires).
+      # Every server module must at least LOAD (catches typos/bad requires).
       - name: Module load check
-        run: |
-          node -e "
-            const fs = require('fs');
-            for (const f of fs.readdirSync('./src/routes'))
-              if (f.endsWith('.js')) require('./src/routes/' + f);
-            for (const m of ['./src/agents/runtime','./src/live/proxy',
-                             './src/services/brief','./src/tools/builtins',
-                             './src/commitments/service','./src/services/intents',
-                             './src/reminders/routes','./src/google/routes']) require(m);
-            console.log('all modules load');"
+        run: node scripts/check-modules.js
       - name: Full test suite
         run: npm run test:all
 

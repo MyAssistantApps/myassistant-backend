@@ -8,6 +8,7 @@ git fetch -q origin
 git reset -q --hard origin/hardening
 echo "now at $(git log --oneline -1)"
 npm ci --omit=dev --no-audit --no-fund --loglevel=error
+node scripts/check-prod-flags.js || true
 "$APP/stop.sh"
 "$APP/start.sh"
 for _ in $(seq 1 30); do

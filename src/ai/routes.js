@@ -40,10 +40,7 @@ function userOf(req, res) {
 router.get("/config", async (req, res) => {
   const uid = userOf(req, res);
   if (!uid) return;
-  // The app says its build in the X-App-Build header on every call (the
-  // query form is for scripts); without it a build-gated switch never flips.
-  const build = req.query.build || req.get("X-App-Build");
-  res.json(await require("./config").forUser(uid, { build, live: req.query.live }));
+  res.json(await require("./config").forUser(uid));
 });
 
 router.post("/context", async (req, res) => {
@@ -231,62 +228,15 @@ router.post("/realtime/secret", async (req, res) => {
   }
 });
 
-/**
- * Creates a GPT-Live conversation for this user (ai/gptLive.js): their
- * voice, the opening line by their gender, and a delegated backend with
- * the tools the phone was given by POST /ai/context. The phone sends
- * `instructions` (that context) and `tools`; the server decides the rest.
- * Answers { session:{id}, transport, opening:{text, instruction}, voice }.
- */
-router.post("/live/session", async (req, res) => {
-  const uid = userOf(req, res);
-  if (!uid) return;
-  const b = req.body || {};
-  try {
-    const openai = require("../services/ai/openai");
-    const gptLive = require("./gptLive");
-    const transport = b.transport && typeof b.transport === "object" ? b.transport : null;
-    if (transport && transport.type !== "webrtc") {
-      return res.status(400).json({ error: "transport.type must be webrtc" });
-    }
-    const profile = await require("../users/context").getProfile(uid).catch(() => null);
-    const built = gptLive.sessionConfig({
-      profile,
-      voice: typeof b.voice === "string" ? b.voice : "",
-      tools: Array.isArray(b.tools) ? b.tools : [],
-      instructions: typeof b.instructions === "string" ? b.instructions : "",
-    });
-    const out = await openai.liveSession({
-      sdp: transport ? transport.sdp : b.sdp,
-      session: built.session,
-      user: uid,
-    });
-    console.log(`ai: gpt-live session uid=${uid} voice=${built.voice} backend=${built.session.delegation.responses.model} tools=${built.toolCount}`);
-    res.status(201).json({
-      session: { id: out.session && out.session.id },
-      transport: out.transport,
-      opening: { text: built.opening, instruction: gptLive.openingInstruction(built.opening) },
-      voice: built.voice,
-    });
-  } catch (e) {
-    console.error(`ai: gpt-live session failed uid=${uid}: ${String(e.message || e).slice(0, 200)}`);
-    res.status(e.status === 400 ? 400 : 502).json({ error: String(e.message || e).slice(0, 200) });
-  }
-});
-
 /** The voices the picker offers (ai/liveVoices.js), grouped by the app. */
 router.get("/voices", (req, res) => {
   const uid = userOf(req, res);
   if (!uid) return;
-  // Only voices she can speak in right now, so a pick is what she uses:
-  // GPT-Live's natural voices, or the ten classic ones without it (all 22
-  // were listed before, most of which nothing could play or speak).
-  const lv = require("./liveVoices");
-  const def = require("./config").gptLiveOn() ? require("./gptLive").DEFAULT_VOICE : require("./proxy").DEFAULT_VOICE;
-  res.json({ voices: lv.offered(), default: def });
+  // Only voices she can speak in, so a pick is what she uses.
+  res.json({ voices: require("./liveVoices").offered(), default: require("./proxy").DEFAULT_VOICE });
 });
 
-/** A voice's own sample (recorded once from GPT-Live, then kept). */
+/** A voice's own sample (spoken once in that voice, then kept). */
 router.get("/voices/:id/sample", async (req, res) => {
   const uid = userOf(req, res);
   if (!uid) return;
@@ -319,7 +269,7 @@ async function serveGreeting(req, res) {
 router.get("/voices/:id/greeting", serveGreeting);
 router.get("/voices/:id/greeting-v3", serveGreeting);
 router.get("/voices/:id/greeting-v4", serveGreeting);
-// v5: recorded from GPT-Live itself (liveVoices.greeting).
+// v5: the path every current build asks for.
 router.get("/voices/:id/greeting-v5", serveGreeting);
 
 router.post("/firebase-token", async (req, res) => {

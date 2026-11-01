@@ -65,6 +65,11 @@ it must be rotated, not just deleted.
 
 - `npm run test:manifest` (every test script points at a real file)
 - `node scripts/manager-test.js` when touching `src/agents/manager.js` or tools
+- `npm run test:production` — the server with production's own settings
+  (`deploy/vps/production.flags`). It snapshots what the phone receives
+  from `/ai/config`; if you changed that on purpose, run
+  `UPDATE_SNAPSHOT=1 npm run test:production` and commit the diff. If you
+  change the server's `.env`, change `production.flags` in the same PR.
 - The suites for what you changed, against a throwaway database:
   `DATABASE_URL=postgres://myassistant:localdev@localhost:5432/myassistant_test npm run test:<suite>`
 - `npm run test:all` runs everything (CI does this on every push).

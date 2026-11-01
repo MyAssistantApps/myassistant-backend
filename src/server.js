@@ -108,8 +108,6 @@ app.use(
       ["^/agent-call/[a-f0-9]{16,}", "/agent-call/#id"],
       ["^/admin-panel/api/recordings/\\d+.*", "/admin-panel/api/recordings/#id"],
       ["^/admin-panel/api/video-notes/\\d+.*", "/admin-panel/api/video-notes/#id"],
-      ["^/posters/photos/\\d+.*", "/posters/photos/#id"],
-      ["^/posters/\\d+.*", "/posters/#id"],
       ["^/shortcuts/runs/\\d+.*", "/shortcuts/runs/#id"],
       ["^/shortcuts/\\d+.*", "/shortcuts/#id"],
       ["^/mailin/messages/\\d+.*", "/mailin/messages/#id"],
@@ -468,7 +466,6 @@ app.use("/studio", appAuth, perUserLimit, require("./routes/studio"));
 // my signature": his exact words, a real photo cleaned up without AI, the
 // card drawn on the phone. Working photos stay out of /docs; only the
 // finished card (and a photo he keeps) becomes a document.
-app.use("/posters", appAuth, posterLimit, require("./routes/posters"));
 // THE DAY'S QUOTE (2026-10-18) — one line and its pictures a day, the same
 // for everyone. The pictures are public (Image.network sends no header).
 const quoteCards = require("./routes/quoteCards");
@@ -694,10 +691,6 @@ require("./db")
 
     const server = app.listen(port, () => {
       console.log(`MYASSISTANT backend on :${port} (postgres ready)`);
-      // GPT-Live's recorded openings, every natural voice, in the background.
-      if (require("./ai/config").gptLiveOn() && require("./services/ai/openai").ready()) {
-        setTimeout(() => require("./ai/liveVoices").warmOpenings().catch(() => {}), 5000).unref();
-      }
       // A key defined TWICE in .env silently keeps the LAST value, which is
       // a brutal way to lose an afternoon: the file looks right at a glance
       // but the app runs the other value. Call it out loudly at boot.
@@ -733,15 +726,6 @@ require("./db")
           ` tts=${require("./services/ai/openai").models.tts()}` +
           ` image=${require("./services/ai/openai").models.image()}` +
           ` fallback=${ai.fallbackModel()}`
-      );
-      // What the APP is told to run (GET /ai/config): the conversation's
-      // models live on the phone and in Firebase AI Logic now.
-      const aiCfg = require("./ai/config");
-      console.log(
-        `  app models: cloud=${aiCfg.cloudModel()} (${aiCfg.thinkingLevel()} thinking, fallback ${aiCfg.cloudFallbackModel()})` +
-          ` fast=${aiCfg.cloudFastModel()}` +
-          ` tts=${aiCfg.ttsModel()} (build ${aiCfg.EXPRESSIVE_BUILD}+: ${aiCfg.expressiveTtsModel()})` +
-          ` live=${aiCfg.liveModel()}`
       );
       if (!process.env.OPENAI_API_KEY) {
         console.warn(

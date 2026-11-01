@@ -31,42 +31,47 @@ function run(test) {
     }
   };
 
-  test("config: the live block's defaults, for build 135+ or an app that says it can", () => {
+  test("config: the realtime block's defaults: OpenAI Realtime, the default voice, the ten voices", () => {
     for (const k of ENV) delete process.env[k];
     try {
-      assert.deepStrictEqual(config.liveBlock(), {
-        on: true, model: "gemini-3.8-live", voice: "Sulafat", silenceMs: 800, prefixMs: 100,
+      const proxy = require("../src/ai/proxy");
+      const b = config.liveBlock(1, null);
+      assert.deepStrictEqual(b, {
+        on: true, model: proxy.servedModels().live, voice: proxy.DEFAULT_VOICE, silenceMs: 800, prefixMs: 100,
         startSensitivity: "low", endSensitivity: "high", idleCloseSec: 900, affectiveDialog: false,
-        vadHangoverMs: 700, fragmentGuard: true,
-        voices: ["Sulafat", "Callirrhoe", "Achernar", "Aoede", "Vindemiatrix", "Kore", "Charon", "Achird"],
+        vadHangoverMs: 700, fragmentGuard: true, voices: proxy.REALTIME_VOICES,
       });
-      assert.strictEqual(config.liveCapable(135), true);
-      assert.strictEqual(config.liveCapable("140"), true);
-      assert.strictEqual(config.liveCapable(134), false);
-      assert.strictEqual(config.liveCapable(undefined), false);
-      assert.strictEqual(config.liveCapable(120, "1"), true, "the app's own flag");
-      assert.strictEqual(config.liveCapable(120, "no"), false);
+      assert.strictEqual(config.liveBlock(1, { assistant: { voice: "ash" } }).voice, "ash", "their pick");
     } finally { restore(); }
   });
 
-  test("config: AI_LIVE=off turns it off; model, voice and silence overridable, nonsense ignored", () => {
+  test("voices: the picker offers only the ten she can speak in, and a pick is used", () => {
+    const lv = require("../src/ai/liveVoices");
+    const proxy = require("../src/ai/proxy");
+    const ids = lv.offered().map((v) => v.id);
+    assert.deepStrictEqual(ids, lv.CLASSIC_VOICES);
+    assert.ok(ids.length <= 12, "no more than twelve voices");
+    for (const v of lv.offered()) assert.ok(["male", "female"].includes(v.gender), v.id);
+    // Every one is a voice both OpenAI Realtime and gpt-4o-mini-tts speak.
+    for (const v of ids) assert.ok(["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar"].includes(v), v);
+    assert.strictEqual(proxy.voiceFor("Cedar"), "cedar", "a pick is never forced to the default");
+    assert.strictEqual(proxy.voiceFor("gleam"), proxy.DEFAULT_VOICE, "a retired GPT-Live voice falls back");
+    assert.strictEqual(proxy.voiceOf({ assistant: { voice: "ash" } }), "ash");
+    assert.strictEqual(proxy.voiceOf(null), proxy.DEFAULT_VOICE);
+  });
+
+  test("config: AI_LIVE=off turns it off; silence overridable, nonsense ignored", () => {
     try {
-      Object.assign(process.env, { AI_LIVE: "off", AI_LIVE_MODEL: "gemini-3.1-flash-live-preview",
-        AI_LIVE_VOICE: "Puck", AI_LIVE_SILENCE_MS: "700" });
+      Object.assign(process.env, { AI_LIVE: "off", AI_LIVE_SILENCE_MS: "700" });
       let b = config.liveBlock();
       assert.strictEqual(b.on, false);
-      assert.strictEqual(b.model, "gemini-3.1-flash-live-preview");
-      assert.strictEqual(b.voice, "Puck");
       assert.strictEqual(b.silenceMs, 700);
-      Object.assign(process.env, { AI_LIVE: "on", AI_LIVE_VOICE: "Fola", AI_LIVE_SILENCE_MS: "50" });
+      Object.assign(process.env, { AI_LIVE: "on", AI_LIVE_SILENCE_MS: "50" });
       b = config.liveBlock();
       assert.strictEqual(b.on, true);
-      assert.strictEqual(b.voice, "Sulafat", "Live takes prebuilt voices only");
       assert.strictEqual(b.silenceMs, 800, "an out-of-range pause falls back");
     } finally { restore(); }
   });
-
-
 
   test("Live tools: one fixed set, at most 32, the conversation tools and must-haves first", () => {
     const { CORE } = require("../src/tools/relevance");

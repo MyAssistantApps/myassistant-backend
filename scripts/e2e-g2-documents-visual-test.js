@@ -18,7 +18,6 @@
  *   (/vision — the camera's own questions — is the app's since 2026-09-29.)
  *   /clients/scan-card  real card reader → person + card photo document.
  *   /meetings  the app's upload shape → minutes → list → PDF.
- *   /posters   build-119 gating and route sanity (full suite: posters-test).
  *
  * NOTHING LEAVES THIS MACHINE. global fetch is replaced: 127.0.0.1 goes
  * through, Gemini / the keyless image host are answered by stubs in this
@@ -248,7 +247,6 @@ const MIME = {
   app.use("/docs", appAuth, require("../src/routes/docs"));
   app.use("/clients", appAuth, require("../src/routes/clients"));
   app.use("/meetings", appAuth, require("../src/meetings/routes"));
-  app.use("/posters", appAuth, require("../src/routes/posters"));
   const server = await new Promise((r) => { const s = app.listen(0, "127.0.0.1", () => r(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
 
@@ -795,20 +793,6 @@ const MIME = {
       const pid = await meetings.createPending(UID, { title: "Still going" });
       const r = await fetch(`${base}/meetings/${pid}/pdf`, { headers: H });
       assert.strictEqual(r.status, 409);
-    });
-
-    /* ============================================================== */
-    console.log("\nphoto cards (build 119) — gating and route sanity");
-    /* ============================================================== */
-    await atest("the card tools are offered to build 119 only; the routes answer with a session", async () => {
-      const names = (build) => registry.declarations({ userId: UID, deviceCaps: { build, granted: [], denied: [] } }).map((d) => d.name);
-      assert.ok(!names(118).includes("make_greeting_poster"));
-      assert.ok(names(119).includes("make_greeting_poster"));
-      assert.ok(names(119).includes("improve_old_photo"));
-      assert.strictEqual((await getJson("/posters/consent")).status, 200);
-      const latest = await getJson("/posters/latest");
-      assert.ok([200, 404].includes(latest.status));
-      assert.strictEqual((await fetch(`${base}/posters/latest`)).status, 401);
     });
 
     /* ============================================================== */

@@ -120,12 +120,7 @@ async function check(name, voice) {
   // the message named voices nobody could find).
   const label = (id) => id[0].toUpperCase() + id.slice(1);
   const lv = require("../ai/liveVoices");
-  const offered = (() => {
-    try {
-      if (require("../ai/config").gptLiveOn()) return require("../ai/gptLive").NATURAL_VOICES;
-    } catch (_) { /* fall through to the whole catalogue */ }
-    return lv.CATALOG.map((c) => c.id);
-  })();
+  const offered = lv.offered().map((c) => c.id);
   const fitting = offered.filter((id) => voiceGender(id) === ng).map(label);
   const list = fitting.length > 1
     ? `${fitting.slice(0, -1).join(", ")} or ${fitting[fitting.length - 1]}`

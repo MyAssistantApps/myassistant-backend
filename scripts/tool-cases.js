@@ -1,7 +1,6 @@
 /**
  * SPOKEN REQUESTS AND THE TOOLS THAT ANSWER THEM - shared by
- * tool-call-eval.js (the cascade's model) and gpt-live-tools-check.js (the
- * GPT-Live backend). Taken from real Conversations.
+ * tool-call-eval.js (the cascade's model). Taken from real conversations.
  */
 // [what they said, the tools that count as right; [] = no tool]
 const CASES = [
