@@ -25,7 +25,8 @@ const TTS_VOICES = {
  * voices, ai/liveVoices.js CLASSIC_VOICES) is used everywhere she speaks:
  * the greeting, the Realtime conversation and spoken replies.
  */
-const DEFAULT_VOICE = "coral";
+// Sage since 2026-11-01 (owner: "set sage as default voice").
+const DEFAULT_VOICE = "sage";
 const REALTIME_VOICES = require("./liveVoices").CLASSIC_VOICES.slice();
 
 /** A voice name → the voice she speaks in: a classic voice as is, anything else the default. */

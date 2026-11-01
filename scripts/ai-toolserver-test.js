@@ -174,7 +174,7 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       assert.strictEqual(c.models.tts, openai.models.tts());
       assert.strictEqual(c.models.thinking, "low");
       assert.strictEqual(c.models.ttsStyle, "warm, friendly and natural");
-      assert.strictEqual(c.models.ttsVoice, "coral");
+      assert.strictEqual(c.models.ttsVoice, "sage");
       assert.strictEqual(c.models.ttsLanguage, "en-IN");
       assert.deepStrictEqual(c.limits, { maxToolRounds: 6 });
       for (const w of ["remind", "call", "alarm", "weather", "my", "email", "reminder", "shortcut"]) {
@@ -210,7 +210,7 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
         assert.strictEqual(c.live.voice, "ash", "the conversation speaks in it too");
         await require(path.join(BACKEND, "src/users/context")).setAssistantProfile(A.id, { voice: "Fola" });
         c = (await api("GET", "/ai/config", { token: A.token })).json;
-        assert.strictEqual(c.models.ttsVoice, "coral", "a voice she cannot speak in falls back");
+        assert.strictEqual(c.models.ttsVoice, "sage", "a voice she cannot speak in falls back");
         process.env.AI_CLOUD_THINKING = "HIGH";
         assert.strictEqual((await api("GET", "/ai/config", { token: A.token })).json.models.thinking, "high");
         process.env.AI_CLOUD_THINKING = "loud";
@@ -270,7 +270,7 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       assert.notStrictEqual(voice.sessionId, chat.sessionId, "no session named: a new one");
       const sys = voice.system;
       assert.match(sys, /YOUR REPLY WILL BE SPOKEN ALOUD/);
-      assert.match(sys, /one to three plain sentences/);
+      assert.match(sys, /one to three spoken sentences/);
       assert.match(sys, /call it now/);
       assert.match(sys, /Do not describe what you are about to do/);
       assert.match(sys, /HOW YOU TALK[^\n]*\n- Talk like a real person/);
@@ -649,7 +649,7 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       const proxy = require(path.join(BACKEND, "src/ai/proxy"));
       let c = (await api("GET", "/ai/config", { token: A.token })).json;
       assert.deepStrictEqual(c.live, {
-        on: true, model: proxy.servedModels().live, voice: "coral", silenceMs: 800, prefixMs: 100,
+        on: true, model: proxy.servedModels().live, voice: "sage", silenceMs: 800, prefixMs: 100,
         startSensitivity: "low", endSensitivity: "high", idleCloseSec: 900, affectiveDialog: false,
         vadHangoverMs: 700, fragmentGuard: true, voices: proxy.REALTIME_VOICES,
       });
