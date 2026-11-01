@@ -28,13 +28,19 @@
  *                chat model, capped at MODEL_TIMEOUT_MS. A timeout or an
  *                error is the old behaviour, never a failed turn.
  *
+ * ONE ASSISTANT, NOTHING VISIBLE (owner, 2026-11-01: "let most of the task
+ * be done by one AI model only, i.e. Maya … the user should not be able to
+ * see the underlying agents, even in the UI"). Every turn is Maya's, on
+ * the one chat model: the specialists are only tool groups and short notes
+ * inside her own turn, never another voice, name or screen. The phone is
+ * told no agents (controlFor), "talk to your manager" is gone, and the one
+ * extra model call (step 4) stays opt-in for when the rules miss.
+ *
  * AI_MANAGER=off turns the manager off (the old selection, unchanged);
  * AI_MANAGER_MODEL=off keeps the rules and drops step 4.
  */
 
 const CARRY_MS = 10 * 60_000;
-// How long an agent the owner asked for waits on their answer.
-const PERSONA_MS = 3 * 60_000;
 // Measured 2026-10-31: gpt-5.4-nano routes in 0.7–1.2 s (gpt-4.1-mini
 // 1.2–1.7 s). The wait overlaps the personal context ai/context.js
 // fetches meanwhile.
@@ -148,42 +154,6 @@ const SPECIALISTS = {
 };
 const NAMES = Object.keys(SPECIALISTS);
 
-/**
- * SPEAKING TO AN AGENT (owner, 2026-10-31): "call your manager", "I want to
- * talk with your manager", "let me speak to the planning agent". The turn
- * is answered BY that agent — the name on screen changes from the
- * assistant's to it — and the next turn is the assistant's again.
- *
- * "your" before or "agent/team" after is required: "call the manager at
- * the bank" is a phone call to a real person, and stays one.
- */
-const AGENT_WORDS = {
-  manager: "manager", boss: "manager", supervisor: "manager", head: "manager",
-  planning: "planner", planner: "planner",
-  communication: "comms", communications: "comms", comms: "comms", messaging: "comms",
-  information: "info", info: "info", research: "info",
-  shopping: "commerce", commerce: "commerce", money: "commerce", payments: "commerce",
-  creative: "creative", design: "creative",
-  "phone control": "device", phone: "device", device: "device",
-  memory: "memory",
-  records: "records", record: "records", documents: "records",
-};
-const AGENT_ALT = Object.keys(AGENT_WORDS).sort((a, b) => b.length - a.length).join("|");
-const ADDRESS = new RegExp(
-  "\\b(?:talk|speak|chat|connect|put me through|transfer|call|get|bring|switch|hand|pass)\\b[^.?!]{0,30}?" +
-  "(?:\\byour\\s+(" + AGENT_ALT + ")(?:\\s+(?:agent|team|specialist))?\\b" +
-  "|\\b(?:the\\s+)?(" + AGENT_ALT + ")\\s+(?:agent|team|specialist)\\b)", "i");
-
-/** The agent id the owner asked to speak to, or null. */
-function addressedIn(text) {
-  const m = ADDRESS.exec(String(text || ""));
-  if (!m) return null;
-  return AGENT_WORDS[(m[1] || m[2]).toLowerCase()] || null;
-}
-
-/** The label the owner sees for an agent id ("Manager" for the manager). */
-const labelOf = (id) => (id === "manager" ? "Manager" : (SPECIALISTS[id] ? SPECIALISTS[id].label : id));
-
 // Thanks, greetings, goodbyes: no specialist, and never worth a model call.
 const SMALL_TALK = /^\s*(thanks?|thank you|thanks a lot|ok(ay)?|cool|great|nice|awesome|good (morning|afternoon|evening|night)|hi|hello|hey|bye|goodbye|see you)\b[\w\s.,!?']{0,30}$/i;
 
@@ -254,19 +224,6 @@ async function decide({ text, owner = true, skip = false, session = null, histor
   };
   if (!enabled() || skip || !owner || !String(text || "").trim()) return { agents: [], via: "skip", ms: 0 };
 
-  // Asked for by name: that agent answers. It keeps the conversation only
-  // while it is waiting on the owner's answer (its last reply asked a
-  // question); otherwise the next turn is the assistant's again.
-  let asked = addressedIn(text);
-  const held = session && session.persona;
-  if (!asked && held && Date.now() - held.at < PERSONA_MS && /\?\s*$/.test(String(session.lastReply || ""))) {
-    asked = held.id;
-  }
-  if (session) session.persona = asked ? { id: asked, at: Date.now() } : null;
-  if (asked) {
-    return { agents: asked === "manager" ? [] : [asked], via: "addressed", addressed: asked, ms: Date.now() - t0 };
-  }
-
   const prev = session && session.manager && Date.now() - session.manager.at < CARRY_MS
     ? session.manager.agents : null;
   if (prev && FOLLOW_UP.test(text)) return done(prev, "carry");
@@ -275,9 +232,10 @@ async function decide({ text, owner = true, skip = false, session = null, histor
   // don't move to the manager"). One specialist's words: Maya does it
   // herself, with that specialist's tools at hand and no hand-off. Only a
   // request spanning two or more specialists goes through the manager.
+  // Several parts ("order biryani and tell Ravi") are still hers: their
+  // tools are offered together and she does each part herself.
   const ruled = byRules(text);
-  if (ruled.length === 1) return done(ruled, "maya");
-  if (ruled.length) return done(ruled, "rules");
+  if (ruled.length) return done(ruled, "maya");
 
   // Nothing matched: Maya answers on her own. Asking a model which
   // specialist to use cost a call and ~1 s on every such turn; it is opt-in
@@ -296,8 +254,7 @@ async function decide({ text, owner = true, skip = false, session = null, histor
  * set, the specialists' toolkits, then the rest of `base` — capped.
  */
 function toolsFor(plan, { base = [], must = [], live = null, cap = 40 } = {}) {
-  if (plan && plan.addressed) must = [...must, "talk_as_agent"];
-  if (!plan || (!plan.agents.length && !plan.addressed)) return base;
+  if (!plan || !plan.agents.length) return base;
   const has = (n) => !live || live.has(n);
   const packs = plan.agents.map((id) => SPECIALISTS[id].tools.filter(has));
   const picked = new Set(base);
@@ -314,90 +271,26 @@ function toolsFor(plan, { base = [], must = [], live = null, cap = 40 } = {}) {
   return out.slice(0, Math.max(cap, must.length + ESSENTIAL.length));
 }
 
-/** The THIS TURN note that hands the turn to its specialists. */
-function briefFor(plan, { assistant = "the assistant" } = {}) {
-  if (plan && plan.addressed) return personaBrief(plan.addressed, assistant);
-  if (!plan || !plan.agents.length) return "";
-  // Maya handles it herself: no team note (its tools are already offered).
-  if (plan.via === "maya") return "";
+/**
+ * The THIS TURN note: Maya's own guidance for the kinds of work in this
+ * request — no hand-off, no team. Nothing for a single kind of work (its
+ * tools are already offered).
+ */
+function briefFor(plan) {
+  if (!plan || plan.agents.length < 2) return "";
   const lines = plan.agents.map((id) => `- ${SPECIALISTS[id].role}`);
-  if (plan.agents.length > 1) {
-    lines.push("- This request has several parts: do each part with its own tools, then give " +
-      "ONE short reply covering all of them, in the order they asked.");
-  }
-  return "[MANAGER] Specialists for this turn:\n" + lines.join("\n");
+  lines.push("- This request has several parts: do each part yourself with its own tools, then give " +
+    "ONE short reply covering all of them, in the order they asked. Never mention agents or a team.");
+  return "This request needs several kinds of work:\n" + lines.join("\n");
 }
 
 /**
- * What the phone shows the owner: who has control of this turn, and which
- * specialist each offered tool belongs to (the first chosen one that owns
- * it). With no specialist, the manager handles the turn itself.
+ * What the phone is told about agents: nothing. Maya is the only one the
+ * owner sees (owner, 2026-11-01). The shape stays so installed builds,
+ * which draw the agent strip from it, simply show none.
  */
-function controlFor(plan, offered = [], { all = false } = {}) {
-  const agents = (plan && plan.agents) || [];
-  // Live picks its own tools as it talks, so it gets every specialist's
-  // ownership up front and shows whichever one the model reaches for.
-  const owners = all ? NAMES : agents;
-  const toolAgent = {};
-  for (const name of offered) {
-    const id = owners.find((a) => SPECIALISTS[a].tools.includes(name));
-    if (id) toolAgent[name] = id;
-  }
-  return {
-    via: (plan && plan.via) || "skip",
-    agents: (all ? NAMES : agents).map((id) => ({ id, label: SPECIALISTS[id].label })),
-    toolAgent,
-    ...(plan && plan.addressed ? { addressed: { id: plan.addressed, label: labelOf(plan.addressed) } } : {}),
-  };
+function controlFor() {
+  return { via: "maya", agents: [], toolAgent: {} };
 }
 
-/** THIS TURN's note when the owner asked for an agent by name. */
-function personaBrief(id, assistant) {
-  const who = labelOf(id);
-  const what = id === "manager"
-    ? `you lead ${assistant}'s team of specialist agents (${NAMES.map((n) => SPECIALISTS[n].label).join(", ")}) and decide who handles each request`
-    : `you are the ${who} agent in ${assistant}'s team: ${SPECIALISTS[id].scope}`;
-  return `[MANAGER] The owner asked to speak with the ${who} agent. For THIS reply you ARE the ${who} ` +
-    `agent — ${what}. First call talk_as_agent with agent "${id}". Then speak as ${who}: open with ` +
-    `"${who} here." if this is the start, and help with what they asked. If you need their answer, ask ONE ` +
-    `question and stop there — you keep the conversation until they answer. Only when you have finished ` +
-    `helping, end with one short line handing them back to ${assistant}. They are talking to you — ` +
-    `do NOT place a phone call for this.`;
-}
-
-/** For the system prompt: how any turn may hand the owner to an agent. */
-function personaRule(assistant = "the assistant") {
-  return `SPEAKING TO AN AGENT: you are ${assistant}, and behind you is a team — a Manager and specialist ` +
-    `agents (${NAMES.map((n) => SPECIALISTS[n].label).join(", ")}). When the owner asks to talk to ` +
-    `"your manager" or one of these agents ("call your manager", "let me speak to the planning agent"), ` +
-    `call talk_as_agent with that agent, then answer AS that agent for that reply ("Manager here. ..."), ` +
-    `and end by handing back to ${assistant}. That is never a phone call. Your next reply is ${assistant} again.`;
-}
-
-/** The tool the model calls to take on an agent's voice for one reply. */
-function registerAgentTools(registry) {
-  registry.register({
-    name: "talk_as_agent",
-    description:
-      "ONLY when the owner asks to speak to YOUR OWN manager or one of YOUR specialist agents — 'call " +
-      "your manager', 'I want to talk to your manager', 'let me speak to the planning agent'. Then " +
-      "answer as that agent and hand back to the assistant when done. NEVER for calling or messaging " +
-      "a person: 'call mom', 'call Ravi', 'call the manager at the bank' are place_phone_call. NEVER " +
-      "for ordinary requests — do those with their own tools as the assistant.",
-    risk: "low",
-    effects: ["read"],
-    inputSchema: {
-      type: "object",
-      properties: {
-        agent: { type: "string", enum: ["manager", ...NAMES], description: "Which agent they asked for." },
-      },
-      required: ["agent"],
-    },
-    async execute(args = {}) {
-      const id = ["manager", ...NAMES].includes(args.agent) ? args.agent : "manager";
-      return { ok: true, agent: id, label: labelOf(id), result: `Speaking as the ${labelOf(id)} agent for this reply.` };
-    },
-  });
-}
-
-module.exports = { decide, toolsFor, briefFor, controlFor, personaRule, registerAgentTools, addressedIn, byRules, SPECIALISTS, ESSENTIAL, FOLLOW_UP, SMALL_TALK, enabled };
+module.exports = { decide, toolsFor, briefFor, controlFor, byRules, SPECIALISTS, ESSENTIAL, FOLLOW_UP, SMALL_TALK, enabled };

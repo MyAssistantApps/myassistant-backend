@@ -556,7 +556,7 @@ async function prepare(uid, body) {
     const only = manager.toolsFor(plan, {
       base, must, live: new Set(registry.list().map((t) => t.name)), cap: relevance.PHONE_MAX,
     });
-    const brief = manager.briefFor(plan, { assistant: assistantName });
+    const brief = manager.briefFor(plan);
     if (brief) notes.push(brief);
     turnRec.agents = plan.agents;
     if (plan.via !== "skip") console.log(`ai: manager ${plan.via} -> ${plan.agents.join("+") || "none"} (${plan.ms}ms)`);
@@ -604,8 +604,6 @@ async function prepare(uid, body) {
         ? liveRules(assistantName, preferred, build, { declared: decls.map((d) => d.name) })
         : voiceRules(assistantName, preferred, build, { declared: decls.map((d) => d.name) })) +
       (expressive ? "\n\n" + EXPRESSIVE_SPEECH : "") +
-      (decls.some((d) => d.name === "talk_as_agent")
-        ? "\n\n" + require("../agents/manager").personaRule(assistantName) : "") +
       "\n\n" + require("../agents/appGuide").appGuide(assistantName) +
       (limits ? "\n\n" + limits : "") +
       (notion ? "\n\n" + notion : "") +
@@ -620,7 +618,6 @@ async function prepare(uid, body) {
     system = runtime.systemPrompt(
       "\n\n" + [expressive ? EXPRESSIVE_SPEECH : "",
         require("../agents/appGuide").appGuide(assistantName),
-        decls.some((d) => d.name === "talk_as_agent") ? require("../agents/manager").personaRule(assistantName) : "",
         extra, notion, last, languageAsk,
         unreadBlock(unread).trim()].filter(Boolean).join("\n"),
       { appBuild: build }
@@ -639,7 +636,7 @@ async function prepare(uid, body) {
     // Which of these tools the phone may run at the same time as the rest
     // of their round (registry.isParallelSafe); every other call in order.
     parallelSafe: tools.map((t) => t.name).filter((n) => registry.isParallelSafe(n)),
-    manager: require("../agents/manager").controlFor(plan, tools.map((t) => t.name), { all: mode === "live" }),
+    manager: require("../agents/manager").controlFor(),
   };
 }
 
