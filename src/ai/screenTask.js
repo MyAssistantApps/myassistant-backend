@@ -143,6 +143,8 @@ function registerScreenTaskTools(registry) {
       "when they only want the app opened, and the dedicated tools (place_phone_call, send_whatsapp_message, " +
       "order_food…) when one fits — this is for everything else. Never for passwords, OTPs or banking PINs.",
     risk: "medium",
+    // Only a build that can run it (ScreenAgentService) says screen_task.
+    requires: [{ kind: "device_feature", id: "screen_task" }],
     // Starting it is a phone action; each step that sends, pays or deletes
     // stops on the phone for the owner's yes (enforce + ScreenAgentService).
     effects: ["device"],

@@ -68,6 +68,7 @@ const REQUIRE_KINDS = new Set([
   "auth",              // a signed-in user (replaces `if (!ctx.userId)` in ~60 tools)
   "os_permission",     // an Android runtime permission, by manifest name
   "device_capability", // a phone feature the app reported (sms, telephony…)
+  "device_feature",    // an opt-in feature the app must say it has (screen_task)
   "app_build",         // a minimum installed app build number
   "integration",       // a configured third party: google_oauth, razorpay, plivo…
   "platform",          // android | ios | server

@@ -220,6 +220,18 @@ function checkOne(req, { userId, deviceCaps, platform, forDeclaration = false })
       return null;
     }
 
+    // OPT-IN: a feature the phone must SAY it has (an older build says
+    // nothing and is not offered the tool). screen_task: do_in_app needs
+    // the build with ScreenAgentService (2026-11-01).
+    case "device_feature": {
+      const caps = (deviceCaps && (deviceCaps.capabilities || deviceCaps.caps)) || {};
+      if (caps[req.id] === true) return null;
+      return {
+        kind: "device_feature", id: req.id, audience: "user",
+        reason: "this needs the latest version of the app",
+      };
+    }
+
     case "platform": {
       const p = platform || deviceCaps?.platform || null;
       if (!p || p === req.id) return null;
