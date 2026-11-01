@@ -289,7 +289,7 @@ async function prepare(uid, body) {
   tm.reset();
   const profile = await require("../users/context").getProfile(uid).catch(() => null);
   tm.mark("profile");
-  const assistantName = (profile && profile.assistant && profile.assistant.name) || "Assistant";
+  const assistantName = require("../users/context").nameOrDefault(profile && profile.assistant && profile.assistant.name);
   let preferred = String((profile && profile.user && profile.user.preferred_language) || "").slice(0, 40);
   s.userName = profile && profile.user && profile.user.name
     ? String(profile.user.name).split(" ")[0] : null;

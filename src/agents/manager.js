@@ -170,7 +170,12 @@ const BACK_TO_ASSISTANT = /\b(?:back to (?:maya|the assistant|my assistant|you)|
 const askedManager = (text) => ASK_MANAGER.test(String(text || ""));
 // The Manager's reach: the internet, any app, the phone, then every team's tools.
 const MANAGER_FIRST = ["do_in_app", "web_search", "read_webpage", "open_named_app", "open_app_screen", "phone_control",
-  "show_search_results", "show_pictures", "hand_back_to_assistant"];
+  "show_search_results", "show_pictures"];
+// The live voice's switch; everywhere else the server decides who answers.
+// Offered on a typed turn, the model called both at once and said "passing
+// this to my manager now" instead of answering AS the Manager (review,
+// 2026-11-01).
+const LIVE_ONLY = new Set(["hand_to_manager", "hand_back_to_assistant"]);
 
 // Thanks, greetings, goodbyes: no specialist, and never worth a model call.
 const SMALL_TALK = /^\s*(thanks?|thank you|thanks a lot|ok(ay)?|cool|great|nice|awesome|good (morning|afternoon|evening|night)|hi|hello|hey|bye|goodbye|see you)\b[\w\s.,!?']{0,30}$/i;
@@ -285,8 +290,9 @@ async function decide({ text, owner = true, skip = false, session = null, histor
  * set, the specialists' toolkits, then the rest of `base` — capped.
  */
 function toolsFor(plan, { base = [], must = [], live = null, cap = 40 } = {}) {
+  if (base.some((n) => LIVE_ONLY.has(n))) base = base.filter((n) => !LIVE_ONLY.has(n));
   if (!plan || !plan.agents.length) return base;
-  const has = (n) => !live || live.has(n);
+  const has = (n) => (!live || live.has(n)) && !LIVE_ONLY.has(n);
   if (plan.addressed === "manager") {
     // Every team's whole kit, the internet and apps first.
     const all = NAMES.flatMap((id) => SPECIALISTS[id].tools);
@@ -331,7 +337,7 @@ function managerBrief(assistant) {
   return `[THE MANAGER] The owner asked to talk to your manager. For this conversation you ARE the Manager — ` +
     `the senior assistant above ${assistant}, who leads her team and can do everything she can, and more. ` +
     `Speak as the Manager, never as ${assistant}: calm, confident, warm and to the point. Start your first reply ` +
-    `with "Manager here." and not again after that. You have every tool: the internet (search, and reading a page ` +
+    `with "Manager here." and not again after that. Never say you are passing anything on — you are the one doing it. You have every tool: the internet (search, and reading a page ` +
     `in full), opening any app on the phone, the phone's settings, calls, messages, reminders, calendar, documents, ` +
     `shopping and the rest. Use them to actually get the job done, several in a row when it takes several steps, ` +
     `and tell them plainly what you did. When the job is done or they ask for ${assistant}, say one short line ` +

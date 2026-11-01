@@ -70,7 +70,7 @@ router.get("/me", handle(async (req) => {
   if (app.scopes.includes("profile")) {
     const p = await require("../users/context").getProfile(Number(req.user.sub)).catch(() => null);
     out.user = { name: (p && p.user && p.user.name) || "" };
-    out.assistant = { name: (p && p.assistant && p.assistant.name) || "Assistant" };
+    out.assistant = { name: require("../users/context").nameOrDefault(p && p.assistant && p.assistant.name) };
   }
   return out;
 }));

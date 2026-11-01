@@ -57,7 +57,9 @@ const NOTE_ALIAS = /<\s*(?:prompt|style|voice|delivery|manner|mood|note)\s*:\s*(
 // HTML-style notes (2026-10-31, on screen as "</tone><informative>"):
 // "<tone>informative</tone>" is the tone note; a closing tag never shows.
 const TONE_XML = /<\s*tone\s*>\s*([^<>\n]{1,80}?)\s*<\s*\/\s*tone\s*>/gi;
-const CLOSING_TAG = /<\s*\/\s*[A-Za-z][A-Za-z _,'&-]{0,58}>/g;
+// "</tone:>" too (2026-11-01, seen at the end of a reply in review), and an
+// empty "<tone:>".
+const CLOSING_TAG = /<\s*\/\s*[A-Za-z][A-Za-z _,'&-]{0,58}\s*:?\s*>|<\s*tone\s*:\s*>/gi;
 function cleanText(text, atStart = true) {
   let out = String(text || "");
   out = out.replace(TONE_XML, (m, t) => (atStart ? `<tone: ${t.trim()}>` : "")).replace(CLOSING_TAG, "");

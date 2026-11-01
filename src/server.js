@@ -1,4 +1,10 @@
 require("dotenv").config();
+// IPv4 FIRST (2026-11-01): the VPS has no working IPv6 route — curl -6 to
+// api.openai.com fails after ~4 s, -4 answers in 0.3 s — and Node sometimes
+// picked the IPv6 address: 24 "fetch failed" in one day (8 replies, 9
+// pictures, 3 web searches, a voice sample). Every outbound call now tries
+// IPv4 first.
+require("dns").setDefaultResultOrder("ipv4first");
 const express = require("express");
 // Express 4 never routes an ASYNC handler's rejection to the error
 // middleware — the rejection went unhandled and Node killed the whole

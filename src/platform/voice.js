@@ -86,7 +86,7 @@ async function openSession({ app, user, body, tzOffsetMin = null }) {
       webrtc: "https://api.openai.com/v1/realtime/calls",
       websocket: `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(out.model)}`,
     },
-    assistant: { name: (profile && profile.assistant && profile.assistant.name) || "Assistant" },
+    assistant: { name: require("../users/context").nameOrDefault(profile && profile.assistant && profile.assistant.name) },
     assistant_tools: serverNames.filter((n) => serverDecls.some((d) => d.name === n)),
     app_tools: appTools.map((t) => t.name),
   };

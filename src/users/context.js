@@ -105,9 +105,9 @@ async function getProfile(userId) {
   return {
     user: u,
     assistant: a
-      ? { name: a.name, gender: a.gender, voice: a.voice, style: a.style,
+      ? { name: nameOrDefault(a.name), gender: a.gender, voice: a.voice, style: a.style,
           avatar_id: a.avatar_id || "" }
-      : { name: "Assistant", gender: "", voice: "", style: "", avatar_id: "" },
+      : { name: DEFAULT_ASSISTANT_NAME, gender: "", voice: "", style: "", avatar_id: "" },
   };
 }
 
@@ -239,8 +239,8 @@ async function setAssistantProfile(userId, { name, gender, voice, style, avatar_
   if (full && full.assistant) return full.assistant;
   const row = await one(`SELECT * FROM assistant_profiles WHERE user_id=$1`, [userId]);
   return row
-    ? { name: row.name, gender: row.gender, voice: row.voice, style: row.style, avatar_id: row.avatar_id }
-    : { name: "Assistant", gender: "", voice: "", style: "", avatar_id: "" };
+    ? { name: nameOrDefault(row.name), gender: row.gender, voice: row.voice, style: row.style, avatar_id: row.avatar_id }
+    : { name: DEFAULT_ASSISTANT_NAME, gender: "", voice: "", style: "", avatar_id: "" };
 }
 
 /* ---------------- standing instructions (§14) ---------------- */
@@ -441,7 +441,20 @@ async function markLanguageAsked(userId, whenMs) {
     [userId, Number(whenMs) || Date.now()]);
 }
 
+/**
+ * THE ASSISTANT'S NAME WHEN THEY NEVER GAVE IT ONE (2026-11-01): Maya. A
+ * reviewed conversation had her answer "My name is Assistant" three times
+ * for someone who had not named her; the old placeholder "Assistant" still
+ * stored for some users counts as no name.
+ */
+const DEFAULT_ASSISTANT_NAME = "Maya";
+function nameOrDefault(name) {
+  const n = String(name || "").trim();
+  return n && n.toLowerCase() !== "assistant" ? n : DEFAULT_ASSISTANT_NAME;
+}
+
 module.exports = {
+  DEFAULT_ASSISTANT_NAME, nameOrDefault,
   migrate,
   getProfile,
   getAssistantProfile,

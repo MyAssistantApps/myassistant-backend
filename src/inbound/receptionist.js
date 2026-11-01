@@ -430,9 +430,9 @@ async function identifyCaller(userId, phone) {
 async function assistantNameFor(userId) {
   try {
     const p = await require("../users/context").getProfile(userId);
-    return p?.assistant?.name || "Assistant";
+    return require("../users/context").nameOrDefault(p?.assistant?.name);
   } catch (_) {
-    return "Assistant";
+    return require("../users/context").DEFAULT_ASSISTANT_NAME;
   }
 }
 

@@ -88,9 +88,23 @@ async function call(path, { body, form, timeoutMs = TIMEOUT_MS, raw = false, hea
     h["content-type"] = "application/json";
     payload = JSON.stringify(body);
   }
-  const r = await fetch(`${BASE()}${path}`, {
-    method: "POST", headers: h, body: payload, signal: AbortSignal.timeout(Math.max(1000, timeoutMs)),
+  // ONE RETRY on a connection that never got a response ("fetch failed":
+  // the network, not OpenAI); never on an HTTP error, which has an answer.
+  const started = Date.now();
+  const send = () => fetch(`${BASE()}${path}`, {
+    method: "POST", headers: h, body: payload,
+    signal: AbortSignal.timeout(Math.max(1000, timeoutMs - (Date.now() - started))),
   });
+  let r;
+  try {
+    r = await send();
+  } catch (e) {
+    const network = e && e.name === "TypeError" && /fetch failed/i.test(String(e.message));
+    if (!network || form || Date.now() - started > timeoutMs - 2000) throw e;
+    console.warn(`openai ${path}: fetch failed (${(e.cause && e.cause.code) || "network"}) — retrying once`);
+    await new Promise((res) => setTimeout(res, 300));
+    r = await send();
+  }
   if (!r.ok) {
     const text = await r.text().catch(() => "");
     if (r.status === 429) busyUntil = Date.now() + 15_000;
