@@ -5829,7 +5829,7 @@ function registerBuiltins() {
         return { ok: false, error: "the news could not be fetched just now" };
       }
       const LABEL = {
-        settings: "your settings", home: "Home", hub: "the Hub", chat: "your messages", nearby: "Nearby",
+        settings: "your settings", home: "Home", hub: "the Hub", chat: "your messages",
         documents: "your documents", clients: "your clients",
         finance: "your finances", stocks: "your stocks",
         diagnostics: "diagnostics", mcp: "your connected servers",
@@ -7283,12 +7283,6 @@ function registerBuiltins() {
       // resolveRecipient() above, shared with send_video_note so one
       // spoken name always reaches the same person (2026-09-26).
       let who = await resolveRecipient(ctx.userId, args.contact_name);
-      // Not in the address book, but found on Nearby a moment ago
-      // (people/nearby.js): reachable through their own assistant.
-      if (!who.contactPhone && !who.ambiguous) {
-        const near = require("../people/nearby").recentMatch(ctx.userId, args.contact_name);
-        if (near) who = { contactPhone: near.phone_number, toPhone: near.phone_number, appUser: near };
-      }
       if (who.ambiguous) {
         return {
           ok: false,
@@ -9479,11 +9473,7 @@ function registerBuiltins() {
     name: "find_places_nearby",
     requiresPermission: "location",
     description:
-      "REAL places near the user, and PEOPLE ON THIS APP nearby who shared " +
-      "their profession ('find me nearby lawyers', 'any electrician around " +
-      "here', 'a doctor near me') — those come back in `people` with the " +
-      "area and distance, and the user can message one through you by " +
-      "name (send_agent_message). Also the map on their phone — 'which is " +
+      "REAL places near the user, and the map on their phone — 'which is " +
       "the best restaurant near me', 'good restaurants nearby', 'where can " +
       "I get a hair patch near me', 'is there a petrol pump around here', " +
       "'ATM close by', 'best hospital near me', 'chemist nearby'. " +
@@ -9567,15 +9557,6 @@ function registerBuiltins() {
         console.warn("find_places_nearby search failed:", e.message);
       }
 
-      // People on this app nearby who share what they do (people/nearby.js).
-      let people = [];
-      if (ctx.userId) {
-        try { people = await require("../people/nearby").search({ q, lat, lng, excludeUserId: ctx.userId }); } catch (_) { people = []; }
-      }
-      const peopleLine = people.length
-        ? ` People on this app nearby: ${people.slice(0, 4).map((p) => `${p.name} (${p.profession}${p.area ? `, ${p.area}` : ""}, ${p.distanceKm} km)`).join("; ")}. ` +
-          "Name them first, say they use this app and shared this, and offer to message one for the user (send_agent_message with their name)."
-        : "";
       const openMap = args.open_map !== false;
       // A google.com/maps SEARCH URL centred on where they are, not a
       // "geo:" URI. Google Maps claims these as app links, so the app
@@ -9590,9 +9571,9 @@ function registerBuiltins() {
 
       return {
         ok: true,
-        data: { query: q, area, places: found, people },
-        ...(openMap && !people.length ? { deviceAction: { type: "open_url", url } } : {}),
-        speak: peopleLine + (found.length
+        data: { query: q, area, places: found },
+        ...(openMap ? { deviceAction: { type: "open_url", url } } : {}),
+        speak: (found.length
           ? `Real places near ${area || "them"}: ` +
             found.slice(0, 3).map((p) => p.name).join("; ") +
             (openMap

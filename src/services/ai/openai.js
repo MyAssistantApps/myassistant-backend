@@ -50,7 +50,7 @@ const models = {
   tts: () => env("OPENAI_TTS_MODEL", "gpt-4o-mini-tts"),
   // Keep the cached greeting, spoken fallback, and Realtime conversation on
   // one voice preset. Sage is also available in the Realtime API.
-  ttsVoice: () => env("OPENAI_TTS_VOICE", "sage"),
+  ttsVoice: () => env("OPENAI_TTS_VOICE", "marin"),
   image: () => env("OPENAI_IMAGE_MODEL", "gpt-image-1"),
   // Edits on a model measured for it (2026-10-02: gpt-image-1.5, ~25 s).
   imageEdit: () => env("OPENAI_IMAGE_EDIT_MODEL", env("OPENAI_IMAGE_MODEL", "gpt-image-1")),

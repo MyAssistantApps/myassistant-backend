@@ -565,11 +565,6 @@ async function prepare(uid, body) {
   // only when both are true; an older build would show them). Never Live:
   // it speaks natively, and a mark would be read out.
   const expressive = body.expressive === true && mode !== "live";
-  // Someone who shares their profession keeps their coarse position
-  // current with every turn (people/nearby.js; throttled, cheap).
-  if (fix && Number.isFinite(fix.lat) && Number.isFinite(fix.lng)) {
-    require("../people/nearby").touchLocation(uid, fix.lat, fix.lng).catch(() => {});
-  }
   // Summarise one earlier day the user has no summary for yet — off the
   // reply's path, at most one model call per turn (memory/episodes.js).
   if (owner) require("../memory/episodes").ensure(uid, tz);

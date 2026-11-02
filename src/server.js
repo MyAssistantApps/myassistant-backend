@@ -275,7 +275,6 @@ app.use("/assistant", gone);
 app.use("/profile", appAuth, require("./routes/profile"));
 // Self-checks from the phones, for the admin panel (routes/diagnostics.js).
 app.use("/diagnostics", appAuth, perUserLimit, require("./routes/diagnostics").router);
-app.use("/nearby", appAuth, perUserLimit, require("./routes/nearby"));
 app.use("/phone", appAuth, require("./routes/phone"));
 // In-app dialer: call analysis uploads, history and the consent toggle.
 app.use("/calls", appAuth, ...paidUploadLimit, require("./routes/calls").router);
