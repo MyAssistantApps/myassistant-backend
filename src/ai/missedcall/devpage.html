@@ -1,0 +1,230 @@
+<!doctype html>
+<!--
+  MISSED-CALL CALLBACK — DEV TEST PAGE (served by route.js at /dev/missed-call-test,
+  never in production). You play the caller.
+
+  Wire format (route.js / laptopSource.js / laptopSink.js):
+    → text {"type":"start","token","callerName"}   → binary PCM16 mono 24000 Hz   → text {"type":"stop"}
+    ← text ready | transcript | clear | ended | error  ← binary PCM16 mono 24000 Hz
+-->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Missed-call test</title>
+<style>
+  :root { --bg:#fff; --fg:#1b1b1b; --muted:#666; --line:#ddd; --ai:#eef3ff; --caller:#f1f1f1; --accent:#2457d6; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#151515; --fg:#eee; --muted:#999; --line:#333; --ai:#1d2740; --caller:#262626; --accent:#7ea2ff; } }
+  body { font: 15px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); max-width: 720px; margin: 24px auto; padding: 0 16px; }
+  label { display: block; color: var(--muted); font-size: 13px; }
+  input { width: 100%; box-sizing: border-box; padding: 7px; margin: 3px 0 10px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; }
+  button { padding: 8px 18px; margin-right: 8px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .4; }
+  #status { color: var(--muted); margin: 12px 0; font-size: 13px; }
+  #turns { display: flex; flex-direction: column; gap: 6px; }
+  .t { padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; }
+  .assistant { background: var(--ai); }
+  .caller { background: var(--caller); align-self: flex-end; }
+  .t b { display: block; font-size: 11px; color: var(--muted); letter-spacing: .04em; }
+  .cut { opacity: .6; } .cut::after { content: "  [interrupted]"; font-size: 12px; }
+  #summary { margin-top: 16px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  #summary .lead { margin: 0 0 8px; font-size: 16px; line-height: 1.55; }
+  #summary details { font-size: 13px; color: var(--muted); }
+  #summary details summary { cursor: pointer; }
+  #summary pre { white-space: pre-wrap; font-size: 12px; overflow-wrap: anywhere; margin: 6px 0 0; }
+  .warn { color: #c0392b; font-weight: 600; }
+</style></head>
+<body>
+<h2>Missed-call callback — dev test</h2>
+<p style="color:var(--muted)">You play the caller. Headphones help: echo cancellation is on, but laptop speakers can still leak the AI's voice into the mic and trigger a barge-in.</p>
+<label>Session token (leave empty when the server runs with AUTH_DISABLED=true)<input id="token" autocomplete="off"></label>
+<label>Caller's saved name (optional)<input id="caller" autocomplete="off"></label>
+<button id="start">Start</button><button id="stop" disabled>Stop</button><button id="sum" hidden>Get summary</button>
+<div id="status">Idle.</div>
+<div id="turns"></div>
+<div id="summary" hidden></div>
+<script>
+"use strict";
+const RATE = 24000; // the route's format: PCM16 mono 24 kHz
+const CHUNK = RATE / 10; // 100 ms per frame sent
+const $ = (id) => document.getElementById(id);
+const status = (t) => { $("status").textContent = t; };
+
+let ws = null, ctx = null, mic = null, node = null;
+let nextAt = 0, t0 = 0, firstAudio = false;
+const playing = new Set();
+let last = null; // { role, el }
+let callId = null; // from "ready": the finished call the summary is asked for
+
+// ---- transcript ----
+function addText(role, delta) {
+  if (!last || last.role !== role) {
+    const el = document.createElement("div");
+    el.className = "t " + role;
+    el.innerHTML = "<b>" + (role === "caller" ? "CALLER (you)" : "AI") + "</b>";
+    el.appendChild(document.createTextNode(""));
+    $("turns").appendChild(el);
+    last = { role, el };
+  }
+  last.el.lastChild.textContent += delta;
+  last.el.scrollIntoView({ block: "end" });
+}
+function markInterrupted() {
+  const els = document.querySelectorAll(".t.assistant");
+  if (els.length) els[els.length - 1].classList.add("cut");
+}
+
+// ---- playback (AI audio) ----
+function play(ab) {
+  const pcm = new Int16Array(ab);
+  const f = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) f[i] = pcm[i] / 32768;
+  const buf = ctx.createBuffer(1, f.length, RATE); // the browser resamples to the device rate
+  buf.copyToChannel(f, 0);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  src.connect(ctx.destination);
+  nextAt = Math.max(nextAt, ctx.currentTime + 0.05);
+  src.start(nextAt);
+  nextAt += buf.duration;
+  playing.add(src);
+  src.onended = () => playing.delete(src);
+}
+function clearPlayback() {
+  for (const s of playing) { try { s.stop(); } catch (_) {} }
+  playing.clear();
+  nextAt = 0;
+}
+
+// ---- capture (mic → 24 kHz PCM16) ----
+// The context runs at the device rate (a 24 kHz context cannot take a mic
+// stream in every browser), so frames are resampled here, linearly, with
+// the fractional position carried across frames.
+const WORKLET = "class Tap extends AudioWorkletProcessor{process(i){const c=i[0]&&i[0][0];if(c)this.port.postMessage(c.slice(0));return true}}registerProcessor('tap',Tap)";
+function resampler(inRate) {
+  const step = inRate / RATE;
+  let carry = new Float32Array(0), pos = 0;
+  return (frame) => {
+    const x = new Float32Array(carry.length + frame.length);
+    x.set(carry); x.set(frame, carry.length);
+    const out = [];
+    while (pos + 1 < x.length) {
+      const i = Math.floor(pos), f = pos - i;
+      out.push(x[i] * (1 - f) + x[i + 1] * f);
+      pos += step;
+    }
+    const keep = Math.floor(pos);
+    carry = x.slice(keep);
+    pos -= keep;
+    return out;
+  };
+}
+
+async function start() {
+  $("start").disabled = true;
+  $("turns").textContent = "";
+  $("sum").hidden = true;
+  $("summary").hidden = true;
+  last = null; firstAudio = false; callId = null;
+  status("Opening the microphone…");
+  ctx = new AudioContext();
+  mic = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" })));
+  node = new AudioWorkletNode(ctx, "tap");
+  ctx.createMediaStreamSource(mic).connect(node);
+  const resample = resampler(ctx.sampleRate);
+  let pend = [];
+
+  ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ai/missed-call/stream?source=laptop");
+  ws.binaryType = "arraybuffer";
+  node.port.onmessage = (e) => {
+    if (!ws || ws.readyState !== 1) return;
+    for (const v of resample(e.data)) pend.push(v);
+    while (pend.length >= CHUNK) {
+      const out = new Int16Array(CHUNK);
+      for (let i = 0; i < CHUNK; i++) out[i] = Math.max(-1, Math.min(1, pend[i])) * 32767;
+      pend = pend.slice(CHUNK);
+      ws.send(out.buffer);
+    }
+  };
+  ws.onopen = () => {
+    t0 = performance.now();
+    status("Connected — starting the call…");
+    ws.send(JSON.stringify({ type: "start", token: $("token").value.trim(), callerName: $("caller").value.trim() }));
+  };
+  ws.onmessage = (e) => {
+    if (typeof e.data !== "string") {
+      if (!firstAudio) { firstAudio = true; status("Live. First AI audio after " + Math.round(performance.now() - t0) + " ms."); }
+      return play(e.data);
+    }
+    const m = JSON.parse(e.data);
+    if (m.type === "ready") { callId = m.id; $("stop").disabled = false; status("Live (" + m.id + ", voice " + m.voice + ", max " + m.maxSec + " s). Waiting for the AI…"); }
+    else if (m.type === "transcript") addText(m.role, m.delta);
+    else if (m.type === "clear") { clearPlayback(); markInterrupted(); }
+    else if (m.type === "ended") status("Ended: " + m.reason + ((m.errors || []).length ? " — " + m.errors.join("; ") : ""));
+    else if (m.type === "error") status("Error: " + m.error);
+  };
+  ws.onclose = () => { teardown(); if (!/^Ended|^Error/.test($("status").textContent)) status("Disconnected."); };
+}
+
+function teardown() {
+  $("start").disabled = false;
+  $("stop").disabled = true;
+  if (mic) mic.getTracks().forEach((t) => t.stop());
+  if (ctx) ctx.close();
+  mic = ctx = node = null;
+  ws = null;
+  if (callId) $("sum").hidden = false; // the call is over: its summary can be asked for
+}
+
+// ---- summary (POST /ai/missed-call/summary, summary.js) ----
+// The summary paragraph first; everything else in a collapsed "Details".
+function showSummary(s) {
+  const box = $("summary");
+  box.hidden = false;
+  box.textContent = "";
+  if (s.empty) { box.textContent = "Nothing to summarize: " + (s.reason || "the caller said almost nothing") + "."; return; }
+  if (s.error) {
+    box.innerHTML = '<span class="warn"></span>';
+    box.firstChild.textContent = "Summary failed (" + s.error + "): " + (s.message || "") + ((s.problems || []).length ? " — " + s.problems.join("; ") : "");
+    return;
+  }
+  const para = document.createElement("p");
+  para.className = "lead";
+  para.textContent = s.summary;
+  box.appendChild(para);
+  // The one thing kept in sight: the AI must never promise for the owner.
+  if (s.ai_committed) {
+    const w = document.createElement("p");
+    w.className = "warn";
+    w.textContent = "The AI promised something on your behalf: " + s.ai_commitments.join("; ");
+    box.appendChild(w);
+  }
+  const { summary: _, ...rest } = s;
+  const details = document.createElement("details");
+  details.innerHTML = "<summary>Details</summary><pre></pre>";
+  details.querySelector("pre").textContent = JSON.stringify(rest, null, 2);
+  box.appendChild(details);
+}
+$("sum").onclick = async () => {
+  $("sum").disabled = true;
+  $("summary").hidden = false;
+  $("summary").textContent = "Summarizing…";
+  try {
+    const token = $("token").value.trim();
+    const r = await fetch("/ai/missed-call/summary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
+      body: JSON.stringify({ sessionId: callId }),
+    });
+    showSummary(await r.json());
+  } catch (e) {
+    showSummary({ error: "request_failed", message: e.message });
+  } finally {
+    $("sum").disabled = false;
+  }
+};
+
+$("start").onclick = () => start().catch((e) => { status("Could not start: " + e.message); teardown(); });
+$("stop").onclick = () => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "stop" })); };
+</script>
+</body></html>

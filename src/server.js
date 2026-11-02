@@ -746,6 +746,7 @@ require("./db")
     });
     // The /live/ws upgrade an old build still tries answers 426.
     require("./ai/gone").attachUpgrade(server);
+    if (process.env.NODE_ENV !== "production") require("./ai/missedcall/route").listen(Number(process.env.MISSED_CALL_DEV_PORT) || 3001);
 
     // Call recordings are pruned after every session, but a server that
     // sat idle over a weekend still holds expired ones. Sweep at boot and
