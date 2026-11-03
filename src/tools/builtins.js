@@ -3866,6 +3866,20 @@ function registerBuiltins() {
     risk: "low",
     inputSchema: { type: "object", properties: {} },
     async execute(_args, ctx) {
+      // UPDATES ARE OFF (owner, 2026-11-03: "turn off auto update features
+      // completely"). The app no longer checks, downloads or installs a
+      // build itself, so the honest answer is that — never "opening the
+      // installer". New builds reach the phone another way.
+      if (process.env.APP_SELF_UPDATE !== "on") {
+        return {
+          ok: true,
+          data: { selfUpdate: false },
+          speak: "In-app updates are turned off — new versions are installed separately.",
+          note:
+            "In-app updating is switched off. Say so in one short line; do " +
+            "NOT claim to check, download, open or install anything.",
+        };
+      }
       let meta = null;
       try {
         meta = require("../routes/appUpdate").readMeta();
