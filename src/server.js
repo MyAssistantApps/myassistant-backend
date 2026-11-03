@@ -329,6 +329,9 @@ app.use("/finance", appAuth, require("./routes/finance").router);
 // TODAY BRIEF — one aggregate fetch for the home dashboard (agenda,
 // promises, unread agent messages, circle, weather, headlines).
 app.use("/brief", appAuth, require("./routes/brief"));
+// PROFESSIONAL ASSISTANTS' "TODAY" (2026-11-03) — the Doctor's / Advocate's /
+// Business page: AI summary, numbers and what needs the user now.
+app.use("/pro", appAuth, require("./routes/pro"));
 // NEWS CARDS (2026-09-25) — Hub → News reads its deck from here.
 app.use("/news", appAuth, require("./routes/news"));
 // Multi-step plans the assistant has committed to: what is running,

@@ -541,7 +541,7 @@ test("claims about screens and timers are backed by the tool that ran", () => {
 
 test("setting the theme by voice produces an action the app can perform", async () => {
   const registry = require("../src/tools/registry");
-  for (const [mode, expect] of [["dark", /dark/i], ["light", /light/i], ["adaptive", /automatic/i]]) {
+  for (const [mode, expect] of [["dark", /dark/i], ["light", /light/i]]) {
     const res = await registry.get("set_app_theme").execute({ mode }, {});
     assert.strictEqual(res.ok, true, `${mode} should be settable`);
     assert.strictEqual(res.deviceAction.type, "set_theme");
@@ -555,6 +555,9 @@ test("a theme the app does not have is refused, not guessed at", async () => {
   const res = await registry.get("set_app_theme").execute({ mode: "sepia" }, {});
   assert.strictEqual(res.ok, false);
   assert.match(res.error, /sepia/);
+  // Adaptive (follow the clock) was removed: only light and dark exist.
+  const gone = await registry.get("set_app_theme").execute({ mode: "adaptive" }, {});
+  assert.strictEqual(gone.ok, false);
 });
 
 test("every screen open_app_screen offers is one the app can actually build", async () => {

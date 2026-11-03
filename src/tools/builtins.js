@@ -5619,11 +5619,9 @@ function registerBuiltins() {
     name: "set_app_theme",
     description:
       "Change how the APP ITSELF looks — 'switch to dark mode', 'make it " +
-      "light', 'turn on dark theme', 'go back to automatic'. This is the " +
-      "assistant app's own appearance, not the phone's system theme.\n" +
-      "'adaptive' follows the clock: light by day, dark in the evening. It " +
-      "is the default, and what 'automatic' means. Pick it when the user " +
-      "asks for automatic or says to stop choosing for them.",
+      "light', 'turn on dark theme'. This is the assistant app's own " +
+      "appearance, not the phone's system theme. The app has two themes, " +
+      "light (the default) and dark; there is no automatic mode.",
     risk: "low",
     deviceAction: true,
     inputSchema: {
@@ -5631,25 +5629,21 @@ function registerBuiltins() {
       properties: {
         mode: {
           type: "string",
-          enum: ["dark", "light", "adaptive"],
-          description:
-            "dark or light to fix it; adaptive to follow the time of day.",
+          enum: ["dark", "light"],
+          description: "dark or light.",
         },
       },
       required: ["mode"],
     },
     async execute(args) {
       const mode = String(args.mode || "").toLowerCase().trim();
-      if (!["dark", "light", "adaptive"].includes(mode)) {
+      if (!["dark", "light"].includes(mode)) {
         return { ok: false, error: `"${args.mode}" is not a theme I can set` };
       }
       return {
         ok: true,
         deviceAction: { type: "set_theme", mode },
-        speak:
-          mode === "adaptive"
-            ? "Back to automatic — light by day, dark in the evening."
-            : `Switched to ${mode} mode.`,
+        speak: `Switched to ${mode} mode.`,
       };
     },
   });

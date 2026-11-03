@@ -47,6 +47,20 @@ function q(s, max = 400) {
   return String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+/**
+ * "MAKE IT YOURS" (2026-11-03): an optional free-text box on the try-on
+ * looks (clothes, haircut, jewellery, custom) — whatever the user wants
+ * changed on top of the reference: "make the sleeves shorter", "in navy".
+ */
+const PERSONAL = {
+  key: "notes", label: "Make it yours", type: "text",
+  hint: "Optional: colour, length, fit, anything to change",
+};
+function personal(params) {
+  const n = q(params && params.notes, 300);
+  return n ? `The user's own direction, which takes priority over defaults (still keep the person's identity): ${n}.` : "";
+}
+
 /* ------------------------------------------------------------------ */
 /* PRESET LISTS — what the app offers as one tap                       */
 /* ------------------------------------------------------------------ */
@@ -195,6 +209,7 @@ const RECIPES = [
       { key: "outfit", label: "What to wear", type: "text", hint: "navy suit, red silk saree, denim jacket" },
       { key: "fit", label: "Fit", type: "choice", options: ["as it comes", "slim fit", "relaxed fit", "oversized"] },
       { key: "occasion", label: "Occasion", type: "text", hint: "office, wedding, interview" },
+      PERSONAL,
     ],
     build({ params, hasGarment }) {
       const what = q(params.outfit);
@@ -214,6 +229,7 @@ const RECIPES = [
         wear,
         fit && fit !== "as it comes" ? `The garment should be a ${fit}.` : "",
         occ ? `The look is for: ${occ}. Choose footwear and accessories that suit it.` : "",
+        personal(params),
         "Drape it on the body as real cloth behaves: follow the shoulders, " +
           "chest and waist, let it fall with gravity, and put the creases, " +
           "folds and shadows where the pose actually puts them. Replace the " +
@@ -234,22 +250,33 @@ const RECIPES = [
     icon: "hair",
     group: "Try it on",
     aspect: "portrait",
-    needs: { model: true },
+    // A REFERENCE HAIRCUT (2026-11-03): a photo of the cut they want —
+    // a celebrity, a salon picture — as the second image.
+    needs: { model: true, garment: "optional" },
     presets: HAIR_PRESETS,
     params: [
       { key: "style", label: "Hairstyle", type: "text", hint: "short fade, long layers, low bun" },
       { key: "colour", label: "Colour", type: "choice", options: HAIR_COLOURS.map((c) => c.label) },
       { key: "length", label: "Length", type: "choice", options: ["as described", "shorter", "longer"] },
+      PERSONAL,
     ],
-    build({ params }) {
+    build({ params, hasGarment }) {
       const style = q(params.style) || "a neat, flattering modern haircut that suits their face shape";
       const colour = HAIR_COLOURS.find((c) => c.label === q(params.colour, 60))?.prompt || "";
       const len = q(params.length, 30);
       return [
         KEEP_IDENTITY,
-        `Change ONLY the hair. Give this person ${style}.`,
-        colour ? `Hair colour: ${colour}.` : "Keep their existing natural hair colour exactly as it is.",
+        hasGarment
+          ? "Change ONLY the hair. Give the person in the FIRST image the exact " +
+            "haircut shown in the SECOND image — its cut, length, layering, " +
+            "parting, texture and volume — adapted naturally to this person's " +
+            "head shape and hairline. Take nothing else from the second image: " +
+            "not the face, skin, clothing or background." +
+            (q(params.style) ? ` Additional direction: ${q(params.style)}.` : "")
+          : `Change ONLY the hair. Give this person ${style}.`,
+        colour ? `Hair colour: ${colour}.` : hasGarment ? "Use the hair colour from the second image only if the user asks; otherwise keep their own natural colour." : "Keep their existing natural hair colour exactly as it is.",
         len === "shorter" ? "Err on the shorter side." : len === "longer" ? "Err on the longer side." : "",
+        personal(params),
         "Re-draw the hairline and the shape of the head's hair so it grows " +
           "the way real hair grows out of this scalp — correct hairline " +
           "position, correct density at the temples and crown, individual " +
@@ -334,6 +361,7 @@ const RECIPES = [
     vto: false,
     params: [
       { key: "piece", label: "The piece", type: "text", hint: "temple-gold necklace, jhumkas, diamond studs" },
+      PERSONAL,
     ],
     build({ params, hasGarment }) {
       const p = q(params.piece) || "a traditional gold necklace with matching earrings";
@@ -342,12 +370,47 @@ const RECIPES = [
         hasGarment
           ? "Put the exact jewellery shown in the SECOND image onto the person in the FIRST image — the same metal colour, the same stones, the same motif and the same size relative to the body."
           : `Put ${p} onto this person.`,
+        personal(params),
         "It must sit where real jewellery sits and behave like metal and " +
           "stone: follow the curve of the neck or the hang of the earlobe, " +
           "catch the light from the same direction as the rest of the " +
           "photograph, cast a small shadow on the skin or cloth beneath it, " +
           "and keep the correct scale. Do not change the face, the outfit, " +
           "the neckline or the background.",
+        PHOTOREAL,
+        IMAGE_ONLY,
+      ].filter(Boolean).join(" ");
+    },
+  },
+
+  /* ---------------- 5b. CUSTOM (2026-11-03) ---------------- */
+  // Your photo, any reference photo, and what to do with it in your own
+  // words — the open-ended try-on for anything the other looks don't cover.
+  {
+    id: "custom",
+    title: "Custom look",
+    blurb: "Your photo, a reference, your words",
+    icon: "custom",
+    group: "Try it on",
+    aspect: "portrait",
+    needs: { model: true, garment: "optional" },
+    params: [
+      { key: "notes", label: "What should I do?", type: "text",
+        hint: "Wear the watch from the reference, give me this beach background" },
+    ],
+    build({ params, hasGarment }) {
+      const ask = q(params.notes, 400) || "a tasteful, flattering refresh of the look";
+      return [
+        KEEP_IDENTITY,
+        hasGarment
+          ? "Use the SECOND image only as the reference for what the user asks " +
+            `for, and apply it to the person in the FIRST image: ${ask}. ` +
+            "Reproduce the referenced item, style or setting faithfully, and " +
+            "take nothing from the second image that the user did not ask for."
+          : `Edit the photo as the user asks: ${ask}.`,
+        "Make every change physically believable — correct scale, lighting " +
+          "from the same direction as the rest of the photograph, real " +
+          "shadows and contact. Change nothing the request does not need.",
         PHOTOREAL,
         IMAGE_ONLY,
       ].filter(Boolean).join(" ");
