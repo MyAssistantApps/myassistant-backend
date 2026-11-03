@@ -35,3 +35,6 @@ DATABASE_URL=<secret>
 GOOGLE_WEB_CLIENT_ID=<secret>
 JWT_SECRET=<secret>
 OPENAI_API_KEY=<secret>
+# Photo edits (Style Studio try-ons): the edits endpoint rejects
+# gpt-image-1 on this account (2026-11-03).
+OPENAI_IMAGE_EDIT_MODEL=gpt-image-1.5
