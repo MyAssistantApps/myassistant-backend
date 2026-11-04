@@ -133,7 +133,9 @@ const globalJson = express.json({
     // against undefined and rejected every legitimate webhook. Only the
     // payment webhook path needs it, so nothing else pays the memory.
     verify: (req, _res, buf) => {
-      if (req.originalUrl && req.originalUrl.startsWith("/payments/webhook")) {
+      if (req.originalUrl && (req.originalUrl.startsWith("/payments/webhook") ||
+          req.originalUrl.startsWith("/ondc/"))) {
+        // ONDC signs the raw bytes of every callback too (src/ondc/crypto.js).
         req.rawBody = buf;
       }
     },
@@ -151,9 +153,21 @@ app.use(require("./ops/spend").bind());
 // 60 was close enough that a fast talker hit 429s and the app silently
 // dropped to the robotic on-device voice. 240 keeps abuse out without
 // throttling real use.
-app.use(rateLimit({ windowMs: 60_000, max: 240, standardHeaders: true }));
+app.use(rateLimit({
+  windowMs: 60_000, max: 240, standardHeaders: true,
+  // ONDC's network answers one search with a reply per store, from a few
+  // gateway addresses: those callbacks are signed and checked instead.
+  skip: (req) => req.path.startsWith("/ondc/"),
+}));
 
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
+// ONDC (2026-11-04): the network's callbacks (public, signed) and the
+// domain verification page ONDC fetches from our root.
+{
+  const ondc = require("./routes/ondc");
+  app.get("/ondc-site-verification.html", ondc.siteVerification);
+  app.use("/ondc", ondc.router);
+}
 
 // Public within the app: remote config (no secrets inside it)
 app.use("/config", configRoute);
@@ -329,6 +343,12 @@ app.use("/finance", appAuth, require("./routes/finance").router);
 // TODAY BRIEF — one aggregate fetch for the home dashboard (agenda,
 // promises, unread agent messages, circle, weather, headlines).
 app.use("/brief", appAuth, require("./routes/brief"));
+// FLIGHTS PAGE (2026-11-04): the flight list the app draws.
+app.use("/travel", appAuth, require("./routes/travel"));
+// IN-APP SHOPPING over ONDC (2026-11-04).
+app.use("/shop", appAuth, require("./routes/shop"));
+// EVERYDAY SERVICES (2026-11-04): partner links with our affiliate tracking.
+app.use("/go", appAuth, require("./routes/go"));
 // PROFESSIONAL ASSISTANTS' "TODAY" (2026-11-03) — the Doctor's / Advocate's /
 // Business page: AI summary, numbers and what needs the user now.
 app.use("/pro", appAuth, require("./routes/pro"));

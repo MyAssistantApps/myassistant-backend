@@ -82,12 +82,27 @@ async function sample(id) {
  * tapped. A voice she cannot speak in gets the default voice's hello.
  */
 const GREETING_LINE = /^[\p{L} .,!?'’-]{2,60}$/u;
+// FASTER HELLO (owner, 2026-11-04: "hello sir should be played fast"): the
+// opening is sped up 1.25× without changing her pitch (src/ai/tempo.js)
+// and its trailing quiet cut. v2 in the key: every voice's hello is made
+// again once, the old slower files are left unused.
+const GREETING_TEMPO = Number(process.env.GREETING_TEMPO) > 1 ? Number(process.env.GREETING_TEMPO) : 1.25;
+async function greetingWav(v, text) {
+  const openai = require("../services/ai/openai");
+  const tempo = require("./tempo");
+  const out = await openai.speak(text, { voice: v.id, format: "pcm" });
+  const pcm = Buffer.isBuffer(out) ? out : Buffer.from(out.buffer || out.audio || out);
+  if (pcm.length < 4800) throw new Error("no speech audio");
+  return openai.wavWrap(tempo.trimSilence(tempo.speedUp(tempo.trimSilence(pcm), GREETING_TEMPO)), 24000);
+}
+
 async function greeting(id, line) {
   const text = String(line || "").trim();
   if (!GREETING_LINE.test(text)) return null;
   const v = byId(id) || byId(require("./proxy").DEFAULT_VOICE);
-  const key = require("crypto").createHash("sha1").update(`tts-v1|${v.id}|${text}`).digest("hex").slice(0, 16);
-  return kept(path.join(DIR, `greet-tts-${key}.wav`), () => speakWav(v, text));
+  const key = require("crypto").createHash("sha1")
+    .update(`tts-v2|${GREETING_TEMPO}|${v.id}|${text}`).digest("hex").slice(0, 16);
+  return kept(path.join(DIR, `greet-tts-${key}.wav`), () => greetingWav(v, text));
 }
 
 /**

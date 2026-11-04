@@ -288,6 +288,8 @@ router.get("/voices/:id/greeting-v3", serveGreeting);
 router.get("/voices/:id/greeting-v4", serveGreeting);
 // v5: the path every current build asks for.
 router.get("/voices/:id/greeting-v5", serveGreeting);
+// v6 (2026-11-04): the faster hello — a new path so phones fetch it again.
+router.get("/voices/:id/greeting-v6", serveGreeting);
 
 router.post("/firebase-token", async (req, res) => {
   const uid = userOf(req, res);
