@@ -12,6 +12,17 @@
  * Only these ids can be opened — /go is not an open redirect.
  */
 const MERCHANTS = [
+  // Food & groceries — the apps everyone already uses (client, 2026-11-05)
+  { id: "swiggy", name: "Swiggy", category: "Food & groceries", url: "https://www.swiggy.com/", program: "partner", color: "#FC8019", home: true },
+  { id: "zomato", name: "Zomato", category: "Food & groceries", url: "https://www.zomato.com/", program: "partner", color: "#E23744", home: true },
+  { id: "blinkit", name: "Blinkit", category: "Food & groceries", url: "https://blinkit.com/", program: "partner", color: "#F8CB46", home: true },
+  { id: "zepto", name: "Zepto", category: "Food & groceries", url: "https://www.zeptonow.com/", program: "partner", color: "#7B2BF9", home: true },
+  { id: "bigbasket", name: "BigBasket", category: "Food & groceries", url: "https://www.bigbasket.com/", program: "network", color: "#84C225", home: true },
+  // Rides — taxis, autos, bikes and goods (client, 2026-11-05)
+  { id: "uber", name: "Uber", category: "Rides", url: "https://m.uber.com/", program: "partner", color: "#000000", home: true },
+  { id: "ola", name: "Ola", category: "Rides", url: "https://book.olacabs.com/", program: "partner", color: "#1C1C1C", home: true },
+  { id: "rapido", name: "Rapido", category: "Rides", url: "https://www.rapido.bike/", program: "partner", color: "#F9C933", home: true },
+  { id: "nammayatri", name: "Namma Yatri", category: "Rides", url: "https://nammayatri.in/", program: "partner", color: "#2E2E2E", home: true },
   // Fashion
   { id: "myntra", name: "Myntra", category: "Fashion", url: "https://www.myntra.com/", program: "network", color: "#FF3F6C" },
   { id: "ajio", name: "AJIO", category: "Fashion", url: "https://www.ajio.com/", program: "network", color: "#2C4152" },
@@ -23,12 +34,12 @@ const MERCHANTS = [
   { id: "purplle", name: "Purplle", category: "Beauty", url: "https://www.purplle.com/", program: "network", color: "#7A2E8E" },
   { id: "mamaearth", name: "Mamaearth", category: "Beauty", url: "https://mamaearth.in/", program: "network", color: "#00AEEF" },
   // Electronics & shopping
-  { id: "amazon", name: "Amazon", category: "Shopping", url: "https://www.amazon.in/", program: "amazon", color: "#FF9900" },
-  { id: "flipkart", name: "Flipkart", category: "Shopping", url: "https://www.flipkart.com/", program: "network", color: "#2874F0" },
+  { home: true, id: "amazon", name: "Amazon", category: "Shopping", url: "https://www.amazon.in/", program: "amazon", color: "#FF9900" },
+  { home: true, id: "flipkart", name: "Flipkart", category: "Shopping", url: "https://www.flipkart.com/", program: "network", color: "#2874F0" },
   { id: "croma", name: "Croma", category: "Shopping", url: "https://www.croma.com/", program: "network", color: "#0F8B8D" },
   { id: "reliancedigital", name: "Reliance Digital", category: "Shopping", url: "https://www.reliancedigital.in/", program: "network", color: "#E42529" },
   // Moving & delivery
-  { id: "porter", name: "Porter", category: "Moving & delivery", url: "https://porter.in/", program: "partner", color: "#1E4FD8" },
+  { home: true, id: "porter", name: "Porter", category: "Rides", url: "https://porter.in/", program: "partner", color: "#1E4FD8" },
   { id: "shiprocket", name: "Shiprocket", category: "Moving & delivery", url: "https://www.shiprocket.in/", program: "partner", color: "#7347EF" },
   { id: "urbancompany", name: "Urban Company", category: "Home services", url: "https://www.urbancompany.com/", program: "partner", color: "#111111" },
   // Health
@@ -53,8 +64,26 @@ const MERCHANTS = [
 
 const BY_ID = new Map(MERCHANTS.map((m) => [m.id, m]));
 
+/**
+ * A deep link inside the partner's own site (a hotel search with dates),
+ * or null: only the same host as the partner's url is ever allowed.
+ */
+function deepLink(m, target) {
+  try {
+    const u = new URL(String(target || ""));
+    const host = new URL(m.url).hostname.replace(/^www\./, "");
+    if (u.protocol !== "https:") return null;
+    if (u.hostname.replace(/^www\./, "") !== host && !u.hostname.endsWith("." + host)) return null;
+    return u.toString();
+  } catch (_) {
+    return null;
+  }
+}
+
 /** The tracked link for [m], and whether we earn on it right now. */
-function trackedUrl(m) {
+function trackedUrl(m, target) {
+  const dest = deepLink(m, target) || m.url;
+  m = { ...m, url: dest };
   if (m.program === "amazon" && process.env.AMAZON_ASSOCIATE_TAG) {
     const u = new URL(m.url);
     u.searchParams.set("tag", process.env.AMAZON_ASSOCIATE_TAG);
@@ -72,9 +101,9 @@ function trackedUrl(m) {
 
 /** The list the app shows (no tracking ids in it). */
 function catalogue() {
-  return MERCHANTS.map(({ id, name, category, color, program }) => ({
-    id, name, category, color, earns: trackedUrl(BY_ID.get(id)).tracked, program,
+  return MERCHANTS.map(({ id, name, category, color, program, home }) => ({
+    id, name, category, color, earns: trackedUrl(BY_ID.get(id)).tracked, program, home: Boolean(home),
   }));
 }
 
-module.exports = { MERCHANTS, BY_ID, trackedUrl, catalogue };
+module.exports = { MERCHANTS, BY_ID, trackedUrl, catalogue, deepLink };

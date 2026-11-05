@@ -547,8 +547,11 @@ function fromImageResponse(j) {
 // Keep spoken replies concise by default; operators can raise this through
 // OPENAI_RT_MAX_OUTPUT_TOKENS after measuring real voice-task usage.
 function realtimeMaxOutputTokens() {
-  const n = Math.round(Number(env("OPENAI_RT_MAX_OUTPUT_TOKENS", "512")));
-  return Number.isFinite(n) ? Math.max(128, Math.min(4096, n)) : 512;
+  // 4096 (client, 2026-11-05: "it gave half the information and stopped"):
+  // these tokens include the AUDIO, so 512 cut any answer longer than about
+  // a minute of speech in the middle of a sentence.
+  const n = Math.round(Number(env("OPENAI_RT_MAX_OUTPUT_TOKENS", "4096")));
+  return Number.isFinite(n) ? Math.max(128, Math.min(4096, n)) : 4096;
 }
 
 /**
@@ -562,7 +565,10 @@ async function realtimeClientSecret({ voice, instructions = "", tools = [], mode
   // the sentence is finished, not just how long the pause was.
   // OPENAI_RT_VAD=server restores the timed pause (silenceMs).
   const turn = env("OPENAI_RT_VAD", "semantic") !== "server"
-    ? { type: "semantic_vad", eagerness: env("OPENAI_RT_EAGERNESS", "auto"), create_response: true, interrupt_response: false }
+    // eagerness "low" (client, 2026-11-05: "before I complete my question
+    // it interrupts in between"): the model waits for the speaker to have
+    // clearly finished — a thinking pause mid-question no longer ends it.
+    ? { type: "semantic_vad", eagerness: env("OPENAI_RT_EAGERNESS", "low"), create_response: true, interrupt_response: false }
     : {
         // 0.7 (2 Oct, "it even considers the background noises"): a TV or a
         // voice across the room stays under it; their own voice, near the
@@ -633,9 +639,15 @@ function safetyId(user) {
  * figures themselves, not a list of snippets for the brain to guess from.
  * Returns { text, sources: [{title, url}], queries, usage, model }.
  */
+// A PERSON, A DOCTOR, A BUSINESS (client, 2026-11-05: asked about "Dr M. N.
+// Rajendra Kumar of Mangalore", got half the facts): these need the pages
+// read properly, so they search at "medium" depth; quick facts stay "low".
+const DETAIL_QUERY = /\b(?:dr|doctor|adv|advocate|mr|mrs|ms|prof|shri|smt|who is|about|details?|profile|biography|clinic|hospital|company|firm|shop|restaurant|hotel|college|school)\b/i;
+
 async function webSearch(query, { model, location, timeoutMs = 45_000 } = {}) {
   // "low" context: the facts arrive in about half the time (2 Oct, "need faster").
-  const tool = { type: "web_search", search_context_size: env("OPENAI_SEARCH_CONTEXT", "low") };
+  const depth = DETAIL_QUERY.test(String(query || "")) ? env("OPENAI_SEARCH_CONTEXT_DETAIL", "medium") : env("OPENAI_SEARCH_CONTEXT", "low");
+  const tool = { type: "web_search", search_context_size: depth };
   if (location && (location.city || location.country)) {
     tool.user_location = {
       type: "approximate", country: String(location.country || "IN").toUpperCase().slice(0, 2),
@@ -653,8 +665,11 @@ async function webSearch(query, { model, location, timeoutMs = 45_000 } = {}) {
       instructions:
         `Today is ${new Date().toLocaleDateString("en-IN", { timeZone: env("SEARCH_TIMEZONE", "Asia/Kolkata"), dateStyle: "full" })}. ` +
         "Answer only from the pages you found, never from memory. " +
-        "Answer the question directly from what you find — the figures, names, times and dates — in at " +
-        "most four sentences, plain text, no headings or bullet points. Prefer today's information for " +
+        "Answer the question directly from what you find — the figures, names, times and dates. Give the " +
+        "COMPLETE answer: for a person, everything the pages say (full name, qualifications, specialty or " +
+        "profession, where they work, address, consulting timings, phone, notable facts); for a business " +
+        "or place, the same. If the pages describe more than one person with that name, say which is which. " +
+        "Plain sentences, no headings or bullet points, as long as the facts need. Prefer today's information for " +
         "anything that changes (prices, timings, news, weather, availability). If the web does not say, " +
         "say so in one line; never guess a figure.",
       input: String(query || "").slice(0, 600),
@@ -685,6 +700,10 @@ async function webSearch(query, { model, location, timeoutMs = 45_000 } = {}) {
     .replace(/\s*\((?:\[[^\]]*\]\([^)\s]*\)(?:,\s*)?)+\)/g, "")
     .replace(/\[([^\]]+)\]\([^)\s]*\)/g, "$1")
     .replace(/[ \t]+\n/g, "\n")
+    // Headings and bold marks would be read out ("hash hash Doctor…").
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
   const seen = new Set();
   const unique = [];

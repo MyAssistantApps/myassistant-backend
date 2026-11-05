@@ -1,6 +1,7 @@
 /**
  * GET /go           → { merchants:[{id,name,category,color,earns}] }
- * GET /go/:id       → { url, tracked } — the partner link with our tracking,
+ * GET /go/:id[?url=] → { url, tracked } — the partner link (or a search on its
+ *                     own site) with our tracking,
  *                     and the click counted (affiliate_clicks).
  * Only known partners: an unknown id is a 404, never a redirect.
  */
@@ -24,7 +25,8 @@ router.get("/", (_req, res) => res.json({ merchants: m.catalogue() }));
 router.get("/:id", async (req, res) => {
   const merchant = m.BY_ID.get(String(req.params.id));
   if (!merchant) return res.status(404).json({ error: "unknown partner" });
-  const out = m.trackedUrl(merchant);
+  // ?url= a search on the partner's own site (same host only).
+  const out = m.trackedUrl(merchant, req.query.url);
   const uid = Number(req.user?.sub);
   migrate().then(() => require("../db").run(
     "INSERT INTO affiliate_clicks (user_id, merchant, tracked, created_at) VALUES ($1,$2,$3,$4)",

@@ -291,7 +291,7 @@ const BACKENDS = {
     const r = await openai.webSearch(q, { location: { country: process.env.SEARCH_COUNTRY || "IN" } });
     if (!r.text) return [];
     return [
-      { title: "Answer from a live web search (just now)", snippet: r.text.slice(0, 1500), url: r.sources[0] ? r.sources[0].url : "", answer: true },
+      { title: "Answer from a live web search (just now)", snippet: r.text.slice(0, 4000), url: r.sources[0] ? r.sources[0].url : "", answer: true },
       ...r.sources.map((src) => ({ title: src.title, snippet: "", url: src.url })),
     ];
   },
