@@ -12,6 +12,7 @@
  * Only these ids can be opened — /go is not an open redirect.
  */
 const MERCHANTS = [
+  { home: "Daily needs", id: "pharmeasy", name: "PharmEasy", category: "Medicines", url: "https://pharmeasy.in/", program: "network", color: "#10847E" },
   // Food & groceries — the apps everyone already uses (client, 2026-11-05)
   { id: "swiggy", name: "Swiggy", category: "Food & groceries", url: "https://www.swiggy.com/", program: "partner", color: "#FC8019", home: true },
   { id: "zomato", name: "Zomato", category: "Food & groceries", url: "https://www.zomato.com/", program: "partner", color: "#E23744", home: true },
@@ -34,18 +35,17 @@ const MERCHANTS = [
   { id: "purplle", name: "Purplle", category: "Beauty", url: "https://www.purplle.com/", program: "network", color: "#7A2E8E" },
   { id: "mamaearth", name: "Mamaearth", category: "Beauty", url: "https://mamaearth.in/", program: "network", color: "#00AEEF" },
   // Electronics & shopping
-  { home: true, id: "amazon", name: "Amazon", category: "Shopping", url: "https://www.amazon.in/", program: "amazon", color: "#FF9900" },
-  { home: true, id: "flipkart", name: "Flipkart", category: "Shopping", url: "https://www.flipkart.com/", program: "network", color: "#2874F0" },
+  { id: "amazon", name: "Amazon", category: "Shopping", url: "https://www.amazon.in/", program: "amazon", color: "#FF9900" },
+  { id: "flipkart", name: "Flipkart", category: "Shopping", url: "https://www.flipkart.com/", program: "network", color: "#2874F0" },
   { id: "croma", name: "Croma", category: "Shopping", url: "https://www.croma.com/", program: "network", color: "#0F8B8D" },
   { id: "reliancedigital", name: "Reliance Digital", category: "Shopping", url: "https://www.reliancedigital.in/", program: "network", color: "#E42529" },
   // Moving & delivery
-  { home: true, id: "porter", name: "Porter", category: "Rides", url: "https://porter.in/", program: "partner", color: "#1E4FD8" },
+  { home: "Daily needs", id: "porter", name: "Porter", category: "Moving & delivery", url: "https://porter.in/", program: "partner", color: "#1E4FD8" },
   { id: "shiprocket", name: "Shiprocket", category: "Moving & delivery", url: "https://www.shiprocket.in/", program: "partner", color: "#7347EF" },
-  { id: "urbancompany", name: "Urban Company", category: "Home services", url: "https://www.urbancompany.com/", program: "partner", color: "#111111" },
+  { home: "Daily needs", id: "urbancompany", name: "Urban Company", category: "Home services", url: "https://www.urbancompany.com/", program: "partner", color: "#111111" },
   // Health
-  { id: "tata1mg", name: "Tata 1mg", category: "Medicines", url: "https://www.1mg.com/", program: "network", color: "#FF6F61" },
-  { id: "pharmeasy", name: "PharmEasy", category: "Medicines", url: "https://pharmeasy.in/", program: "network", color: "#10847E" },
-  { id: "apollo247", name: "Apollo 24|7", category: "Medicines", url: "https://www.apollo247.com/", program: "network", color: "#02475B" },
+  { home: "Daily needs", id: "tata1mg", name: "Tata 1mg", category: "Medicines", url: "https://www.1mg.com/", program: "network", color: "#FF6F61" },
+  { home: "Daily needs", id: "apollo247", name: "Apollo 24|7", category: "Medicines", url: "https://www.apollo247.com/", program: "network", color: "#02475B" },
   { id: "netmeds", name: "Netmeds", category: "Medicines", url: "https://www.netmeds.com/", program: "network", color: "#32AEB1" },
   // Travel & stays
   { id: "makemytrip", name: "MakeMyTrip", category: "Travel & stays", url: "https://www.makemytrip.com/", program: "network", color: "#E73C33" },
@@ -101,8 +101,11 @@ function trackedUrl(m, target) {
 
 /** The list the app shows (no tracking ids in it). */
 function catalogue() {
+  // home: true → on Home under its own category; a string → on Home under
+  // that group instead ("Daily needs", client 2026-11-05).
   return MERCHANTS.map(({ id, name, category, color, program, home }) => ({
-    id, name, category, color, earns: trackedUrl(BY_ID.get(id)).tracked, program, home: Boolean(home),
+    id, name, category, color, earns: trackedUrl(BY_ID.get(id)).tracked, program,
+    home: Boolean(home), homeGroup: typeof home === "string" ? home : (home ? category : null),
   }));
 }
 
