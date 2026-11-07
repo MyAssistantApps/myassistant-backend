@@ -50,7 +50,8 @@ branch protection, collaborators, secrets or workflows for a teammate.
 ## Pushing deploys
 
 Every merge or push to `hardening` here **deploys the backend to the VPS**
-(`.github/workflows/deploy.yml` → `~/app/deploy.sh` on the server) — one
+(`.github/workflows/deploy.yml` → `/opt/myassistant/deploy.sh` on
+the server, backend.envisionsit.in; see `deploy/vps/README.md`) — one
 more reason it goes through the owner's review. Branches do not deploy.
 The flutter repo's `hardening` sends a build to all testers instead.
 

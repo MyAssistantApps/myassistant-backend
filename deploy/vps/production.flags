@@ -17,9 +17,9 @@ PLIVO_FROM_NUMBER=
 PLIVO_VOICE=Polly.Aditi
 PLIVO_ASR_LANG=en-IN
 AGENT_CALL_DAILY_LIMIT=20
-PORT=38231
-DATA_DIR=/home/myass620/app/data
-PUBLIC_BASE_URL=https://myassistant.wishme.today
+PORT=3000
+DATA_DIR=/app/data
+PUBLIC_BASE_URL=https://backend.envisionsit.in
 ALLOW_APP_KEY=false
 AUTH_DISABLED=false
 # Empty on the server (2026-11-01): no Gemini key, and Plivo calls are off.
