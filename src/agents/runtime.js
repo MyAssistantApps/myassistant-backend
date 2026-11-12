@@ -83,6 +83,9 @@ const BACKGROUND_TURN_TIMEOUT_MS =
   Number(process.env.BACKGROUND_TURN_TIMEOUT_MS) || 90_000;
 
 
+// Recent turns the model sees (4-40, default 16; see ai/context.js historyFor).
+const HISTORY_TURNS = Math.min(40, Math.max(4, Math.round(Number(process.env.AI_HISTORY_TURNS)) || 16));
+
 function systemPrompt(extra = "", { appBuild } = {}) {
   // One prompt for every path since 2026-10-02 (ai/voicePrompt.js); the
   // 36,000-character rule list that lived here is gone. The assistant's
@@ -449,7 +452,7 @@ async function runAgentTurn(userText, ctx = {}, onEvent = () => {}) {
 
   // Short conversation context (§18) — recent turns only, never the whole
   // lifetime history.
-  for (const m of (ctx.history || []).slice(-8)) {
+  for (const m of (ctx.history || []).slice(-HISTORY_TURNS)) {
     contents.push({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: String(m.content || "") }],

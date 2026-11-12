@@ -185,11 +185,16 @@ function jsonSchema(node) {
   return out;
 }
 
+// How many recent turns the cloud model sees (4-40, default 16). Eight lost
+// the thread on follow-ups ("and the other one?") once a tool had run between.
+const historyTurns = () =>
+  Math.min(40, Math.max(4, Math.round(Number(process.env.AI_HISTORY_TURNS)) || 16));
+
 /** This session's last turns, oldest first, as the cloud model's history. */
 async function historyFor(uid, sessionId) {
   const recent = require("../memory/recent");
   await recent.settled(uid);
-  const rows = await recent.turns(uid, { sessionId, limit: 8 }).catch(() => []);
+  const rows = await recent.turns(uid, { sessionId, limit: historyTurns() }).catch(() => []);
   return rows.reverse()
     .map((r) => ({
       role: r.role === "assistant" ? "model" : "user",
