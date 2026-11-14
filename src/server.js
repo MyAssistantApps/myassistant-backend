@@ -545,6 +545,9 @@ app.use("/console", platform.consoleRouter);
 // profile + dated notes + linked documents, recalled by voice
 // ("pull up patient Ramesh's file"). See routes/clients.js.
 app.use("/clients", appAuth, require("./routes/clients"));
+// CLINIC — the doctor's workspace (today, follow-ups, dues). Doctors only:
+// the router itself enforces persona === 'doctor' after appAuth.
+app.use("/clinic", appAuth, require("./clinic/routes"));
 
 // TASK OUTCOMES — what the assistant was asked to do and what REALLY
 // happened (call connected / failed and why…). Written by the device and by

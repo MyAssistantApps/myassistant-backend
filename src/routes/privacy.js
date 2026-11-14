@@ -139,6 +139,10 @@ const USER_TABLES = [
   ["records", "user_id"],
   ["client_recalls", "user_id"], // professional mode, beside clients
   ["client_ledger", "user_id"],
+  // The doctor's clinic (src/clinic/store.js): exported with the account
+  // and erased with it, like every other row the user owns.
+  ["clinic_profiles", "user_id"],
+  ["clinic_appointments", "user_id"],
   ["pending_pushes", "user_id"], // notifications still waiting for a device
   ["user_devices", "user_id"], // phone model, OS, permissions
   ["studio_photos", "user_id"], // the bytes are documents; these point at them

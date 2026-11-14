@@ -511,6 +511,49 @@ async function sweepMomentum() {
   }
 }
 
+/**
+ * APPOINTMENT REMINDER CALLS — same contract as recall calls above: one
+ * attempt per appointment, stamped BEFORE dialling, 2–16 hours ahead
+ * (clinic/store.appointmentsNeedingReminder). The single biggest lever on
+ * no-shows, which cost a busy OPD a dozen empty slots a day.
+ */
+async function sweepAppointmentReminders() {
+  const agentCall = require("../agents/agentCall");
+  if (!agentCall.enabled()) return;
+  const clinic = require("../clinic/store");
+  let due = [];
+  try {
+    due = await clinic.appointmentsNeedingReminder();
+  } catch (e) {
+    console.error("appointment reminder query failed:", e.message);
+    return;
+  }
+  for (const a of due) {
+    await clinic.markReminded(a.id); // one attempt, ever
+    try {
+      const first = String(a.doctor_name || "").split(" ")[0] || null;
+      const whenTxt = new Date(Number(a.starts_at)).toLocaleString("en-IN", {
+        weekday: "long", day: "numeric", month: "long",
+        hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata",
+      });
+      await agentCall.start({
+        userId: a.user_id,
+        userName: first,
+        toNumber: a.patient_phone,
+        contactName: a.patient_name,
+        task:
+          `Remind them of their appointment with Dr. ${first || "the doctor"} on ${whenTxt}` +
+          `${a.reason ? ` (${a.reason})` : ""}. Ask whether they will be able to come. ` +
+          `If they cannot, say the clinic will call to find a new time.`,
+        lang: null,
+      });
+      console.log(`appointment: reminding ${a.patient_name} for user ${a.user_id} (appt ${a.id})`);
+    } catch (e) {
+      console.error(`appointment reminder to ${a.patient_name} failed:`, e?.message || e?.code);
+    }
+  }
+}
+
 async function sweep() {
   // Calls whose result never came back (agentCall.closeStale): closed as
   // failed and the user told. On its own line — a failure here must not
@@ -523,6 +566,7 @@ async function sweep() {
   const results = await Promise.allSettled([
     sweepCommitments(),
     sweepPatientRecalls(),
+    sweepAppointmentReminders(),
     sweepMeetings(),
     sweepFares(),
     sweepMorningBriefs(),

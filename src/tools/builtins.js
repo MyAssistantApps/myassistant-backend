@@ -8982,6 +8982,61 @@ function registerBuiltins() {
     },
   });
 
+  // DOCTORS ONLY: a real slot in the clinic's appointment book (clinic/
+  // store.js) — the same book the Clinic screen and the phone receptionist
+  // use, so a voice booking can never double-book a slot.
+  registry.register({
+    name: "book_patient_appointment",
+    description:
+      "DOCTOR users only: book a patient into a specific clinic APPOINTMENT slot " +
+      "('book Ramesh tomorrow at 10', 'put Asha in at 5:30 today for dressing'). " +
+      "Use this instead of schedule_patient_recall when the doctor names an exact " +
+      "day AND time to see the patient. The patient gets a reminder call a few " +
+      "hours before when they have a phone number on their card.",
+    risk: "medium",
+    inputSchema: {
+      type: "object",
+      properties: {
+        client_name: { type: "string", description: "The patient's name as spoken." },
+        starts_at: { type: "string", description: "ISO-8601 datetime of the appointment. Resolve relative phrases yourself." },
+        reason: { type: "string", description: "Reason for the visit, e.g. 'review', 'dressing'." },
+      },
+      required: ["client_name", "starts_at"],
+    },
+    async execute(args, ctx) {
+      if (!ctx.userId) return { ok: false, error: "not signed in" };
+      const { personaOf } = require("../users/persona");
+      if ((await personaOf(ctx.userId)) !== "doctor") {
+        return { ok: false, error: "clinic appointments are only for doctor profiles" };
+      }
+      const { client, err } = await requireClient(ctx.userId, args.client_name);
+      if (err) return err;
+      const when = parseUserTime(args.starts_at, ctx.tzOffsetMin);
+      if (!when || when < Date.now() - 60_000) {
+        return { ok: false, error: "starts_at must be a valid future datetime (ISO-8601)" };
+      }
+      const store = require("../clinic/store");
+      // Booked exactly as the doctor said, without the free-slot check the
+      // phone receptionist uses: a doctor squeezing someone in outside the
+      // grid is a deliberate choice, a caller doing it is not.
+      const row = await store.createAppointment(ctx.userId, {
+        clientId: client.id, patientName: client.name, patientPhone: client.phone || "",
+        startsAt: when, reason: args.reason || "", source: "voice",
+      });
+      const label = new Date(when).toLocaleString("en-IN", {
+        weekday: "short", day: "numeric", month: "short",
+        hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata",
+      });
+      const hasPhone = Boolean(String(client.phone || "").trim());
+      return {
+        ok: true,
+        data: { appointment: store.apptShape(row) },
+        speak: `${client.name} is booked for ${label}.` +
+          (hasPhone ? " I'll call them a few hours before to remind them." : " There's no number on their card, so I can't remind them."),
+      };
+    },
+  });
+
   registry.register({
     name: "complete_patient_recall",
     description:

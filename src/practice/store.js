@@ -87,6 +87,34 @@ async function listRecalls(userId, { clientId, dueBefore, limit = 50 } = {}) {
   );
 }
 
+/**
+ * Pending recalls WITH the patient's name and number, for the clinic
+ * screens — one query instead of one per row. `from`/`to` bound due_at
+ * (either may be omitted).
+ */
+async function listRecallsDetailed(userId, { from, to, limit = 100 } = {}) {
+  await migrate();
+  const params = [userId];
+  let where = "r.user_id = $1 AND r.status = 'pending'";
+  if (from != null) { params.push(Number(from)); where += ` AND r.due_at >= $${params.length}`; }
+  if (to != null) { params.push(Number(to)); where += ` AND r.due_at < $${params.length}`; }
+  params.push(Math.min(Number(limit) || 100, 300));
+  return query(
+    `SELECT r.*, c.name AS client_name, c.phone AS client_phone
+       FROM client_recalls r JOIN clients c ON c.id = r.client_id AND c.user_id = r.user_id
+      WHERE ${where} AND c.archived = 0
+      ORDER BY r.due_at ASC LIMIT $${params.length}`,
+    params
+  );
+}
+
+/** One recall owned by the user, any status, or null. */
+async function getRecall(userId, recallId) {
+  await migrate();
+  return one("SELECT * FROM client_recalls WHERE id = $1 AND user_id = $2",
+    [Number(recallId), userId]);
+}
+
 /** The next pending recall for one client, or null. */
 async function nextRecallFor(userId, clientId) {
   await migrate();
@@ -209,7 +237,8 @@ function recallToClient(r) {
 
 module.exports = {
   migrate,
-  createRecall, setReminderId, listRecalls, nextRecallFor, closeRecall,
+  createRecall, setReminderId, listRecalls, listRecallsDetailed, getRecall,
+  nextRecallFor, closeRecall,
   recallsNeedingCall, markCalled, removeForClient,
   addLedger, balanceOf, pendingDues,
   recallToClient,
