@@ -2,7 +2,9 @@
  * Phone verification — the identity spine of agent-to-agent messaging.
  *
  *   GET  /phone          → { phone, verified }
- *   GET  /phone/methods  → { sim, typed }   which ways this server accepts
+ *   GET  /phone/methods  → { sim, call, typed }   which ways this server accepts
+ *   POST /phone/call-code   { phone }       → { ok, expiresAt }  our caller reads a code
+ *   POST /phone/call-verify { phone, code } → { ok, phone, user }
  *   POST /phone/verify   { pnvToken }      → { ok, phone, user }
  *
  * The number is never taken from the request body. The app runs Firebase
@@ -21,6 +23,7 @@
 const express = require("express");
 const db = require("../db");
 const pnv = require("../services/pnv");
+const callCode = require("../services/callCode");
 const { normalizePhone } = require("../users/phone");
 
 const router = express.Router();
@@ -86,8 +89,44 @@ async function assignNumber(uid, phone, res) {
 // What the verify screen may offer. "sim" is Phone Number Verification;
 // "typed" is the testing switch below. The app asks rather than assumes.
 router.get("/methods", (_req, res) =>
-  res.json({ sim: pnv.configured(), typed: devVerifyAllowed() })
+  res.json({ sim: pnv.configured(), call: callCode.configured(), typed: devVerifyAllowed() })
 );
+
+/**
+ * PROOF BY VOICE CALL (2026-11-14). Phone Number Verification does not
+ * cover Indian carriers, so this is how an Indian number is proven: our
+ * Bolna caller rings it and reads a 6-digit code (services/callCode.js has
+ * the security notes — the code never reaches the requesting account).
+ */
+router.post("/call-code", async (req, res) => {
+  const uid = Number(req.user?.sub);
+  if (!Number.isFinite(uid)) return res.status(401).json({ error: "unauthorized" });
+  if (await accountGone(uid)) return res.status(401).json({ error: ACCOUNT_GONE });
+  const phone = normalizePhone(req.body?.phone);
+  if (!phone) return res.status(400).json({ error: "Enter a valid phone number." });
+  // Do not ring a number that already belongs to someone else.
+  const owner = await db.one("SELECT id FROM users WHERE phone_number = $1 LIMIT 1", [phone]);
+  if (owner && owner.id !== uid) return res.status(409).json({ error: TAKEN });
+  try {
+    const r = await callCode.start(uid, phone);
+    res.json({ ok: true, phone, expiresAt: r.expiresAt });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Couldn't place the call." });
+  }
+});
+
+router.post("/call-verify", async (req, res) => {
+  const uid = Number(req.user?.sub);
+  if (!Number.isFinite(uid)) return res.status(401).json({ error: "unauthorized" });
+  if (await accountGone(uid)) return res.status(401).json({ error: ACCOUNT_GONE });
+  const phone = normalizePhone(req.body?.phone);
+  if (!phone) return res.status(400).json({ error: "Enter a valid phone number." });
+  const v = await callCode.check(uid, phone, req.body?.code);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  if (!(await assignNumber(uid, phone, res))) return;
+  const user = await db.findById(uid);
+  res.json({ ok: true, phone, user: db.publicUser(user) });
+});
 
 router.post("/verify", async (req, res) => {
   const uid = Number(req.user?.sub);

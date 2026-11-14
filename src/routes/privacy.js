@@ -150,6 +150,7 @@ const USER_TABLES = [
   // partner links they tapped — the erase guard found these were left behind.
   ["ondc_requests", "user_id"],
   ["affiliate_clicks", "user_id"],
+  ...require("../services/callCode").USER_TABLES, // verification-call codes (hashed)
   ["pending_pushes", "user_id"], // notifications still waiting for a device
   ["user_devices", "user_id"], // phone model, OS, permissions
   ["studio_photos", "user_id"], // the bytes are documents; these point at them

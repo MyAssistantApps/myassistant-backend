@@ -183,7 +183,7 @@ async function ensureEveryTable() {
     "actions/store", "agents/tasks", "live/recorder", "memory/recent",
     "outcomes/store", "practice/store", "records/store", "routes/contacts",
     "routes/finance", "routes/usage", "services/email", "services/pendingPush",
-    "studio/store", "tools/searchCache", "posters/store", "clinic/store", "pro/store", "listings/store",
+    "studio/store", "tools/searchCache", "posters/store", "clinic/store", "pro/store", "listings/store", "services/callCode",
   ]) {
     await require("../src/" + m).migrate();
   }
