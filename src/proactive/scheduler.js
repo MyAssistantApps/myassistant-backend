@@ -554,6 +554,48 @@ async function sweepAppointmentReminders() {
   }
 }
 
+/**
+ * HEARING REMINDER CALLS (advocates) — the client is phoned 2–20 hours
+ * before their hearing: which court, when, what to bring. Same contract as
+ * the doctor's reminders: one attempt, stamped before dialling.
+ */
+async function sweepHearingReminders() {
+  const agentCall = require("../agents/agentCall");
+  if (!agentCall.enabled()) return;
+  const pro = require("../pro/store");
+  let due = [];
+  try {
+    due = await pro.hearingsNeedingReminder();
+  } catch (e) {
+    console.error("hearing reminder query failed:", e.message);
+    return;
+  }
+  for (const h of due) {
+    await pro.markHearingReminded(h.id); // one attempt, ever
+    try {
+      const first = String(h.advocate_name || "").split(" ")[0] || null;
+      const whenTxt = new Date(Number(h.at)).toLocaleString("en-IN", {
+        weekday: "long", day: "numeric", month: "long",
+        hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata",
+      });
+      await agentCall.start({
+        userId: h.user_id,
+        userName: first,
+        toNumber: h.client_phone,
+        contactName: h.client_name,
+        task:
+          `Remind them that their case "${h.case_title}" has a hearing${h.court ? ` at ${h.court}` : ""} on ${whenTxt}` +
+          `${h.purpose ? ` (${h.purpose})` : ""}. Their advocate asks them to be on time and to bring any ` +
+          `documents they were asked for. Do not discuss the case itself; if they have questions, say the advocate will call back.`,
+        lang: null,
+      });
+      console.log(`hearing: reminding ${h.client_name} for user ${h.user_id} (hearing ${h.id})`);
+    } catch (e) {
+      console.error(`hearing reminder to ${h.client_name} failed:`, e?.message || e?.code);
+    }
+  }
+}
+
 async function sweep() {
   // Calls whose result never came back (agentCall.closeStale): closed as
   // failed and the user told. On its own line — a failure here must not
@@ -566,12 +608,15 @@ async function sweep() {
   const results = await Promise.allSettled([
     sweepCommitments(),
     sweepPatientRecalls(),
-    sweepAppointmentReminders(),
     sweepMeetings(),
     sweepFares(),
     sweepMorningBriefs(),
     sweepPersonDates(),
     sweepMomentum(),
+    // Appended AFTER the named ones: the results below are read by
+    // position, so a sweep inserted mid-list would shift every count.
+    sweepAppointmentReminders(),
+    sweepHearingReminders(),
   ]);
   // One name per sweep, in order — it used to unpack six results into four
   // names, so "briefs" logged the recall count and "fares" the meetings.

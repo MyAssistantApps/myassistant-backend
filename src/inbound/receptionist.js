@@ -218,7 +218,7 @@ async function onAnswer({ to, from, callUuid }) {
   }
 
   const greeting = rec.clinic
-    ? `Hello, this is ${assistantName} from ${rec.clinic.clinicName || `Dr. ${rec.userName}'s clinic`}. ` +
+    ? `Hello, this is ${assistantName} from ${rec.clinic.clinicName || placeOf(rec)}. ` +
       `How can I help you?`
     : rec.known
     ? `Hello ${rec.callerName}, this is ${assistantName}, ${rec.userName}'s assistant. ` +
@@ -257,7 +257,9 @@ function shouldForward(rec) {
 /** Clinic facts + bookable slots for a doctor's line, or null. */
 async function loadClinicContext(userId) {
   const u = await one(`SELECT persona, timezone FROM users WHERE id=$1`, [userId]);
-  if (u?.persona !== "doctor") return null;
+  // A professional's line (owner, 2026-11-14): doctor's clinic, advocate's
+  // chamber, or a business owner's office — each with its own rules below.
+  if (!["doctor", "advocate", "business"].includes(u?.persona)) return null;
   const store = require("../clinic/store");
   const profile = await store.getProfile(userId);
   const tz = 330; // Indian clinics; users.timezone is free text, not an offset
@@ -265,6 +267,7 @@ async function loadClinicContext(userId) {
     ? await store.nextFreeSlots(userId, { tzOffsetMin: tz, days: 4, max: 10 })
     : [];
   return {
+    persona: u.persona,
     clinicName: profile.clinicName,
     address: profile.address,
     fee: profile.fee,
@@ -284,29 +287,69 @@ function slotLabel(ms, tzOffsetMin = 330) {
   return `${wk} ${d.getUTCDate()} ${mo}, ${h % 12 === 0 ? 12 : h % 12}:${m} ${h < 12 ? "am" : "pm"}`;
 }
 
+/** "Dr. Rao's clinic" / "Advocate Rao's chamber" / "Rao's office". */
+function placeOf(rec) {
+  const p = rec.clinic?.persona;
+  return p === "advocate" ? `Advocate ${rec.userName}'s chamber`
+    : p === "business" ? `${rec.userName}'s office`
+      : `Dr. ${rec.userName}'s clinic`;
+}
+
+/** Per-profession words and rules for the receptionist prompt. */
+const PRO_LINE = {
+  doctor: {
+    who: (n) => `A DOCTOR'S CLINIC LINE (Dr. ${n})`, place: "Clinic", fee: "Consultation fee",
+    booking: "an appointment", person: "PATIENT",
+    rules: [
+      "MEDICAL SAFETY — non-negotiable:",
+      "- Never give medical advice, a diagnosis, or any medicine or dose.",
+      "- EMERGENCY (chest pain, trouble breathing, heavy bleeding, unconscious,",
+      "  stroke signs, seizure, severe injury, poisoning, pregnancy bleeding):",
+      "  tell them to call 108 or go to the nearest emergency department NOW,",
+      "  set urgency \"urgent\", and end the call. Do not book them.",
+    ],
+  },
+  advocate: {
+    who: (n) => `AN ADVOCATE'S CHAMBER LINE (Advocate ${n})`, place: "Chamber", fee: "Consultation fee",
+    booking: "a consultation", person: "CLIENT",
+    rules: [
+      "LEGAL SAFETY — non-negotiable:",
+      "- Never give legal advice, an opinion on a case, or predict an outcome.",
+      "- Never discuss any case or client — the caller is not verified.",
+      "- URGENT (arrest, police at the door, a hearing today, a deadline today):",
+      "  set urgency \"urgent\", take the details and say the advocate will be told",
+      "  at once. For free legal aid, NALSA's helpline is 15100.",
+    ],
+  },
+  business: {
+    who: (n) => `A BUSINESS OWNER'S OFFICE LINE (${n})`, place: "Office", fee: null,
+    booking: "a meeting", person: "VISITOR",
+    rules: [
+      "BUSINESS RULES — non-negotiable:",
+      "- Never quote prices, agree terms, confirm orders or commit to any deal.",
+      "- Never share numbers, plans, clients or the owner's whereabouts.",
+      "- Screen politely: who they are, which company, what it is about. Sales",
+      "  pitches: take a one-line message and end courteously.",
+    ],
+  },
+};
+
 function clinicLines(rec) {
   const c = rec.clinic;
   if (!c) return [];
-  const lines = ["", `THIS IS A DOCTOR'S CLINIC LINE (Dr. ${rec.userName}). You MAY tell callers:`];
-  if (c.clinicName) lines.push(`- Clinic: ${c.clinicName}`);
+  const w = PRO_LINE[c.persona] || PRO_LINE.doctor;
+  const lines = ["", `THIS IS ${w.who(rec.userName)}. You MAY tell callers:`];
+  if (c.clinicName) lines.push(`- ${w.place}: ${c.clinicName}`);
   if (c.address) lines.push(`- Address: ${c.address}`);
   lines.push(`- Timings: ${c.hoursText}`);
-  if (c.fee > 0) lines.push(`- Consultation fee: ₹${c.fee}`);
-  lines.push(
-    "",
-    "MEDICAL SAFETY — non-negotiable:",
-    "- Never give medical advice, a diagnosis, or any medicine or dose.",
-    "- EMERGENCY (chest pain, trouble breathing, heavy bleeding, unconscious,",
-    "  stroke signs, seizure, severe injury, poisoning, pregnancy bleeding):",
-    "  tell them to call 108 or go to the nearest emergency department NOW,",
-    "  set urgency \"urgent\", and end the call. Do not book them.",
-  );
+  if (w.fee && c.fee > 0) lines.push(`- ${w.fee}: ₹${c.fee}`);
+  lines.push("", ...w.rules);
   if (c.canBook && c.slots.length) {
     lines.push(
       "",
-      "BOOKING: you MAY book an appointment, but ONLY into one of these free slots:",
+      `BOOKING: you MAY book ${w.booking}, but ONLY into one of these free slots:`,
       ...c.slots.map((s, i) => `  ${i + 1}) ${slotLabel(s, c.tz)}`),
-      "Offer two or three that suit them. Get the PATIENT's name (may differ from the",
+      `Offer two or three that suit them. Get the ${w.person}'s name (may differ from the`,
       "caller) and the reason in a few words. Once they pick one, set book_slot to its",
       "number and confirm the day and time back to them.",
     );

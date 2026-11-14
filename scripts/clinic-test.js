@@ -342,5 +342,99 @@ async function runGate(sub, personaValue) {
     assert.ok(buf.length > 1500);
   });
 
+  /* ---------------------------------------------------------------- */
+  console.log("\nadvocates & business: money, prompts, PDFs, drafting");
+  const proStore = require("../src/pro/store");
+
+  await test("invoice totals: lines, GST, total — in paise, no float drift", () => {
+    const t = proStore.computeTotals([
+      { description: "Strategy consulting", qty: 3, rate: 25000 },
+      { description: "Travel", qty: 1, rate: 1999.99 },
+      { description: "", qty: 2, rate: 10 },        // dropped: no description
+      { description: "Zero qty", qty: 0, rate: 500 }, // dropped: no quantity
+    ], 18);
+    assert.strictEqual(t.lines.length, 2);
+    assert.strictEqual(t.subtotalPaise, 7699999);
+    assert.strictEqual(t.gstPaise, Math.round(7699999 * 0.18));
+    assert.strictEqual(t.totalPaise, t.subtotalPaise + t.gstPaise);
+  });
+  await test("an unusual GST rate is refused (0 used), not guessed", () => {
+    assert.strictEqual(proStore.computeTotals([{ description: "x", qty: 1, rate: 100 }], 17).gstRate, 0);
+    assert.strictEqual(proStore.computeTotals([{ description: "x", qty: 1, rate: 100 }], 28).gstRate, 28);
+  });
+  await test("privacy: every new table is exported and erased", () => {
+    const names = proStore.USER_TABLES.map(([t]) => t).sort();
+    assert.deepStrictEqual(names, ["pro_cases", "pro_hearings", "pro_invoices", "pro_leads"]);
+  });
+
+  const recBase = (persona) => ({
+    userName: "Rao", assistantName: "Maya", callerName: null, settings: { availability: "", may_book: false },
+    clinic: { persona, canBook: true, tz: 330, slots: [Date.UTC(2026, 10, 16, 4, 30)], clinicName: "Rao & Co", address: "MG Road", fee: 2000, hoursText: "Mon 10am–6pm" },
+  });
+  await test("advocate's line: chamber words, no legal advice, 15100, books consultations", () => {
+    const sys = rcp.systemFor(recBase("advocate"));
+    assert.ok(sys.includes("ADVOCATE'S CHAMBER LINE"));
+    assert.ok(sys.includes("Never give legal advice"));
+    assert.ok(sys.includes("15100"));
+    assert.ok(sys.includes("book a consultation"));
+    assert.ok(!sys.includes("108"), "no medical emergency rule on a chamber line");
+  });
+  await test("business line: office words, never commits to deals, books meetings, no fee", () => {
+    const sys = rcp.systemFor(recBase("business"));
+    assert.ok(sys.includes("BUSINESS OWNER'S OFFICE LINE"));
+    assert.ok(sys.includes("Never quote prices"));
+    assert.ok(sys.includes("book a meeting"));
+    assert.ok(!sys.includes("Consultation fee"));
+  });
+  await test("doctor's line is unchanged", () => {
+    const sys = rcp.systemFor(recBase("doctor"));
+    assert.ok(sys.includes("DOCTOR'S CLINIC LINE") && sys.includes("108"));
+  });
+
+  const { renderInvoice, renderDocument, money } = require("../src/pro/pdf");
+  await test("money reads in Indian grouping", () => {
+    assert.strictEqual(money(125000), "Rs. 1,25,000");
+    assert.strictEqual(money(1999.5), "Rs. 1,999.50");
+  });
+  await test("invoice PDF renders with GST and a pay-online link", async () => {
+    const buf = await renderInvoice({
+      kind: "invoice", number: "INV-0001", date: Date.now(), seller: { name: "Rao Ventures", regLine: "GSTIN 29ABCDE1234F1Z5" },
+      buyer: { name: "Acme Ltd" }, items: [{ description: "Consulting", qty: 2, rate: 50000, amount: 100000 }],
+      subtotal: 100000, gstRate: 18, gst: 18000, total: 118000, paymentUrl: "https://rzp.io/l/test",
+    });
+    assert.strictEqual(buf.subarray(0, 5).toString(), "%PDF-");
+  });
+  await test("legal document PDF renders on the advocate's letterhead", async () => {
+    const buf = await renderDocument({
+      title: "Legal Notice", body: "Under instructions from my client...\n\nYou are hereby called upon to pay...",
+      advocate: { name: "Adv. Anita Rao", regLine: "Enrolment No. KAR/1234/2010" },
+    });
+    assert.strictEqual(buf.subarray(0, 5).toString(), "%PDF-");
+  });
+
+  const drafting = require("../src/pro/drafting");
+  await test("drafting cites ONLY grounded provisions; invented sections are dropped", async () => {
+    const realGen2 = router.generateReply;
+    let sys = "";
+    router.generateReply = async (_m, opts) => {
+      sys = opts.system;
+      return { model: "gpt-4.1", reply: JSON.stringify({
+        title: "Legal Notice for Recovery of Rent",
+        body: "Under instructions from my client, I hereby call upon you to pay the arrears of rent of Rs. 60,000 within 15 days, failing which my client shall initiate proceedings.",
+        provisions_cited: ["BNS 318", "Made-up Act 999"],
+        advocate_checks: ["Tenant's full address", "Date of the rent agreement"] }) };
+    };
+    const d = await drafting.draftLegal({ kind: "notice", facts: "Tenant has not paid 4 months rent of Rs 60,000; cheating under IPC 420; vacate in 15 days" });
+    router.generateReply = realGen2;
+    assert.ok(sys.includes("BNS"), "the repealed IPC 420 was mapped to BNS in the grounding");
+    assert.ok(!sys.includes("IPC 420 —"), "the old section is not offered as citable");
+    assert.ok(d.provisionsCited.every((p) => !/made-up/i.test(p)), "an invented act is dropped");
+    assert.strictEqual(d.advocateChecks.length, 2);
+    assert.strictEqual(d.provider, "gpt-4.1");
+  });
+  await test("drafting refuses empty facts", async () => {
+    await assert.rejects(drafting.draftLegal({ kind: "notice", facts: "help" }), /describe the facts/);
+  });
+
   console.log(`\n${passed} passed${process.exitCode ? ", some FAILED" : ""}`);
 })();

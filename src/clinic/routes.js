@@ -27,7 +27,19 @@ const { one } = require("../db");
 
 const DAY = 24 * 3600 * 1000;
 
-router.use(requirePersona("doctor"));
+// The workspace serves the three professions (owner, 2026-11-14): the
+// shared pieces — profile, appointments, follow-ups, dues — for all of
+// them; each profession's own tools are gated again below with only().
+const PRO_PERSONAS = ["doctor", "advocate", "business"];
+router.use(requirePersona(PRO_PERSONAS));
+
+/** Second gate for one profession's tools (req.persona set by the first). */
+function only(...personas) {
+  return (req, res, next) =>
+    personas.includes(req.persona)
+      ? next()
+      : res.status(403).json({ error: "persona_required", required: personas });
+}
 
 /* ---------------- pure helpers (unit-tested) ---------------- */
 
@@ -85,7 +97,9 @@ router.get("/today", async (req, res) => {
     const [rows, dues, count, appts] = await Promise.all([
       practice.listRecallsDetailed(uid, { from: win.start - 60 * DAY, to: win.end + 7 * DAY, limit: 200 }),
       practice.pendingDues(uid, 50),
-      one(`SELECT COUNT(*)::int AS n FROM clients WHERE user_id = $1 AND kind = 'patient' AND archived = 0`, [uid]),
+      // "patients" for a doctor, every case file for an advocate / business.
+      one(`SELECT COUNT(*)::int AS n FROM clients WHERE user_id = $1 AND archived = 0
+             AND kind IN (${req.persona === "doctor" ? "'patient'" : "'client','customer','patient','student'"})`, [uid]),
       require("./store").listAppointments(uid, { from: win.start, to: win.end }),
     ]);
     const b = bucketFollowUps(rows, win);
@@ -98,6 +112,7 @@ router.get("/today", async (req, res) => {
       duesCount: d.length,
       duesTotal: Math.round(d.reduce((s, x) => s + x.balance, 0) * 100) / 100,
       appointments: appts.map(require("./store").apptShape),
+      ...(await todayExtras(req.persona, uid, win)),
     });
   } catch (e) {
     console.error("clinic/today:", e.message);
@@ -345,7 +360,7 @@ router.post("/appointments/delay", async (req, res) => {
 /* ---------------- consult notes ---------------- */
 
 /** One audio chunk → text. The app records in chunks so a failure is visible. */
-router.post("/consult/transcribe", upload.single("audio"), async (req, res) => {
+router.post("/consult/transcribe", only("doctor", "advocate"), upload.single("audio"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "audio file required" });
   if (req.body?.consent !== "true") {
     return res.status(400).json({ error: "patient consent is required to record a consultation" });
@@ -361,7 +376,7 @@ router.post("/consult/transcribe", upload.single("audio"), async (req, res) => {
   }
 });
 
-router.post("/consult/draft", async (req, res) => {
+router.post("/consult/draft", only("doctor"), async (req, res) => {
   const uid = uidOf(req);
   const { clientId, transcript } = req.body || {};
   try {
@@ -381,7 +396,7 @@ router.post("/consult/draft", async (req, res) => {
 });
 
 /** The doctor approved (and maybe edited) the draft: file it in the case file. */
-router.post("/consult/save", async (req, res) => {
+router.post("/consult/save", only("doctor"), async (req, res) => {
   const uid = uidOf(req);
   const { clientId, note, text } = req.body || {};
   try {
@@ -399,7 +414,7 @@ router.post("/consult/save", async (req, res) => {
 
 /* ---------------- prescriptions ---------------- */
 
-router.post("/rx/parse", async (req, res) => {
+router.post("/rx/parse", only("doctor"), async (req, res) => {
   try {
     res.json(await clinicAi.parsePrescription(req.body?.text));
   } catch (e) {
@@ -407,7 +422,7 @@ router.post("/rx/parse", async (req, res) => {
   }
 });
 
-router.post("/rx", async (req, res) => {
+router.post("/rx", only("doctor"), async (req, res) => {
   const uid = uidOf(req);
   const b = req.body || {};
   try {
@@ -456,5 +471,280 @@ router.post("/rx", async (req, res) => {
   }
 });
 
+/* ================================================================== */
+/* ADVOCATES & BUSINESS (owner, 2026-11-14)                            */
+/* ================================================================== */
+
+const pro = require("../pro/store");
+const { renderInvoice, renderDocument } = require("../pro/pdf");
+const drafting = require("../pro/drafting");
+
+/** What "today" adds for each profession beyond the shared pieces. */
+async function todayExtras(persona, uid, win) {
+  try {
+    if (persona === "advocate") {
+      const hearings = await pro.listHearings(uid, { from: win.start, to: win.end + 7 * DAY });
+      const upcoming = hearings.filter((h) => h.status === "upcoming");
+      return {
+        hearingsToday: upcoming.filter((h) => h.at < win.end),
+        hearingsWeek: upcoming.filter((h) => h.at >= win.end),
+      };
+    }
+    if (persona === "business") {
+      const [leads, unpaid] = await Promise.all([
+        pro.listLeads(uid, { open: true }),
+        pro.listInvoices(uid, { kind: "invoice", status: "issued" }),
+      ]);
+      return {
+        leadsDue: leads.filter((l) => l.nextFollowUp != null && l.nextFollowUp < win.end),
+        openLeads: leads.length,
+        pipelineValue: Math.round(leads.reduce((s, l) => s + l.value, 0) * 100) / 100,
+        unpaidInvoices: unpaid.length,
+        unpaidTotal: Math.round(unpaid.reduce((s, i) => s + i.total, 0) * 100) / 100,
+      };
+    }
+  } catch (e) {
+    console.error("clinic/today extras:", e.message);
+  }
+  return {};
+}
+
+/** Letterhead fields from the profile + account, for every PDF. */
+async function letterheadOf(uid, persona) {
+  const [profile, u] = await Promise.all([
+    clinicStore.getProfile(uid),
+    one("SELECT name, specialty FROM users WHERE id = $1", [uid]),
+  ]);
+  const regLine = profile.regNo
+    ? persona === "advocate" ? `Enrolment No. ${profile.regNo}`
+      : persona === "business" ? `GSTIN ${profile.regNo}` : `Reg. No. ${profile.regNo}`
+    : "";
+  const name = persona === "advocate" && u?.name && !/^adv\.?\s/i.test(u.name) ? `Adv. ${u.name}` : u?.name || "";
+  return {
+    profile,
+    head: {
+      name: persona === "business" ? profile.clinicName || name : name,
+      subtitle: persona === "business" ? (profile.clinicName ? name : profile.qualification) : profile.qualification,
+      regLine,
+      org: persona === "business" ? "" : profile.clinicName,
+      address: profile.address,
+      phone: profile.phone,
+    },
+  };
+}
+
+/** Files a PDF in the user's documents and links it to a client. */
+async function filePdf(uid, { buffer, filename, title, category, summary, clientId, fullText }) {
+  const doc = await docsStore.createDocument(uid, { buffer, filename, mime: "application/pdf", note: title });
+  const stamp = new Date().toISOString().slice(0, 10);
+  await docsStore.setMetadata(uid, doc.id, {
+    title, category, docDate: stamp, summary: String(summary || "").slice(0, 1200),
+    tags: [category], fullText: String(fullText || "").slice(0, 12000),
+  });
+  if (clientId) await clients.linkDocument(uid, doc.id, clientId).catch(() => {});
+  return docsStore.getDocument(uid, doc.id);
+}
+
+const safeName = (s) => String(s || "").replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_") || "document";
+
+/* ---------------- cases & hearings (advocates) ---------------- */
+
+router.get("/cases", only("advocate"), async (req, res) => {
+  try {
+    res.json({ cases: await pro.listCases(uidOf(req), { status: req.query.status === "closed" ? "closed" : "open" }) });
+  } catch (e) { res.status(500).json({ error: "could not load cases" }); }
+});
+
+router.post("/cases", only("advocate"), async (req, res) => {
+  const uid = uidOf(req);
+  try {
+    if (req.body?.clientId && !(await clients.getClient(uid, req.body.clientId))) {
+      return res.status(404).json({ error: "client not found" });
+    }
+    const c = await pro.createCase(uid, req.body || {});
+    audit.record(uid, "pro.case.created", `case "${c.title}"`);
+    res.json({ case: c });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/cases/:id", only("advocate"), async (req, res) => {
+  const uid = uidOf(req);
+  const c = await pro.getCase(uid, req.params.id).catch(() => null);
+  if (!c) return res.status(404).json({ error: "case not found" });
+  const hearings = await pro.listHearings(uid, { caseId: c.id });
+  res.json({ case: c, hearings });
+});
+
+router.patch("/cases/:id", only("advocate"), async (req, res) => {
+  const c = await pro.updateCase(uidOf(req), req.params.id, req.body || {}).catch((e) => ({ error: e.message }));
+  if (!c) return res.status(404).json({ error: "case not found" });
+  if (c.error) return res.status(400).json(c);
+  res.json({ case: c });
+});
+
+router.post("/cases/:id/hearings", only("advocate"), async (req, res) => {
+  const uid = uidOf(req);
+  try {
+    const h = await pro.addHearing(uid, req.params.id, req.body || {});
+    if (!h) return res.status(404).json({ error: "case not found" });
+    audit.record(uid, "pro.hearing.added", `hearing for "${h.caseTitle}"`);
+    res.json({ hearing: h, noPhone: req.body?.remindClient !== false && !h.clientPhone });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.patch("/hearings/:id", only("advocate"), async (req, res) => {
+  const h = await pro.updateHearing(uidOf(req), req.params.id, req.body || {}).catch(() => null);
+  if (!h) return res.status(404).json({ error: "hearing not found" });
+  res.json({ hearing: h });
+});
+
+/* ---------------- legal drafting (advocates) ---------------- */
+
+router.post("/drafts/legal", only("advocate"), async (req, res) => {
+  const uid = uidOf(req);
+  const { kind, facts, clientId, caseId } = req.body || {};
+  try {
+    const c = clientId ? await clients.getClient(uid, clientId) : null;
+    const k = caseId ? await pro.getCase(uid, caseId) : null;
+    const d = await drafting.draftLegal({ kind, facts, clientName: c?.name || k?.clientName || "", caseTitle: k?.title || "" });
+    res.json(d);
+  } catch (e) { res.status(422).json({ error: e.message || "could not draft" }); }
+});
+
+router.post("/drafts/legal/pdf", only("advocate"), async (req, res) => {
+  const uid = uidOf(req);
+  const { title, body, clientId } = req.body || {};
+  if (!String(body || "").trim()) return res.status(400).json({ error: "the document is empty" });
+  try {
+    const c = clientId ? await clients.getClient(uid, clientId) : null;
+    if (clientId && !c) return res.status(404).json({ error: "client not found" });
+    const { head } = await letterheadOf(uid, "advocate");
+    const pdf = await renderDocument({ title, body, advocate: head, date: Date.now(), tzOffsetMin: tzOf(req) });
+    const t = String(title || "Legal document").slice(0, 120);
+    const doc = await filePdf(uid, {
+      buffer: pdf, filename: `${safeName(t)}_${new Date().toISOString().slice(0, 10)}.pdf`,
+      title: c ? `${t} — ${c.name}` : t, category: "other", summary: String(body).slice(0, 600),
+      clientId: c?.id, fullText: body,
+    });
+    if (c) await clients.addNote(uid, c.id, `Drafted: ${t}`).catch(() => {});
+    audit.record(uid, "pro.legal.pdf", `"${t}"`);
+    res.json({ document: docsStore.toClient(doc) });
+  } catch (e) {
+    console.error("drafts/legal/pdf:", e.message);
+    res.status(400).json({ error: e.message || "could not create the PDF" });
+  }
+});
+
+/* ---------------- invoices & quotes (business; advocates bill too) ---------------- */
+
+router.get("/invoices", only("business", "advocate"), async (req, res) => {
+  try {
+    res.json({ invoices: await pro.listInvoices(uidOf(req), {
+      kind: ["invoice", "quote"].includes(req.query.kind) ? req.query.kind : undefined }) });
+  } catch (e) { res.status(500).json({ error: "could not load invoices" }); }
+});
+
+router.post("/invoices", only("business", "advocate"), async (req, res) => {
+  const uid = uidOf(req);
+  const b = req.body || {};
+  try {
+    const c = await clients.getClient(uid, b.clientId);
+    if (!c) return res.status(404).json({ error: "choose a client first" });
+    const row = await pro.createInvoice(uid, { ...b, clientId: c.id });
+    const inv = pro.invoiceShape({ ...row, client_name: c.name });
+    // An issued invoice is money owed: it goes in the client's dues ledger,
+    // so "who owes me" and the Today numbers include it.
+    if (inv.kind === "invoice") {
+      await practice.addLedger(uid, { clientId: c.id, amount: inv.total, kind: "due", note: inv.number }).catch(() => {});
+    }
+    // Optional payment link (Razorpay), before the PDF so the PDF carries it.
+    let paymentUrl = "";
+    let paymentError = null;
+    if (inv.kind === "invoice" && b.paymentLink !== false) {
+      const payments = require("../payments/service");
+      if (payments.enabled()) {
+        const u = await one("SELECT name FROM users WHERE id = $1", [uid]);
+        const r = await payments.createRequest({
+          userId: uid, amountRupees: inv.total, payerName: c.name, payerPhone: c.phone || "",
+          description: `${inv.number}`, userName: u?.name || "",
+        });
+        if (r.ok) {
+          paymentUrl = r.url;
+          await pro.setInvoiceFields(uid, inv.id, { paymentRequestId: r.id, paymentUrl: r.url });
+        } else paymentError = r.error;
+      } else paymentError = "online payment links aren't set up on this server yet";
+    }
+    const { head } = await letterheadOf(uid, req.persona);
+    const pdf = await renderInvoice({
+      kind: inv.kind, number: inv.number, date: Date.now(), dueAt: inv.dueAt, seller: head,
+      buyer: { name: c.name, phone: c.phone }, items: inv.items, subtotal: inv.subtotal,
+      gstRate: inv.gstRate, gst: inv.gst, total: inv.total, notes: inv.notes, paymentUrl, tzOffsetMin: tzOf(req),
+    });
+    const label = inv.kind === "quote" ? "Quotation" : "Invoice";
+    const doc = await filePdf(uid, {
+      buffer: pdf, filename: `${label}_${inv.number}_${safeName(c.name)}.pdf`,
+      title: `${label} ${inv.number} — ${c.name}`, category: inv.kind === "quote" ? "other" : "bill",
+      summary: `${label} ${inv.number}: ${inv.items.map((i) => i.description).join(", ")} — total ${inv.total}`,
+      clientId: c.id,
+    });
+    const fresh = await pro.setInvoiceFields(uid, inv.id, { documentId: Number(doc.id) });
+    audit.record(uid, `pro.${inv.kind}.created`, `${inv.number} for "${c.name}"`);
+    res.json({ invoice: pro.invoiceShape(fresh), document: docsStore.toClient(doc), paymentError });
+  } catch (e) {
+    console.error("clinic/invoices:", e.message);
+    res.status(400).json({ error: e.message || "could not create the invoice" });
+  }
+});
+
+/** Paid by cash / bank transfer: settle the invoice and record the payment. */
+router.post("/invoices/:id/paid", only("business", "advocate"), async (req, res) => {
+  const uid = uidOf(req);
+  const row = await pro.getInvoiceRow(uid, req.params.id).catch(() => null);
+  if (!row || row.kind !== "invoice") return res.status(404).json({ error: "invoice not found" });
+  if (row.status === "paid") return res.json({ invoice: pro.invoiceShape(row) });
+  const fresh = await pro.setInvoiceFields(uid, row.id, { status: "paid" });
+  if (row.client_id) {
+    await practice.addLedger(uid, { clientId: row.client_id, amount: pro.toRupees(row.total_paise), kind: "paid", note: `${row.number} paid` }).catch(() => {});
+  }
+  audit.record(uid, "pro.invoice.paid", row.number);
+  res.json({ invoice: pro.invoiceShape(fresh) });
+});
+
+/* ---------------- leads & deals (business) ---------------- */
+
+router.get("/leads", only("business"), async (req, res) => {
+  try {
+    res.json({ leads: await pro.listLeads(uidOf(req), { open: req.query.all !== "1" }) });
+  } catch (e) { res.status(500).json({ error: "could not load leads" }); }
+});
+
+router.post("/leads", only("business"), async (req, res) => {
+  try {
+    const l = await pro.createLead(uidOf(req), req.body || {});
+    audit.record(uidOf(req), "pro.lead.created", `lead "${l.name}"`);
+    res.json({ lead: l });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/**
+ * Update a lead. Moving it to "won" turns it into a client (case file) so
+ * invoices, dues and follow-ups attach to a real record.
+ */
+router.patch("/leads/:id", only("business"), async (req, res) => {
+  const uid = uidOf(req);
+  try {
+    let l = await pro.updateLead(uid, req.params.id, req.body || {});
+    if (!l) return res.status(404).json({ error: "lead not found" });
+    if (l.stage === "won" && !l.clientId) {
+      const c = await clients.createClient(uid, {
+        name: l.company ? `${l.name} (${l.company})` : l.name, kind: "client", phone: l.phone,
+        summary: l.note || (l.value ? `Deal worth ${l.value}` : ""),
+      });
+      l = await pro.updateLead(uid, l.id, { clientId: c.id });
+    }
+    res.json({ lead: l });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 module.exports = router;
-module.exports._test = { dayWindow, bucketFollowUps, tzOf, followUpShape, dayStartOf };
+module.exports._test = { dayWindow, bucketFollowUps, tzOf, followUpShape, dayStartOf, todayExtras };

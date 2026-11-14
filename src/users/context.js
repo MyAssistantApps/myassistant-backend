@@ -327,6 +327,12 @@ async function contextBlock(userId, { lat, lng, tz, at, appBuild = 0 } = {}) {
     u.persona === "doctor" &&
       `works as a doctor${u.specialty ? ` (${u.specialty})` : ""} — their case files are PATIENTS, ` +
       `follow-ups are patient recalls`,
+    u.persona === "advocate" &&
+      `works as an advocate${u.specialty ? ` (${u.specialty})` : ""} — their case files are CLIENTS with ` +
+      `matters and hearing dates; fees are tracked per client; never give legal opinions as fact`,
+    u.persona === "business" &&
+      `runs a business at a senior level — speak like an executive assistant: clients, deals, ` +
+      `meetings, invoices and receivables; be brief and decisive`,
     u.profession && `profession: ${u.profession}`,
     u.organisation && `organisation: ${u.organisation}`,
     u.location && `location: ${u.location}`,

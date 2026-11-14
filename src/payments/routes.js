@@ -38,6 +38,11 @@ webhooks.post("/webhook", async (req, res) => {
   try {
     const row = await payments.applyWebhook(req.body || {});
     if (row) await payments.notifyPaid(row);
+    // A paid link that settles an invoice marks it paid + records it in
+    // the client's ledger (src/pro/store.js; idempotent on retries).
+    if (row && row.status === "paid") {
+      await require("../pro/store").onPaymentPaid(row).catch(() => {});
+    }
   } catch (e) {
     console.error("payment webhook error:", e.message || e);
   }
