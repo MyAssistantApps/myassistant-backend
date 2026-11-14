@@ -11,7 +11,7 @@
  */
 const router = require("express").Router();
 
-const EFFECTIVE = "27 September 2026";
+const EFFECTIVE = "14 November 2026";
 const CONTACT = "myassistant658@gmail.com";
 const ENTITY = "MyAssistant";
 
@@ -86,11 +86,15 @@ const PRIVACY = `
 <h2>2b. Connected apps</h2>
 <p>If you connect Notion, the assistant can read and add to only the pages you choose to share, and only when you ask. It always asks you before changing anything. Disconnecting removes our access at Notion and deletes the link from our servers.</p>
 
+<h2>2c. Public pages for professionals</h2>
+<p>Doctors, advocates and businesses can choose to publish a public page (name, practice or business name, address and map location, phone, photo, description and posts). Nothing is public until they publish it, and they can take it down at any time. Published pages can be found by other users nearby and by search engines. If you send a booking request from such a page, your name, phone number and message go only to that professional.</p>
+
 <h2>3. Processors we rely on</h2>
 <p>MyAssistant uses a small number of service providers to function. They receive only what the feature requires, and only to provide the service to you:</p>
 <table>
 <tr><th>Provider</th><th>Used for</th></tr>
-<tr><td>Google (Gemini AI, Firebase Authentication, Cloud Messaging)</td><td>Understanding and answering your requests; sign-in; push notifications. Voice/text sent for AI processing is handled under Google's API data-use terms.</td></tr>
+<tr><td>OpenAI (AI models)</td><td>Understanding and answering your requests, by text and by voice. Voice/text sent for AI processing is handled under OpenAI's API data-use terms, which do not use API data to train their models.</td></tr>
+<tr><td>Google (Firebase Authentication, Cloud Messaging)</td><td>Sign-in and push notifications.</td></tr>
 <tr><td>Telephony provider (Bolna AI)</td><td>Placing assistant-relayed phone calls you request.</td></tr>
 <tr><td>Notion (only if you connect it)</td><td>Reading and adding to the pages you share.</td></tr>
 <tr><td>Market/news/image services (Yahoo Finance, Google News, image-generation providers)</td><td>Live market data, headlines, and images you ask the assistant to create. Only your query content is sent — never your identity.</td></tr>

@@ -508,7 +508,9 @@ const sampleBrief = () => ({
       location: "Room 2" }];
     try {
       const { body } = await api("GET", "/brief");
-      const m = body.agenda.find((a) => a.kind === "meeting");
+      // "In an hour" is tomorrow after 11 pm: look in both lists, or the test
+      // fails every night (2026-11-14).
+      const m = [...(body.agenda || []), ...(body.tomorrow || [])].find((a) => a.kind === "meeting");
       assert.deepStrictEqual({ id: m.event_id, name: m.name, place: m.place, title: m.title },
         { id: "evX", name: "Standup", place: "Room 2", title: "Standup · Room 2" });
       assert.strictEqual(body.address, "Sir");

@@ -1,4 +1,9 @@
-# VPS — myassistant.wishme.today
+# OLD VPS — myassistant.wishme.today (no longer deployed to)
+
+> **2026-11-14: production moved to `backend.envisionsit.in`** — see
+> `deploy/docker-vps/README.md`. This page describes the old shared host,
+> kept for reference. `production.flags` in this folder now mirrors the NEW
+> server's `.env`.
 
 The live backend runs on a shared host (`myass620@168.119.64.101`, Ubuntu
 22.04, no root, no Docker, no cron). These scripts are copies of the ones in

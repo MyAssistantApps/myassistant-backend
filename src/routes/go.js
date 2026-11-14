@@ -36,3 +36,5 @@ router.get("/:id", async (req, res) => {
 });
 
 module.exports = router;
+// The erase suite's schema guard creates every table before it looks.
+module.exports.migrate = migrate;

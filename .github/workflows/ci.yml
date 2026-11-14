@@ -47,7 +47,10 @@ jobs:
           path: myassistant-backend
       - uses: actions/checkout@v4
         with:
-          repository: dhanuvagman006/myassistant-flutter
+          repository: MyAssistantApps/myassistant-flutter
+          # The app's LIVE branch, not the repo's default (stale main): the
+          # halves must agree with what actually ships.
+          ref: hardening
           path: myassistant-flutter
       - uses: actions/setup-node@v4
         with:

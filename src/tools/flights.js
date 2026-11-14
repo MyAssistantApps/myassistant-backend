@@ -475,4 +475,4 @@ async function list({ from, to, date, adults = 1, cabin = "economy", max = 20 })
   return job;
 }
 
-module.exports = { search, list, provider, resolveAirport, CITY_IATA, amadeusHost, isoMinutes };
+module.exports = { search, list, provider, resolveAirport, CITY_IATA, amadeusHost, isoMinutes, migrate: cacheTable };
