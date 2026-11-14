@@ -145,6 +145,7 @@ const USER_TABLES = [
   ["clinic_appointments", "user_id"],
   // Advocates' cases/hearings and business invoices/leads (src/pro/store.js).
   ...require("../pro/store").USER_TABLES,
+  ...require("../listings/store").USER_TABLES, // public page, photo, posts, booking requests
   ["pending_pushes", "user_id"], // notifications still waiting for a device
   ["user_devices", "user_id"], // phone model, OS, permissions
   ["studio_photos", "user_id"], // the bytes are documents; these point at them

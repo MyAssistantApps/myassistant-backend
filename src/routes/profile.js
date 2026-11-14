@@ -104,6 +104,11 @@ router.put("/details", async (req, res) => {
   const uid = uidOf2(req);
   if (!uid) return res.status(401).json({ error: "sign in" });
   const p = await userCtx.updateProfile(uid, req.body || {});
+  // No longer a doctor/advocate/business? Their public page comes down.
+  if (req.body && req.body.persona !== undefined) {
+    const now = await require("../users/persona").personaOf(uid).catch(() => null);
+    if (now !== null) await require("../listings/store").unpublishIfNotPro(uid, now).catch(() => {});
+  }
   res.json(p);
 });
 

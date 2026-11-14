@@ -320,7 +320,7 @@ async function createAppointment(userId, a, { requireFreeSlot = false, tzOffsetM
      VALUES ($1,$2,$3,$4,$5,$6,$7,'booked',$8,$9,$10,$10) RETURNING *`,
     [userId, a.clientId ? Number(a.clientId) : null, name, clean(a.patientPhone, 40), starts,
      Math.max(5, Math.min(Number(a.durationMin) || p.slotMin, 240)), clean(a.reason, 200),
-     ["app", "voice", "receptionist"].includes(a.source) ? a.source : "app",
+     ["app", "voice", "receptionist", "web"].includes(a.source) ? a.source : "app",
      a.remindPatient === false ? 0 : 1, now]
   );
   return row;

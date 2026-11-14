@@ -9620,7 +9620,32 @@ function registerBuiltins() {
         console.warn("find_places_nearby search failed:", e.message);
       }
 
-      const openMap = args.open_map !== false;
+      // PROFESSIONALS ON MYASSISTANT (2026-11-14): doctors, advocates and
+      // businesses who published a page (src/listings) come FIRST — "doctors
+      // near me" should point at the ones using this app. Real rows only.
+      let listed = [];
+      try {
+        const { searchNearby } = require("../listings/routes");
+        const r = await searchNearby({ lat, lng, q, radiusKm: 10, limit: 5 });
+        if (r.results.length && (r.persona || r.terms.length)) {
+          listed = r.results.slice(0, 3).map((l) => ({
+            name: l.persona === "business" && l.placeName ? l.placeName : l.displayName,
+            what: l.headline || l.specialty || "",
+            place: l.persona === "business" ? "" : l.placeName,
+            area: l.area || l.city || "",
+            distanceKm: Math.round(l.distanceKm * 10) / 10,
+            phone: l.phone,
+          }));
+        }
+      } catch (e) {
+        console.warn("find_places_nearby listings failed:", e.message);
+      }
+      const listedLine = listed.length
+        ? "On MyAssistant nearby (mention these FIRST, with distance, and offer to call or book): " +
+          listed.map((p) => `${p.name}${p.what ? ` (${p.what})` : ""}, ${p.distanceKm} km`).join("; ") + ". "
+        : "";
+
+      const openMap = args.open_map !== false;
       // A google.com/maps SEARCH URL centred on where they are, not a
       // "geo:" URI. Google Maps claims these as app links, so the app
       // opens at the right place — and on a phone without Maps it opens
@@ -9634,9 +9659,9 @@ function registerBuiltins() {
 
       return {
         ok: true,
-        data: { query: q, area, places: found },
+        data: { query: q, area, places: found, onMyAssistant: listed },
         ...(openMap ? { deviceAction: { type: "open_url", url } } : {}),
-        speak: (found.length
+        speak: listedLine + (found.length
           ? `Real places near ${area || "them"}: ` +
             found.slice(0, 3).map((p) => p.name).join("; ") +
             (openMap
@@ -9645,8 +9670,8 @@ function registerBuiltins() {
           : openMap
           ? `The search returned only directory pages, no place names${area ? ` in ${area}` : ""}. ` +
             "Maps IS open at their search — say that in one sentence and ask " +
-            "them to look. NAME NOTHING: you were given no place names."
-          : "The search returned no place names. Say so plainly and offer to " +
+            "them to look. " + (listed.length ? "Name ONLY the MyAssistant ones above." : "NAME NOTHING: you were given no place names.")
+          : (listed.length ? "Name ONLY the MyAssistant ones above — the web search found nothing else. " : "") + "The search returned no place names. Say so plainly and offer to " +
             "open the map — never invent a place."),
       };
     },

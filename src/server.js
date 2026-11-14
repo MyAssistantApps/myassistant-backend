@@ -570,6 +570,16 @@ app.use("/admin-panel", require("./routes/admin_web"));
 // Public legal pages — the Play Store listing links to /legal/privacy.
 app.use("/legal", require("./routes/legal"));
 
+// PUBLIC LISTINGS (2026-11-14) — doctors, advocates and businesses publish
+// a page others find nearby in the app and on Google: /p/<slug>, plus
+// /sitemap.xml and /robots.txt. See src/listings.
+{
+  const listings = require("./listings/routes");
+  app.use(rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true, skip: (req) => !req.path.startsWith("/p/") }), listings.publicRouter);
+  app.use("/listing", appAuth, listings.proRouter);
+  app.use("/listings", appAuth, listings.searchRouter);
+}
+
 // Regional language from the caller's IP (no app permissions needed)
 app.use("/region", regionRoute);
 
