@@ -49,10 +49,12 @@ branch protection, collaborators, secrets or workflows for a teammate.
 
 ## Pushing deploys
 
-Every merge or push to `hardening` here **deploys the backend to the VPS**
-(`.github/workflows/deploy.yml` → `~/app/deploy.sh` on the server) — one
-more reason it goes through the owner's review. Branches do not deploy.
-The flutter repo's `hardening` sends a build to all testers instead.
+Every merge or push to `hardening` here **deploys the backend to production**
+(`.github/workflows/deploy.yml` → `/opt/myassistant/deploy.sh` on
+`backend.envisionsit.in`) — one more reason it goes through the owner's
+review. The script backs up the database, rebuilds the Docker image, checks
+`/health` and rolls back on any failure. Branches do not deploy. Details:
+`deploy/docker-vps/README.md`.
 
 ## Secrets — both repos are PUBLIC
 
@@ -73,6 +75,9 @@ it must be rotated, not just deleted.
 - The suites for what you changed, against a throwaway database:
   `DATABASE_URL=postgres://myassistant:localdev@localhost:5432/myassistant_test npm run test:<suite>`
 - `npm run test:all` runs everything (CI does this on every push).
+- Tests that read the app's source (test:fulfillment, test:state, e2e-g3)
+  look for it at `../myassistant-flutter`; elsewhere set
+  `APP_DIR=/path/to/myassistant-flutter`.
 
 ## Setup
 
@@ -80,3 +85,103 @@ it must be rotated, not just deleted.
 your branch's work first — uncommitted changes are backed up, then
 discarded), writes
 the secrets from Bitwarden and runs the backend and the app.
+
+---
+
+# Project guide (for Claude and the team)
+
+What MyAssistant is: a voice-first personal assistant app (Flutter) with a
+Node/Express + Postgres backend. Users name their own assistant — never
+hardcode a name (it was once "Hari"; that is the client's old name, not the
+product's). The product is **MyAssistant**.
+
+## Production (since 2026-11-14)
+
+| | |
+|---|---|
+| Backend URL | `https://backend.envisionsit.in` (the app's default) |
+| Server | `189.72.146.77`, Docker Compose in `/opt/myassistant/` (backend, postgres 16, caddy) |
+| Deploy | push to `hardening` → GitHub → `deploy.sh` (backup, build, health, rollback) |
+| Settings | the server's `/opt/myassistant/.env`, mirrored without secrets in `deploy/vps/production.flags` |
+| Admin panel | `/admin-panel` — sign in with the server's `ADMIN_KEY` |
+| Old server | `myassistant.wishme.today` — retired, not deployed to, its data was not migrated |
+
+## App updates (no App Distribution needed)
+
+The backend is the update channel: `/config` tells installed apps the newest
+build and `/app/latest.apk` serves it; the app offers it on launch.
+To publish a build:
+
+1. Build with a **higher versionCode** than the last one published
+   (`flutter build apk --release --build-number=<N>`; 207 was published on
+   2026-11-14). The app only offers a build whose number is higher.
+2. Upload: `POST /admin/apk` (header `X-Admin-Key`, multipart `apk`), or on
+   the server copy the APK into `/opt/myassistant/data/` and run
+   `docker compose exec backend node -e 'require("./src/routes/appUpdate").publish({tmpPath:"/app/data/<file>.apk",versionCode:N,versionName:"x.y.z",changelog:["…"]})'`.
+3. Check `GET /config` shows the new `latestVersionCode`.
+
+Builds must be signed with the team key (SHA-256 `9e6b2d23…`) or they will
+not install over existing ones.
+
+## How the code is organised
+
+- `src/server.js` mounts every router; `src/db.js` owns the core schema.
+- **Feature stores self-migrate**: each `src/<feature>/store.js` has a
+  `migrate()` with `CREATE TABLE IF NOT EXISTS` — no change to db.js needed.
+- **Privacy is enforced by tests.** Any new table with a `user_id` must be
+  listed in `USER_TABLES` in `src/routes/privacy.js` (export + account
+  delete), and its `migrate()` added to `ensureEveryTable()` in
+  `scripts/erase-test.js` and `scripts/e2e-g5-security-privacy-test.js`.
+  `npm run test:erase` fails until you do.
+- **AI**: text goes through the OpenAI router `src/services/ai/router.js`
+  (`generateReply(messages, {system, model, json, schema})`); voice is OpenAI
+  Realtime; outbound calls are Bolna (`src/agents/agentCall.js`); inbound
+  calls are Plivo (`src/inbound/receptionist.js`). Do not add other AI
+  SDKs to the app — named Claude models are for development only.
+- **Voice tools** live in `src/tools/builtins.js` (`registry.register`).
+- The app sends its location as `X-Geo-Lat` / `X-Geo-Lng` and timezone as
+  `X-TZ-Offset` on every request.
+
+### Professional workspaces (doctor / advocate / business)
+
+- `users.persona` is chosen at sign-up (`src/users/persona.js`:
+  `requirePersona`, `proKindFor`). Each profession sees only its own tools;
+  the server enforces it (403), the app just hides screens.
+- `/clinic` (`src/clinic/`) is shared by all three, with `only(...)` gates per
+  profession: profile & timings, slot engine, appointments, follow-ups,
+  dues, consult notes + Rx (doctor), cases/hearings + legal drafting
+  (advocate), invoices + leads (business; invoices for advocates too).
+- `src/pro/` holds cases, hearings, invoices (amounts in paise, GST) and leads.
+- Reminder sweeps are appended to the END of `sweep()` in
+  `src/proactive/scheduler.js` — results are read by position.
+
+### Public listings (`src/listings/`)
+
+Professionals publish a page: `/listing` (their editor), `/listings/near`
+(any user, nearest first), and public `/p/<slug>` pages with schema.org
+data, plus `/sitemap.xml` and `/robots.txt` for Google. Doctors need a
+registration number and advocates an enrolment number before going public.
+Advocates get a factual page only (no posts, no fee — Bar Council Rule 36);
+doctors post updates, not offers. Booking requests become real appointments.
+
+## Running locally
+
+```sh
+# throwaway Postgres (never use a database that holds real data)
+docker run -d --name ma-pg -e POSTGRES_USER=e2e -e POSTGRES_PASSWORD=e2e -e POSTGRES_DB=ma -p 55432:5432 postgres:16-alpine
+DATABASE_URL=postgres://e2e:e2e@localhost:55432/ma PORT=3998 node src/server.js
+# phone over USB, app built with --dart-define=BASE_URL=http://localhost:3998:
+adb reverse tcp:3998 tcp:3998
+```
+
+## Known gaps (2026-11-14)
+
+- Before a public release, review production's `.env` with
+  `npm run test:production` — it prints warnings for unsafe settings.
+- Missing on production: `SERPAPI_KEY` (web search / places),
+  `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET`
+  (payment links).
+- The Notion integration is still named "Hari Assistant" in Notion itself;
+  rename it there, then update the text in `src/connectors/notion/tools.js`
+  and the app's `connected_apps_screen.dart`.
+- `e2e-g5`'s forget_memory test is occasionally flaky; rerun before chasing it.

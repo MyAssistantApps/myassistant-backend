@@ -1,3 +1,8 @@
+> **Not how production runs today.** Production is a single Docker Compose
+> VPS (`backend.envisionsit.in`) deployed by `.github/workflows/deploy.yml` —
+> see `deploy/docker-vps/README.md`. This Kubernetes guide is kept for a
+> future move to a cluster.
+
 # Deployment Guide — MYASSISTANT_BACKEND on Kubernetes
 
 End-to-end runbook. Prereqs: a Kubernetes cluster (GKE / EKS / DigitalOcean /
