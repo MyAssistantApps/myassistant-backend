@@ -31,7 +31,6 @@
     "test:erase": "node scripts/erase-test.js",
     "test:readback": "node scripts/readback-test.js",
     "test:live": "node scripts/live-turn-test.js",
-    "e2e:missedcall": "node scripts/missedcall-test.js",
     "test:ai": "node scripts/ai-toolserver-test.js",
     "test:production": "node scripts/production-config-test.js",
     "test:screen": "node scripts/screen-task-test.js",
