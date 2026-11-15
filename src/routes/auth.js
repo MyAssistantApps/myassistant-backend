@@ -102,8 +102,20 @@ router.post("/login", async (req, res) => {
 function googleAudiences() {
   const legacy = String(process.env.GOOGLE_WEB_CLIENT_ID_LEGACY || "")
     .split(",").map((s) => s.trim()).filter(Boolean);
-  return [process.env.GOOGLE_WEB_CLIENT_ID, ...legacy].filter(Boolean);
+  return [process.env.GOOGLE_WEB_CLIENT_ID, ...legacy, ...DEMO_GOOGLE_CLIENTS].filter(Boolean);
 }
+
+/**
+ * THE INVESTOR DEMO APP (com.myassistant.myassistant.demo, 2026-11-15)
+ * signs in through the Firebase project's web client: Google ties that
+ * package's Android sign-in to Firebase project hari-62ec0, so its tokens
+ * carry this audience. Same person, same `sub`, same account. Client ids
+ * are public identifiers, not secrets. Override with GOOGLE_WEB_CLIENT_ID_DEMO.
+ */
+const DEMO_GOOGLE_CLIENTS = String(
+  process.env.GOOGLE_WEB_CLIENT_ID_DEMO ||
+    "134941649419-9u0hmtpljbgm9m9kihar08g2ms953v8r.apps.googleusercontent.com"
+).split(",").map((s) => s.trim()).filter(Boolean);
 
 router.post("/google", async (req, res) => {
   const { idToken } = req.body || {};
