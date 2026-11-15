@@ -63,6 +63,10 @@ const app = express();
 // so one voice turn can be traced HTTP -> agent -> tool -> MCP -> database.
 const observability = require("./infra/observability");
 app.use(observability.requestId());
+// REQUEST LOG: every request (health, auth, everything) into request_logs,
+// kept 2 days, shown in the admin panel's Request log (src/ops/requestLog.js).
+const requestLog = require("./ops/requestLog");
+app.use(requestLog.middleware());
 app.set("trust proxy", 1);
 app.use(helmet());
 
@@ -698,6 +702,13 @@ require("./db")
       )
       .catch((e) => console.error("  knowledge seed failed:", e.message));
 
+    // REQUEST LOG — batch writer and the 2-day cleanup. Background only.
+    try {
+      requestLog.start();
+    } catch (e) {
+      console.error("  request log failed to start:", e.message);
+    }
+
     // PROACTIVE — commitment nudges and pre-meeting briefs.
     // Background only; a failure here never affects a request.
     try {
@@ -843,6 +854,7 @@ require("./db")
             Promise.all([
               require("./live/recorder").stopAll(),
               require("./mailin/service").stopReceiver().catch(() => {}),
+              requestLog.flush(),
             ]),
             new Promise((r) => setTimeout(r, 4000).unref?.()),
           ]);

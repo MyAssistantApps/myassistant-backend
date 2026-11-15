@@ -1708,6 +1708,54 @@ router.post("/api/feedback/:id(\\d+)", async (req, res) => {
 
 const configRoute = require("./config");
 
+/* ------------------------------------------------------------------ */
+/* Request log — every HTTP request, kept 2 days (ops/requestLog.js)   */
+/* ------------------------------------------------------------------ */
+
+router.get("/api/requests", async (req, res) => {
+  const requestLog = require("../ops/requestLog");
+  // What is still in memory goes in first, so the page shows up to now.
+  await requestLog.flush();
+  const before = parseInt(req.query.before, 10);
+  const [rows, summary] = await Promise.all([
+    requestLog.list({
+      before: Number.isFinite(before) ? before : undefined,
+      limit: req.query.limit,
+      method: String(req.query.method || "").trim() || undefined,
+      status: String(req.query.status || "").trim() || undefined,
+      q: String(req.query.q || "").trim().slice(0, 200) || undefined,
+      userId: String(req.query.user || "").trim() || undefined,
+      hideAdmin: req.query.hideAdmin === "1",
+    }),
+    requestLog.summary(),
+  ]);
+  const ids = [...new Set(rows.map((r) => r.user_id).filter((u) => /^[1-9][0-9]*$/.test(u || "")))];
+  const names = new Map();
+  if (ids.length) {
+    for (const u of await sq("SELECT id::text AS id, name FROM users WHERE id::text = ANY($1::text[])", [ids])) {
+      names.set(u.id, u.name);
+    }
+  }
+  res.json({
+    summary,
+    rows: rows.map((r) => ({
+      id: Number(r.id),
+      at: Number(r.ts),
+      rid: r.rid,
+      method: r.method,
+      path: r.path,
+      status: r.status,
+      ms: r.ms,
+      userId: r.user_id,
+      userName: names.get(r.user_id) || null,
+      ip: r.ip,
+      ua: r.ua,
+      bytes: r.bytes,
+      aborted: r.aborted,
+    })),
+  });
+});
+
 router.get("/api/flags", async (_req, res) => {
   const o = await configRoute.overrides();
   res.json({

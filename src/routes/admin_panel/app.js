@@ -261,6 +261,7 @@ const ICONS = {
   refresh: "M23 4v6h-6M1 20v-6h6M3.5 9a9 9 0 0 1 14.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0 0 20.5 15",
   info: "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01",
   user: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z",
+  terminal: "M4 17l6-6-6-6M12 19h8",
 };
 function icon(name) {
   const s = svgEl("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.8, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" });
@@ -289,7 +290,8 @@ const NAV = [
   ["People", [["#/users", "Users", "users"], ["#/phones", "Phones", "phone"], ["#/feedback", "Feedback", "inbox"]]],
   ["Content", [["#/conversations", "Conversations", "chat"], ["#/recordings", "Recordings", "mic"],
     ["#/documents", "Documents", "file"], ["#/video-notes", "Video notes", "video"]]],
-  ["Operations", [["#/activity", "Activity", "list"], ["#/outcomes", "Task outcomes", "check"],
+  ["Operations", [["#/activity", "Activity", "list"], ["#/requests", "Request log", "terminal"],
+    ["#/outcomes", "Task outcomes", "check"],
     ["#/broadcast", "Notifications", "bell"], ["#/flags", "Feature flags", "flag"], ["#/debug", "System & debug", "cpu"]]],
 ];
 const NAV_FLAT = NAV.flatMap(([, items]) => items);
@@ -417,6 +419,7 @@ async function render() {
     if (hash.startsWith("#/video-notes")) return await viewVideoNotes();
     if (hash.startsWith("#/documents")) return await viewDocuments();
     if (hash.startsWith("#/activity")) return await viewActivity();
+    if (hash.startsWith("#/requests")) return await viewRequests();
     if (hash.startsWith("#/feedback")) return await viewFeedback();
     if (hash.startsWith("#/outcomes")) return await viewOutcomes();
     if (hash.startsWith("#/broadcast")) return await viewBroadcast();
@@ -1659,6 +1662,125 @@ async function viewActivity() {
     h("div", { class: "card table-card" },
       h("table", {},
         h("thead", {}, h("tr", {}, h("th", {}, "When"), h("th", {}, "User"), h("th", {}, "Action"), h("th", {}, "Detail"))),
+        body),
+      moreBtn)));
+  await load(false);
+}
+
+/* ------------------------------------------------------------------ */
+/* Request log — every HTTP request, kept 2 days (2026-11-15)          */
+/* ------------------------------------------------------------------ */
+
+async function viewRequests() {
+  shell("#/requests", loading());
+  const f = { q: "", method: "", status: "", user: "", hideAdmin: true };
+  let oldestId = null, timer = null;
+  const body = h("tbody", {});
+  const kpis = h("div", { class: "grid kpis", style: "margin-bottom:12px;" });
+  const moreBtn = h("button", { class: "btn", style: "margin:12px;" }, "Load older");
+
+  const statusTone = (s) => (s >= 500 ? "danger" : s >= 400 ? "warn" : s >= 300 ? "neutral" : "good");
+  const fmtMs = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(1) + " s" : ms + " ms");
+
+  function row(r) {
+    const when = new Date(r.at);
+    return h("tr", {},
+      h("td", { class: "sub", style: "white-space:nowrap;" },
+        h("div", {}, when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })),
+        h("div", { class: "faint" }, when.toLocaleDateString([], { day: "numeric", month: "short" }))),
+      h("td", {}, h("span", { class: "badge neutral" }, r.method)),
+      h("td", { style: "max-width:420px; word-break:break-all; font-family:'Geist Mono',monospace; font-size:12px;" },
+        r.path, r.rid ? h("div", { class: "faint" }, "id " + r.rid) : null),
+      h("td", {}, h("span", { class: "badge " + statusTone(r.status) }, String(r.status)),
+        r.aborted ? h("div", { class: "sub" }, "client left") : null),
+      h("td", { class: "num", style: "white-space:nowrap;" }, fmtMs(r.ms)),
+      h("td", {}, r.userId
+        ? (/^\d+$/.test(r.userId)
+          ? h("a", { href: "#/user/" + r.userId }, r.userName || "#" + r.userId)
+          : h("span", {}, r.userId))
+        : h("span", { class: "faint" }, "—")),
+      h("td", { class: "sub", style: "max-width:260px;" },
+        h("div", {}, r.ip || "—"),
+        h("div", { class: "faint", style: "word-break:break-all;" }, r.ua || "")));
+  }
+
+  function drawSummary(s) {
+    kpis.replaceChildren(
+      kpi("Last hour", s.last_hour, s.last_hour ? `avg ${fmtMs(s.avg_ms)}` : null),
+      kpi("Last 24 hours", s.last_day),
+      kpi("4xx (24 h)", s.c4xx),
+      kpi("5xx (24 h)", s.c5xx),
+      kpi("Stored", s.total, s.oldest ? `since ${timeAgo(s.oldest)} · kept ${s.keepDays} days` : `kept ${s.keepDays} days`));
+  }
+
+  async function load(append) {
+    const qs = new URLSearchParams({ limit: "100" });
+    for (const k of ["q", "method", "status", "user"]) if (f[k]) qs.set(k, f[k]);
+    if (f.hideAdmin) qs.set("hideAdmin", "1");
+    if (append && oldestId) qs.set("before", String(oldestId));
+    const d = await api("/requests?" + qs);
+    drawSummary(d.summary);
+    if (!append) body.replaceChildren();
+    if (d.rows.length) {
+      body.append(...d.rows.map(row));
+      oldestId = d.rows[d.rows.length - 1].id;
+    } else if (!append) {
+      body.append(h("tr", {}, h("td", { colspan: 7, class: "chart-empty" },
+        d.summary.enabled ? "No requests match." : "The request log is switched off (REQUEST_LOG=0).")));
+    }
+    moreBtn.disabled = d.rows.length < 100;
+  }
+  const reload = () => { oldestId = null; load(false).catch((e) => toast(e.message, true)); };
+  moreBtn.addEventListener("click", () => load(true).catch((e) => toast(e.message, true)));
+
+  const select = (key, options) => h("select", {
+    class: "input", style: "width:auto;",
+    onchange: (e) => { f[key] = e.target.value; reload(); },
+  }, options.map(([v, label]) => h("option", { value: v }, label)));
+
+  const live = h("input", {
+    type: "checkbox",
+    onchange: (e) => {
+      clearInterval(timer);
+      if (!e.target.checked) return;
+      timer = setInterval(() => {
+        if (!location.hash.startsWith("#/requests")) return clearInterval(timer);
+        reload();
+      }, 5000);
+    },
+  });
+
+  const filters = h("div", { style: "display:flex; gap:8px; flex-wrap:wrap; align-items:center;" },
+    h("input", {
+      class: "input", style: "max-width:220px;", placeholder: "Path contains…",
+      oninput: debounce((e) => { f.q = e.target.value.trim(); reload(); }, 300),
+    }),
+    select("method", [["", "Any method"], ["GET", "GET"], ["POST", "POST"], ["PUT", "PUT"],
+      ["PATCH", "PATCH"], ["DELETE", "DELETE"], ["OPTIONS", "OPTIONS"]]),
+    select("status", [["", "Any status"], ["2xx", "2xx"], ["3xx", "3xx"], ["4xx", "4xx"], ["5xx", "5xx"]]),
+    h("input", {
+      class: "input", style: "max-width:110px;", placeholder: "User id",
+      oninput: debounce((e) => { f.user = e.target.value.trim(); reload(); }, 300),
+    }),
+    h("label", { class: "sub", style: "display:flex; gap:6px; align-items:center;" },
+      h("input", { type: "checkbox", checked: f.hideAdmin, onchange: (e) => { f.hideAdmin = e.target.checked; reload(); } }),
+      "Hide admin panel"),
+    h("label", { class: "sub", style: "display:flex; gap:6px; align-items:center;" }, live, "Auto-refresh"),
+    h("button", { class: "btn", onclick: reload }, "Refresh"));
+
+  shell("#/requests", h("div", {},
+    h("div", { class: "page-head" },
+      h("div", {}, h("div", { class: "page-title" }, "Request log"),
+        h("div", { class: "page-sub" },
+          "Every request the server answered (health checks and sign-ins included), newest first. " +
+          "Kept for 2 days. Query strings, headers and bodies are never stored.")),
+      filters),
+    kpis,
+    h("div", { class: "card table-card" },
+      h("table", {},
+        h("thead", {}, h("tr", {},
+          h("th", {}, "When"), h("th", {}, "Method"), h("th", {}, "Path"), h("th", {}, "Status"),
+          h("th", {}, "Time"), h("th", {}, "User"), h("th", {}, "IP · device"))),
         body),
       moreBtn)));
   await load(false);

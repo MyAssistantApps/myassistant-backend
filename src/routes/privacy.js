@@ -233,6 +233,9 @@ const USER_TABLES = [
   ["ui_specs", "user_id"],
   ["ui_spec_history", "user_id"],
   ["ui_themes", "user_id"],
+  // 2026-11-15: the 2-day request log (ops/requestLog.js) — paths, IP and
+  // user agent of each request a signed-in user made.
+  ["request_logs", "user_id"],
 ];
 
 /**
