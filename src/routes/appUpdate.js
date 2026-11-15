@@ -125,9 +125,9 @@ async function announceUpdate(meta) {
     try {
       const r = await push.send(
         u.fcm_token,
-        `Update ready — version ${meta.versionName}`,
+        `Update Available: Version ${meta.versionName}`,
         (Array.isArray(meta.changelog) && meta.changelog[0]) ||
-          "Open the app to install the latest version.",
+          "Please open the app to install the latest version.",
         { kind: "app_update", versionCode: String(meta.versionCode) }
       );
       if (r.ok) sent++;
@@ -135,9 +135,9 @@ async function announceUpdate(meta) {
         // Queue it: a phone whose token died in the last update learns
         // about this one when it registers again.
         require("../services/pendingPush")
-          .queue(u.id, `Update ready — version ${meta.versionName}`,
+          .queue(u.id, `Update Available: Version ${meta.versionName}`,
             (Array.isArray(meta.changelog) && meta.changelog[0]) ||
-              "Open the app to install the latest version.",
+              "Please open the app to install the latest version.",
             { kind: "app_update", versionCode: String(meta.versionCode) })
           .catch(() => {});
       }

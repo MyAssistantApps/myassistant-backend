@@ -165,8 +165,8 @@ async function sweep({ staleMs = 6 * 60 * 60 * 1000, limit = 20 } = {}) {
       await require("../services/push").sendNotification(
         w.fcm_token,
         hitTarget
-          ? `₹${amt} — your ${w.origin}→${w.destination} target is met`
-          : `${w.origin}→${w.destination} dropped to ₹${amt}`,
+          ? `₹${amt}: ${w.origin}→${w.destination} Target Price Met`
+          : `${w.origin}→${w.destination} Fare Reduced to ₹${amt}`,
         `${best.flight.flight} on ${w.depart_date}, ${best.flight.stops === 0 ? "non-stop" : best.flight.stops + " stop"}.`
       ,
         { kind: "fare_alert" });

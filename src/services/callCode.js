@@ -164,18 +164,18 @@ let dial = placeBolnaCall;
  */
 async function start(uid, phone, { now = Date.now() } = {}) {
   await migrate();
-  if (!configured()) throw new CallCodeError("Verification calls aren't available right now.", 503);
-  if (!callable(phone)) throw new CallCodeError("Enter an Indian mobile number (+91).");
+  if (!configured()) throw new CallCodeError("Verification calls are currently unavailable.", 503);
+  if (!callable(phone)) throw new CallCodeError("Please enter an Indian mobile number (+91).");
 
   if ((await countSince("user_id = $1 AND created_at > $2", [uid, now - HOUR])) >= LIMITS.perUserHour ||
       (await countSince("user_id = $1 AND created_at > $2", [uid, now - DAY])) >= LIMITS.perUserDay) {
-    throw new CallCodeError("Too many calls. Please wait a while and try again.", 429);
+    throw new CallCodeError("Too many calls have been requested. Please try again later.", 429);
   }
   if ((await countSince("phone = $1 AND created_at > $2", [phone, now - DAY])) >= LIMITS.perPhoneDay) {
-    throw new CallCodeError("This number has had too many calls today. Please try tomorrow.", 429);
+    throw new CallCodeError("This number has received too many calls today. Please try again tomorrow.", 429);
   }
   if ((await countSince("created_at > $1", [now - DAY])) >= LIMITS.globalDay) {
-    throw new CallCodeError("Verification calls are busy right now. Please try later.", 503);
+    throw new CallCodeError("Verification calls are temporarily at capacity. Please try again later.", 503);
   }
 
   const u = await one("SELECT name, gender FROM users WHERE id = $1", [uid]).catch(() => null);
@@ -201,7 +201,7 @@ async function start(uid, phone, { now = Date.now() } = {}) {
   } catch (e) {
     console.warn(`call-code: call failed for user ${uid}:`, e.message);
     await run("UPDATE phone_call_codes SET expires_at = $2 WHERE id = $1", [row.id, now]);
-    throw new CallCodeError("Couldn't place the call. Please try again in a minute.", 502);
+    throw new CallCodeError("Unable to place the call. Please try again in a minute.", 502);
   }
   return { expiresAt: now + TTL_MS };
 }
@@ -210,27 +210,27 @@ async function start(uid, phone, { now = Date.now() } = {}) {
 async function check(uid, phone, code, { now = Date.now() } = {}) {
   await migrate();
   const c = String(code || "").replace(/\D/g, "");
-  if (c.length !== 6) return { ok: false, error: "Enter the 6-digit code." };
+  if (c.length !== 6) return { ok: false, error: "Please enter the 6-digit code." };
   const row = await one(
     `SELECT * FROM phone_call_codes
       WHERE user_id = $1 AND phone = $2 AND used_at = 0 AND expires_at > $3
       ORDER BY id DESC LIMIT 1`,
     [uid, phone, now]
   );
-  if (!row) return { ok: false, error: "That code has expired. Ask for a new call." };
-  if (Number(row.tries) >= MAX_TRIES) return { ok: false, error: "Too many wrong codes. Ask for a new call." };
+  if (!row) return { ok: false, error: "This code has expired. Please request a new call." };
+  if (Number(row.tries) >= MAX_TRIES) return { ok: false, error: "Too many incorrect codes have been entered. Please request a new call." };
   const want = Buffer.from(row.code_hash, "hex");
   const got = Buffer.from(hashCode(c, phone), "hex");
   if (want.length !== got.length || !crypto.timingSafeEqual(want, got)) {
     await run("UPDATE phone_call_codes SET tries = tries + 1 WHERE id = $1", [row.id]);
     const left = MAX_TRIES - Number(row.tries) - 1;
-    return { ok: false, error: left > 0 ? `That code isn't right. ${left} ${left === 1 ? "try" : "tries"} left.` : "Too many wrong codes. Ask for a new call." };
+    return { ok: false, error: left > 0 ? `The code is incorrect. ${left} ${left === 1 ? "attempt" : "attempts"} remaining.` : "Too many incorrect codes have been entered. Please request a new call." };
   }
   const done = await one(
     "UPDATE phone_call_codes SET used_at = $2 WHERE id = $1 AND used_at = 0 RETURNING id",
     [row.id, now]
   );
-  return done ? { ok: true } : { ok: false, error: "That code was already used." };
+  return done ? { ok: true } : { ok: false, error: "This code was already used." };
 }
 
 /** Old rows are useless after a day; the scheduler or a test may call this. */

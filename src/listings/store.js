@@ -364,7 +364,7 @@ async function saveListing(userId, persona, patch, prof) {
       next.lat = Math.round(Number(patch.lat) * 1e6) / 1e6;
       next.lng = Math.round(Number(patch.lng) * 1e6) / 1e6;
     } else {
-      const e = new Error("That map location isn't valid.");
+      const e = new Error("Please select a valid map location.");
       e.status = 400;
       throw e;
     }
@@ -430,19 +430,19 @@ function sniffImage(buf) {
 async function setPhoto(userId, base64) {
   await migrate();
   if (!(await getRow(userId))) {
-    const e = new Error("Save your listing first.");
+    const e = new Error("Please save your listing first.");
     e.status = 409;
     throw e;
   }
   const buf = Buffer.from(String(base64 || "").replace(/^data:[^,]*,/, ""), "base64");
   const mime = sniffImage(buf);
   if (!mime) {
-    const e = new Error("Use a JPEG, PNG or WebP photo.");
+    const e = new Error("Please use a JPEG, PNG or WebP photo.");
     e.status = 400;
     throw e;
   }
   if (buf.length > MAX_PHOTO_BYTES) {
-    const e = new Error("That photo is too large (400 KB max).");
+    const e = new Error("The photo is too large. The maximum size is 400 KB.");
     e.status = 413;
     throw e;
   }
@@ -484,13 +484,13 @@ async function createPost(userId, p) {
   const title = clean(p.title, 100);
   const body = clean(p.body, 600);
   if (!title && !body) {
-    const e = new Error("Write something to post.");
+    const e = new Error("Please enter the content of the post.");
     e.status = 400;
     throw e;
   }
   const live = await one("SELECT COUNT(*)::int AS n FROM listing_posts WHERE user_id = $1 AND expires_at > $2", [Number(userId), Date.now()]);
   if ((live?.n || 0) >= 10) {
-    const e = new Error("You already have 10 live posts — remove one first.");
+    const e = new Error("You already have 10 live posts. Please remove one first.");
     e.status = 409;
     throw e;
   }
@@ -519,7 +519,7 @@ async function createRequest(ownerId, r, { ip = "", source = "web", fromUser = n
   const name = clean(r.name, 80);
   const phone = cleanPhone(r.phone);
   if (!name || !phone) {
-    const e = new Error("Please give your name and a phone number.");
+    const e = new Error("Please provide your name and a phone number.");
     e.status = 400;
     throw e;
   }
@@ -530,7 +530,7 @@ async function createRequest(ownerId, r, { ip = "", source = "web", fromUser = n
   if (ipHash) {
     const n = await one("SELECT COUNT(*)::int AS n FROM listing_requests WHERE ip_hash = $1 AND created_at > $2", [ipHash, now - DAY]);
     if ((n?.n || 0) >= 5) {
-      const e = new Error("Too many requests today. Please call instead.");
+      const e = new Error("The daily request limit has been reached. Please telephone instead.");
       e.status = 429;
       throw e;
     }

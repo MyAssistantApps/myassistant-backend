@@ -40,7 +40,7 @@ function uid(req, res) {
   if (sub === "anonymous-dev") sub = 0;
   const id = Number(sub);
   if (!Number.isInteger(id) || id < 0) {
-    res.status(400).json({ error: "Style Studio needs a signed-in account" });
+    res.status(400).json({ error: "Style Studio requires a signed-in account." });
     return null;
   }
   return id;
@@ -51,7 +51,7 @@ const receive = (fields) => (req, res, next) =>
   upload.fields(fields)(req, res, (err) => {
     if (!err) return next();
     if (err.code === "LIMIT_FILE_SIZE") {
-      return res.status(413).json({ error: "that photo is too large (max 18 MB)" });
+      return res.status(413).json({ error: "The photo is too large. The maximum size is 18 MB." });
     }
     console.error("studio upload:", err.message);
     return res.status(400).json({ error: "bad upload" });
@@ -82,10 +82,10 @@ function fail(res, e, where) {
     return res.status(503).json({ error: e.message, code });
   }
   if (e.constructor?.name === "DocumentLimitError") {
-    return res.status(507).json({ error: "your document storage is full — delete a few files first" });
+    return res.status(507).json({ error: "Your document storage is full. Please delete some files first." });
   }
   console.error(`studio ${where}:`, e.stack || e.message);
-  return res.status(500).json({ error: "Style Studio hit a snag. Try that again in a moment." });
+  return res.status(500).json({ error: "Style Studio encountered an error. Please try again shortly." });
 }
 
 /* ------------------------------------------------------------------ */
@@ -182,7 +182,7 @@ router.post("/photos", receive([{ name: "file", maxCount: 1 }]), async (req, res
   if (id === null) return;
   try {
     const file = firstFile(req, "file");
-    if (!file) return res.status(400).json({ error: "a photo is required" });
+    if (!file) return res.status(400).json({ error: "A photo is required." });
     const role = req.body.role === "garment" ? "garment" : "model";
     // A garment photo is a picture of a shirt; a model photo is a face.
     if (role === "model" && !(await requireConsent(id, res))) return;

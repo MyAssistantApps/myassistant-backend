@@ -266,13 +266,13 @@ async function deliver(id) {
         // video popup (push_service.dart _deliver); kind stays
         // agent_message so older handling still applies.
         await tell(to.id, to.fcm_token,
-          `${senderName} sent you a video note`,
+          `${senderName} Sent You a Video Note`,
           "Tap to watch. It was made by AI from their recorded video.",
           { kind: "agent_message", avatar: "1" },
           { queue: true });
       }
-      await tell(sender.id, sender.fcm_token, "Your video note was delivered",
-        `Your video note reached ${name}.`, { kind: "video_note" });
+      await tell(sender.id, sender.fcm_token, "Video Note Delivered",
+        `Your video note was delivered to ${name}.`, { kind: "video_note" });
       await outcome(done, "completed", `reached ${name} in the app`);
     } else {
       // Not on the app (or the number changed hands): the sender shares it.
@@ -295,8 +295,8 @@ async function deliver(id) {
         delivered_at: Date.now(), delivered_to: "sender", document_id: doc.id, error: "",
         note: `${r.recipient_name || "They"} isn't on the app — saved to the sender's documents to share`,
       });
-      await tell(sender.id, sender.fcm_token, "Your video note is ready",
-        `Your video note for ${name} is ready to share — it's in your documents.`,
+      await tell(sender.id, sender.fcm_token, "Your Video Note Is Ready",
+        `Your video note for ${name} is ready to share. It is available in your documents.`,
         { kind: "video_note" }, { queue: true });
       await outcome(done, "completed",
         `ready in your documents to share with ${name} — they aren't on the app`);
@@ -333,8 +333,8 @@ async function fail(id, reason) {
   }
   const sender = await userRow(r.user_id);
   if (sender) {
-    await tell(sender.id, sender.fcm_token, "Your video note couldn't be made",
-      `Your video note for ${r.recipient_name || "your contact"} couldn't be made. You can ask for it again.`,
+    await tell(sender.id, sender.fcm_token, "Video Note Not Created",
+      `Your video note for ${r.recipient_name || "your contact"} could not be created. You may request it again.`,
       { kind: "video_note" }, { queue: true });
   }
   await outcome(r, "failed", `the video note for ${r.recipient_name || "them"} couldn't be made`);

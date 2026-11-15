@@ -270,7 +270,7 @@ const src = (f) => fs.readFileSync(__dirname + "/../src/" + f, "utf8");
         assert.strictEqual(j.notice, null);
         const z = await upload("application/zip", "x.zip");
         assert.strictEqual(z.status, 415);
-        assert.match((await z.json()).error, /^That kind of file can't be saved here .*Photos, PDFs/);
+        assert.match((await z.json()).error, /^This file type cannot be saved here .*Photos, PDFs/);
       });
 
       await atest("'my last hospital report' with none saved: an unread scan may stand in, a filed report may not", async () => {

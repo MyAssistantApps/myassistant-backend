@@ -63,7 +63,7 @@ router.post("/address/rotate", wrap(async (req, res) => {
     res.json({ address: address.toClient(r.address), retired: r.retired ? address.toClient(r.retired).address : null });
   } catch (e) {
     if (e.code === "rotate_limit") {
-      return res.status(429).json({ error: `You can get a new address ${address.ROTATE_PER_DAY} times a day.` });
+      return res.status(429).json({ error: `A new address may be requested ${address.ROTATE_PER_DAY} times a day.` });
     }
     throw e;
   }

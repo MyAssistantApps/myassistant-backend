@@ -44,12 +44,12 @@ function postKindsFor(persona) {
 }
 
 const MISSING_WORDS = {
-  name: "Your name",
-  address: "The full address",
-  location: "The map pin",
-  phone: "A phone number",
-  reg_no: "Your medical registration number (Clinic settings)",
-  enrolment_no: "Your Bar Council enrolment number (Chamber settings)",
+  name: "your name",
+  address: "the full address",
+  location: "the map pin",
+  phone: "a phone number",
+  reg_no: "your medical registration number (Clinic Settings)",
+  enrolment_no: "your Bar Council enrolment number (Chamber Settings)",
 };
 
 function baseUrl(req) {
@@ -117,7 +117,7 @@ proRouter.post("/publish", async (req, res) => {
       return res.status(409).json({
         error: "incomplete",
         missing: r.missing,
-        message: `Before going public, add: ${r.missing.map((m) => MISSING_WORDS[m] || m).join(", ")}.`,
+        message: `To publish this listing, please provide: ${r.missing.map((m) => MISSING_WORDS[m] || m).join(", ")}.`,
       });
     }
     audit.record(uidOf(req), on ? "listing.published" : "listing.unpublished", "public listing");
@@ -157,7 +157,7 @@ proRouter.post("/posts", async (req, res) => {
   try {
     const kinds = postKindsFor(req.persona);
     if (!kinds.length) {
-      return res.status(403).json({ error: "Bar Council rules don't allow advocates to advertise, so posts are off for chambers." });
+      return res.status(403).json({ error: "Bar Council rules do not permit advocates to advertise; posts are therefore unavailable for chambers." });
     }
     const kind = kinds.includes(req.body?.kind) ? req.body.kind : "update";
     const post = await store.createPost(uidOf(req), { ...(req.body || {}), kind });
@@ -191,10 +191,10 @@ proRouter.post("/requests/:id/accept", async (req, res) => {
     const uid = uidOf(req);
     const r = await store.getRequest(uid, req.params.id);
     if (!r) return res.status(404).json({ error: "not found" });
-    if (r.status !== "new") return res.status(409).json({ error: `Already ${r.status}.` });
+    if (r.status !== "new") return res.status(409).json({ error: `This request has already been ${r.status}.` });
     const startsAt = Number(req.body?.startsAt);
     if (!Number.isFinite(startsAt) || startsAt < Date.now() - 3600_000) {
-      return res.status(400).json({ error: "Pick a time for the appointment." });
+      return res.status(400).json({ error: "Please select a time for the appointment." });
     }
     const appt = await clinicStore.createAppointment(uid, {
       patientName: r.name,
@@ -216,7 +216,7 @@ proRouter.post("/requests/:id/decline", async (req, res) => {
   try {
     const r = await store.getRequest(uidOf(req), req.params.id);
     if (!r) return res.status(404).json({ error: "not found" });
-    if (r.status !== "new") return res.status(409).json({ error: `Already ${r.status}.` });
+    if (r.status !== "new") return res.status(409).json({ error: `This request has already been ${r.status}.` });
     const updated = await store.setRequestStatus(uidOf(req), r.id, "declined");
     audit.record(uidOf(req), "listing.request.declined", `request #${r.id}`);
     res.json({ request: updated });
@@ -280,7 +280,7 @@ async function searchNearby({ lat, lng, q = "", persona = null, radiusKm = 15, l
 searchRouter.get("/near", async (req, res) => {
   try {
     const g = geoOf(req);
-    if (!g) return res.status(400).json({ error: "location_required", message: "Turn on location to see who's nearby." });
+    if (!g) return res.status(400).json({ error: "location_required", message: "Location access is required to view nearby listings. Please enable it." });
     const r = await searchNearby({
       ...g,
       q: String(req.query.q || "").slice(0, 100),
@@ -326,11 +326,11 @@ searchRouter.get("/:slug", async (req, res) => {
 searchRouter.post("/:slug/request", async (req, res) => {
   try {
     const l = await store.getPublishedBySlug(req.params.slug);
-    if (!l || !l.acceptsRequests) return res.status(404).json({ error: "This listing isn't taking requests." });
-    if (l.userId === uidOf(req)) return res.status(400).json({ error: "That's your own listing." });
+    if (!l || !l.acceptsRequests) return res.status(404).json({ error: "This listing is not accepting requests." });
+    if (l.userId === uidOf(req)) return res.status(400).json({ error: "A request cannot be sent to your own listing." });
     const r = await store.createRequest(l.userId, req.body || {}, { ip: req.ip, source: "app", fromUser: uidOf(req) });
     if (!r.duplicate) {
-      notifyOwner(l.userId, "New booking request", `${r.name} asked for ${r.preferred || "an appointment"}`, { kind: "listing_request", id: r.id });
+      notifyOwner(l.userId, "New Booking Request", `${r.name} has requested ${r.preferred || "an appointment"}.`, { kind: "listing_request", id: r.id });
     }
     res.json({ ok: true, duplicate: Boolean(r.duplicate) });
   } catch (e) {
@@ -474,28 +474,28 @@ ${photoUrl ? `<meta property="og:image" content="${esc(photoUrl)}">` : ""}
     ${l.phone ? `<a class="btn p" href="tel:${esc(l.phone)}">📞 Call</a>` : ""}
     ${wa ? `<a class="btn wa" href="https://wa.me/${esc(wa)}" rel="nofollow">💬 WhatsApp</a>` : ""}
     <a class="btn" href="${esc(dir)}" rel="nofollow">🧭 Directions</a>
-    ${l.acceptsRequests ? `<a class="btn" href="#book">🗓️ Request booking</a>` : ""}
+    ${l.acceptsRequests ? `<a class="btn" href="#book">🗓️ Request Booking</a>` : ""}
   </div></div>
   ${l.about ? `<section class="card"><h2>About</h2><p>${esc(l.about).replace(/\n/g, "<br>")}</p></section>` : ""}
   <section class="card"><h2>Details</h2>
     ${facts.map(([k, v]) => `<div class="row"><b>${esc(k)}</b><span>${esc(v)}</span></div>`).join("")}
   </section>
-  ${l.services.length ? `<section class="card"><h2>${l.persona === "advocate" ? "Areas of practice" : "Services"}</h2><div class="chips">${l.services.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}</div></section>` : ""}
+  ${l.services.length ? `<section class="card"><h2>${l.persona === "advocate" ? "Areas of Practice" : "Services"}</h2><div class="chips">${l.services.map((s) => `<span class="chip">${esc(s)}</span>`).join("")}</div></section>` : ""}
   ${posts.length ? `<section class="card"><h2>Updates</h2>${posts.map((p) => `<div class="post">${p.kind === "offer" ? '<span class="tag">Offer</span>' : ""}<strong>${esc(p.title)}</strong>${p.body ? `<p>${esc(p.body).replace(/\n/g, "<br>")}</p>` : ""}</div>`).join("")}</section>` : ""}
   <section class="card"><h2>Location</h2><p>${esc(where)}</p>
     <iframe class="map" loading="lazy" referrerpolicy="no-referrer" title="Map"
       src="https://maps.google.com/maps?q=${l.lat},${l.lng}&z=16&output=embed"></iframe>
   </section>
-  ${l.acceptsRequests ? `<section class="card" id="book"><h2>Request a booking</h2>
+  ${l.acceptsRequests ? `<section class="card" id="book"><h2>Request a Booking</h2>
     <form method="post" action="${esc(base)}/p/${esc(l.slug)}/request">
-      <div><label for="n">Your name</label><input id="n" name="name" required maxlength="80" autocomplete="name"></div>
-      <div><label for="ph">Phone</label><input id="ph" name="phone" required inputmode="tel" maxlength="20" autocomplete="tel"></div>
-      <div><label for="pr">Preferred day / time</label><input id="pr" name="preferred" maxlength="120" placeholder="e.g. Tomorrow evening"></div>
-      <div><label for="m">Message (optional)</label><textarea id="m" name="message" rows="3" maxlength="500"></textarea></div>
+      <div><label for="n">Full Name</label><input id="n" name="name" required maxlength="80" autocomplete="name"></div>
+      <div><label for="ph">Phone Number</label><input id="ph" name="phone" required inputmode="tel" maxlength="20" autocomplete="tel"></div>
+      <div><label for="pr">Preferred Day and Time</label><input id="pr" name="preferred" maxlength="120" placeholder="e.g. Tomorrow evening"></div>
+      <div><label for="m">Message (Optional)</label><textarea id="m" name="message" rows="3" maxlength="500"></textarea></div>
       <div class="hp" aria-hidden="true"><label>Website<input name="website" tabindex="-1" autocomplete="off"></label></div>
-      <button class="btn p" type="submit">Send request</button>
+      <button class="btn p" type="submit">Submit Request</button>
     </form>
-    <p class="note">${esc(l.displayName)} will confirm a time with you by phone. Your number is shared only with them.</p>
+    <p class="note">${esc(l.displayName)} will contact you by telephone to confirm a time. Your phone number is not shared with anyone else.</p>
   </section>` : ""}
   ${l.persona === "advocate" ? `<p class="note">This page is published by the advocate for information only, as permitted by the Bar Council of India rules. It is not an advertisement or solicitation.</p>` : ""}
   <footer>Listed on <b>MyAssistant</b></footer>
@@ -515,7 +515,7 @@ publicRouter.get("/p/:slug", async (req, res) => {
     const l = await store.getPublishedBySlug(req.params.slug);
     securityHeaders(res);
     if (!l) {
-      return res.status(404).send(simplePage("Not found", "This page isn't available. It may have been taken down."));
+      return res.status(404).send(simplePage("Page Not Found", "This page is unavailable. It may have been removed."));
     }
     const prof = await clinicStore.getProfile(l.userId);
     const posts = postKindsFor(l.persona).length ? await store.listPosts(l.userId, { limit: 10 }) : [];
@@ -526,7 +526,7 @@ publicRouter.get("/p/:slug", async (req, res) => {
     res.setHeader("Cache-Control", "public, max-age=300");
     res.send(renderPage(l, prof, posts, { url, photoUrl, base }));
   } catch (e) {
-    res.status(500).send(simplePage("Something went wrong", "Please try again in a moment."));
+    res.status(500).send(simplePage("Unexpected Error", "An unexpected error has occurred. Please try again shortly."));
   }
 });
 
@@ -549,19 +549,19 @@ publicRouter.post("/p/:slug/request", express.urlencoded({ extended: false, limi
   const back = `${baseUrl(req)}/p/${encodeURIComponent(req.params.slug)}`;
   try {
     const l = await store.getPublishedBySlug(req.params.slug);
-    if (!l || !l.acceptsRequests) return res.status(404).send(simplePage("Not available", "This page isn't taking requests.", back));
+    if (!l || !l.acceptsRequests) return res.status(404).send(simplePage("Not Available", "This page is not accepting requests.", back));
     // Honeypot: real people never see or fill this field. Pretend success.
     if (String(req.body?.website || "").trim()) {
-      return res.send(simplePage("Request sent", "Thank you.", back));
+      return res.send(simplePage("Request Sent", "Thank you.", back));
     }
     const r = await store.createRequest(l.userId, req.body || {}, { ip: req.ip, source: "web" });
     if (!r.duplicate) {
-      notifyOwner(l.userId, "New booking request", `${r.name} asked for ${r.preferred || "an appointment"} (from your web page)`, { kind: "listing_request", id: r.id });
+      notifyOwner(l.userId, "New Booking Request", `${r.name} has requested ${r.preferred || "an appointment"} via your web page.`, { kind: "listing_request", id: r.id });
     }
-    res.send(simplePage("Request sent",
-      `Thank you${r.name ? `, ${r.name}` : ""}. ${l.displayName} will call you to confirm a time.`, back));
+    res.send(simplePage("Request Sent",
+      `Thank you${r.name ? `, ${r.name}` : ""}. ${l.displayName} will contact you by telephone to confirm a time.`, back));
   } catch (e) {
-    res.status(e.status || 400).send(simplePage("Couldn't send", e.message || "Please try again.", back));
+    res.status(e.status || 400).send(simplePage("Unable to Send Request", e.message || "Please try again.", back));
   }
 });
 

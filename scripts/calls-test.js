@@ -379,8 +379,8 @@ async function staleCalls() {
       assert.strictEqual((await statusOf(fresh.id)).status, "dialing", "a call five minutes old is still going");
       const p = told();
       assert.strictEqual(p.length, 1, JSON.stringify(p));
-      assert.strictEqual(p[0].title, "No result from the call to Ravi Kumar");
-      assert.match(p[0].body, /can't say whether it got through/);
+      assert.strictEqual(p[0].title, "No Result from the Call to Ravi Kumar");
+      assert.match(p[0].body, /could not be confirmed whether the call connected/);
       await agent.closeStale();
       assert.strictEqual(told().length, 1, "told twice");
     });

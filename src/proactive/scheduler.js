@@ -77,8 +77,8 @@ async function sweepCommitments() {
     try {
       await push.sendNotification(
         c.fcm_token,
-        overdue ? "Overdue" : "Due soon",
-        `You said you'd ${lowerFirst(c.text)}${who}.`,
+        overdue ? "Overdue" : "Due Soon",
+        `You agreed to ${lowerFirst(c.text)}${who}.`,
         { kind: "commitment" }
       );
       await commitments.markNudged(c.id);
@@ -171,7 +171,7 @@ async function buildBrief(userId, event) {
         LIMIT 3`,
       [userId, ...names.map((n) => String(n))]
     ).catch(() => []);
-    for (const o of owed) parts.push(`You owe ${o.owed_to}: ${o.text}`);
+    for (const o of owed) parts.push(`Pending for ${o.owed_to}: ${o.text}`);
   }
 
   return parts;
@@ -272,15 +272,15 @@ function morningBody(b, tzOffsetMin) {
     const first = b.agenda[0];
     const at = first.at ? ` at ${hhmmLocal(first.at, tzOffsetMin)}` : "";
     bits.push(
-      `${b.agenda.length} on your plate — first: ${first.title}${at}`
+      `${b.agenda.length} on your agenda; first: ${first.title}${at}`
     );
   }
   if (b.messages.length) {
     bits.push(
-      `${b.messages.length} message${b.messages.length === 1 ? "" : "s"} waiting (${b.messages[0].from})`
+      `${b.messages.length} message${b.messages.length === 1 ? "" : "s"} pending (${b.messages[0].from})`
     );
   }
-  if (b.promises.length) bits.push(`You owe: ${b.promises[0].text}`);
+  if (b.promises.length) bits.push(`Pending commitment: ${b.promises[0].text}`);
   if (b.weather_line) bits.push(b.weather_line);
   return bits.join(" · ").slice(0, 320);
 }
@@ -289,11 +289,11 @@ function morningBody(b, tzOffsetMin) {
  *  the same sentence does not arrive every quiet day of the week. */
 function quietMorningLine() {
   const lines = [
-    "Nothing scheduled today. Tell me what to line up.",
-    "Your day is clear. Want me to plan it with you?",
-    "No meetings, no promises due. Ask me for anything.",
-    "A clear day. Say the word and I'll set your reminders.",
-    "Nothing waiting. Shall I check your mail or your week?",
+    "Nothing is scheduled today. Ask your assistant to arrange your day.",
+    "Your day is clear. Your assistant can help you plan it.",
+    "No meetings or commitments are due. Your assistant is available.",
+    "A clear day. Your assistant can set reminders on request.",
+    "Nothing is pending. Your assistant can review your mail or your week.",
   ];
   return lines[new Date().getDate() % lines.length];
 }
@@ -359,7 +359,7 @@ async function sweepMorningBriefs() {
         first ? `Good morning, ${first} ☀️` : "Good morning ☀️",
         quietDay
           ? quietMorningLine()
-          : morningBody(b, tz) || "Your day is ready — tap for your brief.",
+          : morningBody(b, tz) || "Your day is ready. Tap to view your brief.",
         { kind: "morning_brief" }
       );
       if (ok) sent++;
@@ -413,8 +413,8 @@ async function sweepPersonDates() {
         const ok = await push.sendNotification(
           u.fcm_token,
           `🎂 Tomorrow: ${d.name}'s ${d.label}`,
-          `${d.name}'s ${d.label} is tomorrow (${when}). Want me to ` +
-            `schedule a call or a message?`,
+          `${d.name}'s ${d.label} is tomorrow (${when}). Your assistant can ` +
+            `schedule a call or a message.`,
           { kind: "person_date" }
         );
         if (ok) sent++;

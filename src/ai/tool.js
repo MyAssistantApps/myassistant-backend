@@ -272,7 +272,7 @@ function afterDeviceAction(uid, s, a) {
         slots: a.slots || [],
         tzOffsetMin: require("../services/tz").offsetOr(a.tz),
       });
-      await tell(uid, `Call to ${a.person || "them"} finished`, out && out.spoken, "call_outcome");
+      await tell(uid, `Call to ${a.person || "them"} Completed`, out && out.spoken, "call_outcome");
     })().catch((e) => console.error("ai: scheduling call follow failed:", e.message || e));
     return;
   }
@@ -281,9 +281,9 @@ function afterDeviceAction(uid, s, a) {
       const outcome = await require("../fulfillment/service").awaitCallOutcome(a.task_id, a.call_id);
       const said = outcome.result ||
         (outcome.state === "no_answer"
-          ? `${a.venue} did not answer, so nothing is booked.`
-          : `The call to ${a.venue} did not go through, so nothing is booked.`);
-      await tell(uid, `Call to ${a.venue || "the business"} finished`, said, "call_outcome");
+          ? `${a.venue} did not answer, so no booking has been made.`
+          : `The call to ${a.venue} could not be connected, so no booking has been made.`);
+      await tell(uid, `Call to ${a.venue || "the business"} Completed`, said, "call_outcome");
     })().catch((e) => console.error("ai: fulfillment call follow failed:", e.message || e));
   }
 }

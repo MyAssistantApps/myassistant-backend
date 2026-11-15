@@ -81,7 +81,7 @@ const lastCode = () => calls[calls.length - 1].code;
     const bad = good === "000000" ? "111111" : "000000";
     const r1 = await cc.check(A, PHONE, bad);
     assert.strictEqual(r1.ok, false);
-    assert.ok(/4 tries left/.test(r1.error), r1.error);
+    assert.ok(/4 attempts remaining/.test(r1.error), r1.error);
     assert.deepStrictEqual(await cc.check(A, PHONE, good), { ok: true });
     assert.strictEqual((await cc.check(A, PHONE, good)).ok, false, "second use");
   });
@@ -136,7 +136,7 @@ const lastCode = () => calls[calls.length - 1].code;
   await test("a failed call still counts and leaves no live code", async () => {
     await db.run("DELETE FROM phone_call_codes WHERE user_id = $1", [A]);
     cc._setDial(async () => { throw new Error("provider down"); });
-    await assert.rejects(cc.start(A, PHONE), /Couldn't place the call/);
+    await assert.rejects(cc.start(A, PHONE), /Unable to place the call/);
     const r = await db.one("SELECT COUNT(*)::int AS n FROM phone_call_codes WHERE user_id = $1", [A]);
     assert.strictEqual(r.n, 1);
     assert.strictEqual((await cc.check(A, PHONE, "123456")).ok, false);

@@ -24,7 +24,7 @@ async function today(req, res) {
     res.json(await svc.today());
   } catch (e) {
     console.error("quote cards today:", e && (e.stack || e.message));
-    res.status(500).json({ error: "error", message: "The quote did not load. Try again in a moment." });
+    res.status(500).json({ error: "error", message: "Unable to load the quote. Please try again." });
   }
 }
 router.get("/today", today);

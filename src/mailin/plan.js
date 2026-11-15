@@ -171,48 +171,48 @@ function pushFor(ctx) {
   const issuer = x.issuer || "";
   const your = issuer ? `your ${issuer}` : "your";
   switch (status) {
-    case "already": return { title: "Already saved", body: "I already have this one in My documents." };
+    case "already": return { title: "Already Saved", body: "This document is already saved in My Documents." };
     case "nothing":
-      return { title: "Nothing to save", body: "Got an email but found nothing to save. Forward the bill itself, or a PDF or photo of it." };
+      return { title: "Nothing to Save", body: "An email was received, but it contained nothing to save. Please forward the bill itself, or a PDF or photo of it." };
     case "confirm":
-      return { title: "Confirm forwarding", body: "Your email service wants you to confirm forwarding. Open Bills by email to see the code." };
+      return { title: "Confirm Forwarding", body: "Your email service requires you to confirm forwarding. Open Bills by Email to view the code." };
     case "full":
-      return { title: "Couldn't save the email", body: "Couldn't save the email — your documents are full. Delete a few you no longer need." };
+      return { title: "Unable to Save Email", body: "Unable to save the email because your documents are full. Please delete some that are no longer required." };
     case "couldnt_read": {
       const s = safeLabel(cleanText(ctx.subject, 60));
-      return { title: "Saved from email", body: `Saved ${s ? `"${s}"` : "an email"} from your email. I couldn't read it — open it to check.` };
+      return { title: "Saved from Email", body: `Saved ${s ? `"${s}"` : "an email"} from your email. It could not be read; please open it to check.` };
     }
     default: break;
   }
   if (!remindersSet && auth === "personal") {
-    return { title: "Saved from email", body: `Saved ${q}. Did you forward this? Open Bills by email and tap "This was me" to set reminders.` };
+    return { title: "Saved from Email", body: `Saved ${q}. If you forwarded this, open Bills by Email and tap "Sent by Me" to set reminders.` };
   }
   if (!remindersSet && auth !== "you" && auth !== "verified") {
-    return { title: "Saved from email", body: `Saved ${q}. I couldn't confirm who sent it, so I haven't set reminders — open it to check.` };
+    return { title: "Saved from Email", body: `Saved ${q}. The sender could not be confirmed, so no reminders have been set. Please open it to check.` };
   }
-  const first = reminders.length ? `I'll remind you ${whenWords(reminders[0].atMs, now, tzOffsetMin)}.` : "";
+  const first = reminders.length ? `You will be reminded ${whenWords(reminders[0].atMs, now, tzOffsetMin)}.` : "";
   const kindWord = x.kind ? x.kind[0].toUpperCase() + x.kind.slice(1) : "Document";
   if (ctx.encrypted && BILLISH.has(x.kind)) {
-    return { title: `${kindWord} saved`, body: `Saved ${your} ${x.kind}. It's password-protected, so open it to check the amount.` };
+    return { title: `${kindWord} Saved`, body: `Saved ${your} ${x.kind}. It is password-protected, so please open it to check the amount.` };
   }
   if (BILLISH.has(x.kind)) {
     const amt = x.amount ? formatInr(x.amount) : "";
     if (x.dueOn && first) {
-      return { title: "Bill saved", body: `Got ${your} bill — ${amt ? amt + " " : ""}due ${shortDate(x.dueOn, now)}. ${first}` };
+      return { title: "Bill Saved", body: `Saved ${your} bill: ${amt ? amt + " " : ""}due ${shortDate(x.dueOn, now)}. ${first}` };
     }
-    if (x.dueOn) return { title: "Bill saved", body: `Saved ${your} bill — it was due ${shortDate(x.dueOn, now)}.` };
-    return { title: "Bill saved", body: `Saved ${your} bill${amt ? ` (${amt})` : ""}. I couldn't find a due date.` };
+    if (x.dueOn) return { title: "Bill Saved", body: `Saved ${your} bill. It was due ${shortDate(x.dueOn, now)}.` };
+    return { title: "Bill Saved", body: `Saved ${your} bill${amt ? ` (${amt})` : ""}. No due date was found.` };
   }
   if (x.kind === "ticket" && x.travelOn) {
     const route = x.travelFrom && x.travelTo ? ` (${x.travelFrom} to ${x.travelTo})` : "";
-    return { title: "Ticket saved",
-      body: `Saved your ticket for ${shortDate(x.travelOn, now)}${route}.${first ? " I'll remind you the evening before." : ""}` };
+    return { title: "Ticket Saved",
+      body: `Saved your ticket for ${shortDate(x.travelOn, now)}${route}.${first ? " You will be reminded the evening before." : ""}` };
   }
   const renewOn = x.expiresOn || (x.kind === "renewal" ? x.dueOn : "");
   if (x.kind === "renewal" && renewOn) {
-    return { title: "Renewal saved", body: `Saved ${your} renewal — due by ${shortDate(renewOn, now)}.${first ? " " + first : ""}` };
+    return { title: "Renewal Saved", body: `Saved ${your} renewal, due by ${shortDate(renewOn, now)}.${first ? " " + first : ""}` };
   }
-  return { title: "Saved from email", body: `Saved ${q} to My documents.` };
+  return { title: "Saved from Email", body: `Saved ${q} to My Documents.` };
 }
 
 module.exports = {

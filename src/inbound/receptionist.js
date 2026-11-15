@@ -563,8 +563,8 @@ async function onHangup(rec, params = {}) {
       if (u?.fcm_token) {
         const title =
           rec.urgency === "urgent"
-            ? `Urgent: ${rec.callerName || "someone"} called`
-            : `${rec.callerName || "New caller"} called`;
+            ? `Urgent: ${rec.callerName || "Someone"} Called`
+            : `${rec.callerName || "New Caller"} Called`;
         await require("../services/push").sendNotification(
           u.fcm_token, title, rec.summary, { kind: "inbound_call" }
         );

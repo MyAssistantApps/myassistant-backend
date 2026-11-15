@@ -87,7 +87,7 @@ function pickNudge(f, env = process.env) {
     if (w.habitsKept) bits.push(plural(w.habitsKept, "habit") + " kept");
     if (!bits.length) return null; // an empty week is not news
     const best = w.bestDay && S.isDay(w.bestDay) ? ` Best day: ${DAY_NAMES[S.weekday(w.bestDay)]}.` : "";
-    return { kind: "weekly", title: "Your week", body: `This week: ${bits.join(", ")}.${best}` };
+    return { kind: "weekly", title: "Your Week", body: `This week: ${bits.join(", ")}.${best}` };
   }
 
   if (f.hour === EVENING_HOUR && p.total > 0 && p.done < p.total) {
@@ -95,24 +95,24 @@ function pickNudge(f, env = process.env) {
     if (p.done > 0) {
       return {
         kind: "evening",
-        title: "Today's three",
-        body: `${p.done} of ${p.total} done — finish one more, or move ${left === 1 ? "it" : "the rest"} to tomorrow?`,
+        title: "Today's Three",
+        body: `${p.done} of ${p.total} completed. Complete one more, or move ${left === 1 ? "it" : "the rest"} to tomorrow.`,
       };
     }
     return {
       kind: "evening",
-      title: atRisk ? "Keep it going" : "Today's three",
+      title: atRisk ? "Maintain Your Streak" : "Today's Three",
       body: atRisk
-        ? `One small win keeps your ${st.current}-day streak going — or move today's list to tomorrow.`
-        : "Today's list is still open — one small win counts. Or move it to tomorrow?",
+        ? `One small win will maintain your ${st.current}-day streak. Alternatively, move today's list to tomorrow.`
+        : "Today's list is still open. One small win counts; alternatively, move it to tomorrow.",
     };
   }
 
   if (f.hour === GUARD_HOUR && atRisk) {
     return {
       kind: "streak",
-      title: "Keep it going",
-      body: `One small win keeps your ${st.current}-day streak going.`,
+      title: "Maintain Your Streak",
+      body: `One small win will maintain your ${st.current}-day streak.`,
     };
   }
   return null;

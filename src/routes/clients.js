@@ -43,13 +43,13 @@ router.post("/scan-card", cardUpload.single("file"), async (req, res) => {
   if (id === null) return;
   if (!id) return res.status(401).json({ error: "sign in to save contacts" });
   const f = req.file;
-  if (!f?.buffer?.length) return res.status(400).json({ error: "a photo of the card is required" });
+  if (!f?.buffer?.length) return res.status(400).json({ error: "A photo of the card is required." });
   const mime = /^image\/(jpeg|png|webp|heic|heif)$/.test(f.mimetype) ? f.mimetype : "image/jpeg";
   const cards = require("../people/card");
   const card = await cards.readCard(f.buffer, mime);
-  if (!card) return res.status(502).json({ error: "couldn't read the card right now — try again" });
+  if (!card) return res.status(502).json({ error: "Unable to read the card. Please try again." });
   if (!card.name && !card.company) {
-    return res.status(422).json({ error: "no name found — hold the card flat and fill the frame" });
+    return res.status(422).json({ error: "No name was found. Please hold the card flat and fill the frame." });
   }
   try {
     const person = await cards.saveCard(id, card, { buffer: f.buffer, mime });

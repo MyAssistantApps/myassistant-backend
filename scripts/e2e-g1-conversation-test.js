@@ -742,7 +742,7 @@ function isoLocal(ms, tz = 330) {
       assert.ok(offered.includes("web_search"));
       const p = mine().slice(before);
       assert.strictEqual(p.length, 1, JSON.stringify(p));
-      assert.match(p[0].title, /^Done: Tell me the weather in Mysuru/);
+      assert.match(p[0].title, /^Completed: Tell me the weather in Mysuru/);
       assert.match(p[0].body, /29°C/);
       assert.strictEqual(p[0].data.kind, "scheduled_task");
       const after = await db.one(`SELECT last_error FROM jobs WHERE id=$1`, [job.id]);
@@ -771,7 +771,7 @@ function isoLocal(ms, tz = 330) {
       await db.run(`UPDATE jobs SET status='done' WHERE id=$1`, [job.id]);
       const p = mine().slice(before);
       assert.strictEqual(p.length, 1);
-      assert.match(p[0].title, /^Done: Find out when the Mysuru Dasara/);
+      assert.match(p[0].title, /^Completed: Find out when the Mysuru Dasara/);
       assert.match(p[0].body, /Jamboo Savari/);
     });
 
@@ -806,7 +806,7 @@ function isoLocal(ms, tz = 330) {
       assert.match(fs.readFileSync(doc.path, "utf8"), /\[1\]/, "the brief is cited");
       const p = mine().slice(before);
       assert.strictEqual(p.length, 1);
-      assert.strictEqual(p[0].title, "Your research is ready");
+      assert.strictEqual(p[0].title, "Your Research Is Ready");
     });
 
     /* ================================================================ */
@@ -839,13 +839,13 @@ function isoLocal(ms, tz = 330) {
       assert.ok(titles.some((t) => /^Good morning, Dhanush/.test(t)), JSON.stringify(titles));
       const morning = got.find((p) => p.data.kind === "morning_brief");
       assert.ok(morning.body && morning.body.length > 5, "the brief says something");
-      assert.match(morning.body, /You owe: Send the GST papers/, morning.body);
+      assert.match(morning.body, /Pending commitment: Send the GST papers/, morning.body);
       const bday = got.find((p) => p.data.kind === "person_date");
       assert.ok(bday, JSON.stringify(titles));
       assert.match(bday.title, /Tomorrow: Chetan's birthday/);
       const nudge = got.find((p) => p.data.kind === "commitment");
       assert.ok(nudge, JSON.stringify(titles));
-      assert.strictEqual(nudge.title, "Due soon");
+      assert.strictEqual(nudge.title, "Due Soon");
       assert.match(nudge.body, /send the GST papers to the auditor/);
 
       const n = mine().length;

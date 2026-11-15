@@ -138,8 +138,8 @@ auth.post("/code", async (req, res) => {
   // Older codes for this account stop working.
   await run(`UPDATE platform_console_codes SET used=true WHERE user_id=$1 AND created_at < $2`, [user.id, now]);
   const r = await require("../services/push").send(user.fcm_token,
-    "Developer console sign-in",
-    `Your code is ${code}. It expires in 5 minutes. If you didn't ask for it, ignore this.`,
+    "Developer Console Sign-In",
+    `Your code is ${code}. It expires in 5 minutes. If you did not request it, please disregard this message.`,
     { kind: "console_code" }).catch(() => ({ ok: false }));
   if (!r || !r.ok) console.warn(`[console] code push to user ${user.id} failed`);
   try { require("../audit/log").record(user.id, "console.code.sent", "A developer console sign-in code was sent to your phone"); } catch (_) {}

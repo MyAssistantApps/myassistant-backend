@@ -372,10 +372,10 @@ function stubRuntime(reply = "Done.", impl = null) {
         await runJob(retry);
         const p = pushesTo();
         assert.strictEqual(p.length, 1, JSON.stringify(p));
-        assert.strictEqual(p[0].title, "Scheduled task failed");
+        assert.strictEqual(p[0].title, "Scheduled Task Failed");
         // The user's notification is plain words; the raw provider error
         // stays in the log and the job's last_error (handlers.js, 2026-10-07).
-        assert.match(p[0].body, /went wrong on my side/);
+        assert.match(p[0].body, /unexpected error has occurred/);
         assert.doesNotMatch(p[0].body, /503|gemini|high demand/i);
         assert.strictEqual(rt.calls.length, 3);
         // Tomorrow is queued from when today's run was DUE, not from the
@@ -401,7 +401,7 @@ function stubRuntime(reply = "Done.", impl = null) {
         const before = pushesTo().length;
         await runJob(await queue("scheduled_task", { task: "Call Ravi and tell him the meeting moved", tzOffsetMin: 330 }));
         assert.strictEqual((await pending("scheduled_task")).length, 0, "a second call could be placed");
-        assert.strictEqual(pushesTo().slice(before)[0].title, "Scheduled task failed");
+        assert.strictEqual(pushesTo().slice(before)[0].title, "Scheduled Task Failed");
       } finally {
         rt.restore();
       }
@@ -421,7 +421,7 @@ function stubRuntime(reply = "Done.", impl = null) {
           const before = pushesTo().length;
           await runJob(await queue("scheduled_task", { task: "Mail Ravi that the meeting moved", tzOffsetMin: 330 }));
           assert.strictEqual((await pending("scheduled_task")).length, 0, `${tool} could run twice`);
-          assert.strictEqual(pushesTo().slice(before)[0].title, "Scheduled task failed");
+          assert.strictEqual(pushesTo().slice(before)[0].title, "Scheduled Task Failed");
         } finally {
           rt.restore();
         }
@@ -463,7 +463,7 @@ function stubRuntime(reply = "Done.", impl = null) {
         assert.strictEqual((await pending("deep_research")).length, 0);
         const p = pushesTo().slice(before);
         assert.strictEqual(p.length, 1);
-        assert.strictEqual(p[0].title, "Research didn't finish");
+        assert.strictEqual(p[0].title, "Research Not Completed");
       } finally {
         ai.generateReply = realReply;
         webSearch.run = realSearch;

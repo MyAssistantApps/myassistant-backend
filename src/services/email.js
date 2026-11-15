@@ -220,9 +220,9 @@ function smtpTransport(acc) {
 /** Verify both directions actually log in, then store (upsert). */
 async function connectAccount(userId, { address, password, imapHost, smtpHost }) {
   const addr = String(address || "").trim().toLowerCase();
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) throw new Error("that email address doesn't look valid");
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) throw new Error("Please enter a valid email address.");
   const pass = String(password || "").replace(/\s+/g, ""); // Gmail shows app passwords with spaces
-  if (pass.length < 6) throw new Error("password looks too short");
+  if (pass.length < 6) throw new Error("The password is too short.");
   const hosts = hostsFor(addr, imapHost, smtpHost);
   const acc = { address: addr, password: pass, imapHost: hosts.imap, smtpHost: hosts.smtp };
 

@@ -218,7 +218,7 @@ const back = (base, k) => S.addDays(base, -k);
   await atest("8 pm: today's list is not all done", () => {
     const n = nudges.pickNudge(base, env);
     assert.strictEqual(n.kind, "evening");
-    assert.strictEqual(n.body, "2 of 3 done — finish one more, or move it to tomorrow?");
+    assert.strictEqual(n.body, "2 of 3 completed. Complete one more, or move it to tomorrow.");
     assert.strictEqual(nudges.pickNudge({ ...base, priorities: { total: 3, done: 3 } }, env), null,
       "all done: nothing to say");
     assert.strictEqual(nudges.pickNudge({ ...base, priorities: { total: 0, done: 0 } }, env), null);
@@ -231,7 +231,7 @@ const back = (base, k) => S.addDays(base, -k);
     const g = { ...base, hour: 21, streak: { current: 5, activeToday: false } };
     const n = nudges.pickNudge(g, env);
     assert.strictEqual(n.kind, "streak");
-    assert.strictEqual(n.body, "One small win keeps your 5-day streak going.");
+    assert.strictEqual(n.body, "One small win will maintain your 5-day streak.");
     assert.strictEqual(nudges.pickNudge({ ...g, streak: { current: 2, activeToday: false } }, env), null);
     assert.strictEqual(nudges.pickNudge({ ...g, streak: { current: 9, activeToday: true } }, env), null);
   });
@@ -282,7 +282,7 @@ const back = (base, k) => S.addDays(base, -k);
     };
     assert.strictEqual(await nudges.sweep({ now: at, deps, env }), 1);
     assert.deepStrictEqual(sent, [{ uid: 1, kind: "evening",
-      body: "1 of 3 done — finish one more, or move the rest to tomorrow?" }]);
+      body: "1 of 3 completed. Complete one more, or move the rest to tomorrow." }]);
     // Ten minutes later: already sent today.
     assert.strictEqual(await nudges.sweep({ now: at + 600_000, deps, env }), 0);
     // And at 21:10, when the guard would fire, the day's one push is spent.

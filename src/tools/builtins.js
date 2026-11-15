@@ -7391,8 +7391,8 @@ function registerBuiltins() {
       if (appUser.fcm_token && !muted) {
         pushed = await push.sendNotification(
           appUser.fcm_token,
-          ctx.userName ? `${ctx.userName} sent you a message` : "You have a new message",
-          "Open the app and your assistant will read it to you.",
+          ctx.userName ? `${ctx.userName} Sent You a Message` : "You Have a New Message",
+          "Please open the app to have your assistant read it to you.",
           // Lets the recipient's app react: fetch the inbox and have their
           // assistant SPEAK the message the moment the app is open/opened.
           { kind: "agent_message" }
@@ -7633,9 +7633,9 @@ function registerBuiltins() {
           await require("../services/push").sendNotification(
             appUser.fcm_token,
             ctx.userName
-              ? `${ctx.userName} sent you a document`
-              : "You received a document",
-            "Open the app and your assistant will show it to you.",
+              ? `${ctx.userName} Sent You a Document`
+              : "Document Received",
+            "Please open the app to have your assistant show it to you.",
             { kind: "agent_message" }
           );
         } catch (e) {
@@ -9645,7 +9645,7 @@ function registerBuiltins() {
           listed.map((p) => `${p.name}${p.what ? ` (${p.what})` : ""}, ${p.distanceKm} km`).join("; ") + ". "
         : "";
 
-      const openMap = args.open_map !== false;
+      const openMap = args.open_map !== false;
       // A google.com/maps SEARCH URL centred on where they are, not a
       // "geo:" URI. Google Maps claims these as app links, so the app
       // opens at the right place — and on a phone without Maps it opens

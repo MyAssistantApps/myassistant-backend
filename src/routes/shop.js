@@ -56,7 +56,7 @@ router.post("/search", async (req, res) => {
   const lat = req.body?.lat ?? parseFloat(req.get("X-Geo-Lat"));
   const lng = req.body?.lng ?? parseFloat(req.get("X-Geo-Lng"));
   if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
-    return res.status(400).json({ error: "the delivery location is needed" });
+    return res.status(400).json({ error: "The delivery location is required." });
   }
   const intent = {
     fulfillment: {
@@ -98,7 +98,7 @@ router.post("/select", async (req, res) => {
   const b = req.body || {};
   if (!(await owned(req, b.transactionId))) return res.status(404).json({ error: "not found" });
   if (!b.bppId || !b.bppUri || !b.providerId || !(b.items || []).length) {
-    return res.status(400).json({ error: "a store and at least one item are needed" });
+    return res.status(400).json({ error: "A store and at least one item are required." });
   }
   const r = await client.send("select", {
     domain: domainOf(b.domain), transactionId: b.transactionId, bppId: b.bppId, bppUri: b.bppUri,
@@ -127,7 +127,7 @@ router.post("/init", async (req, res) => {
   const bill = b.billing || {};
   const del = b.delivery || {};
   if (!bill.name || !bill.phone || !del.address || !del.phone) {
-    return res.status(400).json({ error: "name, phone and delivery address are needed" });
+    return res.status(400).json({ error: "Name, phone number and delivery address are required." });
   }
   const address = (a) => ({
     name: a.name || bill.name,
@@ -196,7 +196,7 @@ async function myOrder(req, id) {
 }
 
 router.post("/pay", async (req, res) => {
-  if (!pay.enabled()) return res.status(503).json({ error: "payments are not set up yet" });
+  if (!pay.enabled()) return res.status(503).json({ error: "Payments are not yet available." });
   const txn = req.body?.transactionId;
   const order = await db().one(
     "SELECT * FROM ondc_orders WHERE transaction_id = $1 AND user_id = $2 ORDER BY id DESC LIMIT 1",
@@ -205,7 +205,7 @@ router.post("/pay", async (req, res) => {
   const rows = await store.responses(txn, "on_init");
   const onInit = rows[rows.length - 1]?.payload?.message?.order;
   const total = Number(onInit?.quote?.price?.value);
-  if (!onInit || !Number.isFinite(total)) return res.status(409).json({ error: "the store has not confirmed the price yet" });
+  if (!onInit || !Number.isFinite(total)) return res.status(409).json({ error: "The store has not yet confirmed the price." });
   try {
     const bill = order.billing || {};
     const link = await pay.createLink({
@@ -332,7 +332,7 @@ router.post("/orders/:id/cancel", async (req, res) => {
   if (!order) return res.status(404).json({ error: "not found" });
   const conf = (await store.responses(order.transaction_id, "on_confirm")).pop();
   const sellerId = conf?.payload?.message?.order?.id;
-  if (!sellerId) return res.status(409).json({ error: "the store has not accepted the order yet" });
+  if (!sellerId) return res.status(409).json({ error: "The store has not yet accepted the order." });
   const r = await client.send("cancel", {
     domain: order.domain, transactionId: order.transaction_id, bppId: order.bpp_id, bppUri: order.bpp_uri,
     userId: uid(req),

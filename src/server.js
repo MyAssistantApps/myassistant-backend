@@ -200,7 +200,7 @@ const paidWriteLimit = (windowMs, max) => rateLimit({
   windowMs, max, standardHeaders: true,
   keyGenerator: (req) => String(req.user?.sub || req.ip),
   skip: (req) => req.method === "GET" || req.method === "HEAD",
-  message: { error: "Too many uploads — wait a moment and try again." },
+  message: { error: "Too many uploads. Please wait a moment and try again." },
 });
 const paidUploadLimit = [paidWriteLimit(60_000, 20), paidWriteLimit(3600_000, 200)];
 
@@ -650,12 +650,12 @@ app.use((err, _req, res, _next) => {
     const tooBig = status === 413 || err.type === "entity.too.large" || err.code === "LIMIT_FILE_SIZE";
     return res.status(tooBig ? 413 : status).json({
       error: tooBig
-        ? "That file is a little too large for me. Could you try a smaller one?"
-        : "Something about that request didn't go through. Please try again.",
+        ? "The file is too large. Please try a smaller file."
+        : "The request could not be processed. Please try again.",
     });
   }
   console.error("Unhandled error:", err);
-  res.status(500).json({ error: "Sorry, something went wrong on our side. Please try again in a moment." });
+  res.status(500).json({ error: "An unexpected error has occurred. Please try again shortly." });
 });
 
 const port = process.env.PORT || 3000;

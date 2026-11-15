@@ -103,7 +103,7 @@ router.post("/", async (req, res) => {
     if (e?.code === "quota") {
       return res.status(402).json({
         error: "quota",
-        message: "You've reached today's limit for calls I place for you.",
+        message: "The daily limit for calls placed on your behalf has been reached.",
       });
     }
     if (e?.code === "bad_number") {

@@ -519,7 +519,7 @@ async function processCall(id, uid, filePath, meta) {
       ? `${n} item${n === 1 ? "" : "s"} from your call ${withWho}added to your agenda.`
       : `Your call ${withWho}was noted: ${summary.slice(0, 120)}`;
     require("../services/push")
-      .sendNotification(user.fcm_token, "Call notes ready", body,
+      .sendNotification(user.fcm_token, "Call Notes Ready", body,
         { kind: "call_analysis" })
       .catch(() => {});
   }
