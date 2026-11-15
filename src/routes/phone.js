@@ -194,6 +194,18 @@ router.post("/verify", async (req, res) => {
  * ██ warning below exists so this cannot be forgotten.
  */
 const devVerifyAllowed = () => process.env.ALLOW_DEV_PHONE_VERIFY === "true";
+
+// NARROWING (2026-11-15, security hardening): DEV_PHONE_VERIFY_USERS, a
+// comma-separated list of user ids and/or emails, limits typed claims to
+// those testers while the switch is on. Unset = everyone (as before).
+function devVerifyAllowedFor(user) {
+  if (!devVerifyAllowed()) return false;
+  const list = String(process.env.DEV_PHONE_VERIFY_USERS || "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (!list.length) return true;
+  if (!user) return false;
+  return list.includes(String(user.id)) || (user.email && list.includes(String(user.email).toLowerCase()));
+}
 const devTries = new Map(); // uid -> [ms] of typed claims in the last day
 
 if (devVerifyAllowed()) {
@@ -203,9 +215,10 @@ if (devVerifyAllowed()) {
   );
 }
 
-router.get("/dev-available", (_req, res) =>
-  res.json({ available: devVerifyAllowed() })
-);
+router.get("/dev-available", async (req, res) => {
+  const user = devVerifyAllowed() ? await db.findById(Number(req.user?.sub)).catch(() => null) : null;
+  res.json({ available: devVerifyAllowedFor(user) });
+});
 
 router.post("/dev-verify", async (req, res) => {
   if (!devVerifyAllowed()) {
@@ -214,6 +227,9 @@ router.post("/dev-verify", async (req, res) => {
   const uid = Number(req.user?.sub);
   if (!Number.isFinite(uid)) return res.status(401).json({ error: "unauthorized" });
   if (await accountGone(uid)) return res.status(401).json({ error: ACCOUNT_GONE });
+  if (!devVerifyAllowedFor(await db.findById(uid))) {
+    return res.status(403).json({ error: "not available" });
+  }
 
   const phone = normalizePhone(req.body?.phone);
   if (!phone) return res.status(400).json({ error: "Please enter a valid phone number." });
@@ -234,3 +250,4 @@ router.post("/dev-verify", async (req, res) => {
 
 module.exports = router;
 module.exports.ACCOUNT_GONE = ACCOUNT_GONE;
+module.exports.devVerifyAllowedFor = devVerifyAllowedFor; // tests

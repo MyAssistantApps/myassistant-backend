@@ -65,6 +65,8 @@ const observability = require("./infra/observability");
 app.use(observability.requestId());
 app.set("trust proxy", 1);
 app.use(helmet());
+// Provider bodies, SQL and stack traces never reach a client (infra/safeErrors.js).
+app.use(require("./infra/safeErrors").middleware());
 
 // CORS — native mobile apps don't enforce it, but web-origin callers do:
 // any future web client, the avatar WebView page, and local dev tools.
@@ -107,6 +109,10 @@ app.use(
     includePath: true,
     metricsPath: "/metrics",
     promClient: { collectDefaultMetrics: {} },
+    // Unmatched paths are not counted (2026-11-15, security hardening):
+    // every distinct word-like URL became a new, never-expiring series, so
+    // a loop of GET /<random> grew the heap until the container died.
+    bypass: { onFinish: (_req, res) => res.statusCode === 404 },
     // Collapse ids so metrics stay low-cardinality.
     normalizePath: [
       ["^/docs/\\d+.*", "/docs/#id"],
@@ -117,6 +123,8 @@ app.use(
       ["^/shortcuts/runs/\\d+.*", "/shortcuts/runs/#id"],
       ["^/shortcuts/\\d+.*", "/shortcuts/#id"],
       ["^/mailin/messages/\\d+.*", "/mailin/messages/#id"],
+      ["^/p/[^/]+", "/p/#slug"],
+      ["^/(inbound/plivo|agent-call/bolna)/.*", "/$1/#hook"],
     ],
   })
 );
@@ -156,9 +164,12 @@ app.use(require("./ops/spend").bind());
 app.use(rateLimit({
   windowMs: 60_000, max: 240, standardHeaders: true,
   // ONDC's network answers one search with a reply per store, from a few
-  // gateway addresses: those callbacks are signed and checked instead.
+  // gateway addresses: those callbacks have their own, roomier bucket.
   skip: (req) => req.path.startsWith("/ondc/"),
 }));
+// ONDC callbacks were exempt from EVERY limit, and each forged one costs
+// up to two registry lookups before its signature fails (2026-11-15).
+app.use("/ondc", rateLimit({ windowMs: 60_000, max: 1200, standardHeaders: true }));
 
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 // ONDC (2026-11-04): the network's callbacks (public, signed) and the
@@ -562,7 +573,10 @@ app.use("/places", appAuth, require("./routes/places"));
 app.use("/stocks", appAuth, require("./routes/stocks"));
 
 // ---------------- ADMIN ANALYTICS ----------------
-app.use("/analytics", appAuth, require("./routes/analytics"));
+// Platform-wide totals: the admin key only (was any signed-in user; the
+// app never calls it — the admin panel has its own copy).
+app.use("/analytics", adminKeyLimit, require("./middleware/adminKey").requireAdminKey,
+  require("./routes/analytics"));
 
 // ---------------- ADMIN WEB DASHBOARD ----------------
 // Note: no appAuth here because this is for the web browser
@@ -643,6 +657,10 @@ app.use((err, _req, res, _next) => {
     return res.status(400).json({ error: "invalid JSON body" });
   }
   if (res.headersSent) return; // a stream already started — nothing to add
+  // The spend circuit-breaker (ops/budget.js) said no.
+  if (err.code === "budget_exceeded") {
+    return res.status(402).json({ error: err.message, code: err.code });
+  }
   // Body/upload problems carry their own 4xx status (413 too large, 400
   // aborted). Pass it through with a kind sentence instead of a bare 500.
   const status = err.code === "LIMIT_FILE_SIZE" ? 413 : Number(err.status || err.statusCode);

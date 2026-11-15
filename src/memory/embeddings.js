@@ -31,6 +31,7 @@ const PROVIDERS = {
     dims: 1536,
     async embed(texts) {
       const base = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+      await require("../ops/budget").check({ path: "/embeddings" });
       const r = await fetch(`${base}/embeddings`, {
         method: "POST",
         headers: {

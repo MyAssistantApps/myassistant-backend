@@ -386,6 +386,14 @@ router.get("/:id/file", async (req, res) => {
   if (!row || !fs.existsSync(row.path)) return res.status(404).json({ error: "not found" });
   res.setHeader("Content-Type", row.mime);
   res.setHeader("Cache-Control", "private, max-age=86400"); // immutable per id
+  // The type is the one the uploader declared. Only passive types render
+  // inline; anything else (an uploaded .html, an SVG with script) is a
+  // download, never a page on this origin (2026-11-15).
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  if (!/^(image\/(jpeg|png|webp|gif|heic|heif)|application\/pdf|audio\/|video\/)/i.test(String(row.mime || ""))) {
+    res.setHeader("Content-Disposition", "attachment");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+  }
   fs.createReadStream(row.path).pipe(res);
 });
 

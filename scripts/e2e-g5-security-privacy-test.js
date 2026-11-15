@@ -323,14 +323,17 @@ async function seedRow(table, userCol, uid, over = {}) {
       const statuses = [];
       for (let i = 0; i < 21; i++) {
         const r = await api("POST", "/auth/login", {
-          ip, body: { email: `nobody-${stamp}@example.test`, password: "wrong-password" },
+          // A different account each try: this checks the per-ADDRESS limit.
+          // One account is locked sooner, after 10 failures (services/loginGuard.js,
+          // covered by test:hardening).
+          ip, body: { email: `nobody-${stamp}-${i}@example.test`, password: "wrong-password" },
         });
         statuses.push(r.status);
       }
       assert.deepStrictEqual(statuses.slice(0, 20), Array(20).fill(401), statuses.join(","));
       assert.strictEqual(statuses[20], 429, `the 21st try got ${statuses[20]}`);
       const other = await api("POST", "/auth/login", {
-        ip: "192.0.2.78", body: { email: `nobody-${stamp}@example.test`, password: "x" },
+        ip: "192.0.2.78", body: { email: `nobody-${stamp}-other@example.test`, password: "x" },
       });
       assert.strictEqual(other.status, 401, "one address's limit spilled onto another");
     });

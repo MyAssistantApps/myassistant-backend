@@ -82,6 +82,9 @@ function isBusy(e) {
 async function call(path, { body, form, timeoutMs = TIMEOUT_MS, raw = false, headers = {} } = {}) {
   const k = key();
   if (!k) throw new OpenAIError("OPENAI_API_KEY is not set", 0, "");
+  // The spend circuit-breaker (ops/budget.js): today's global and
+  // per-user caps, checked before any money is spent.
+  await require("../../ops/budget").check({ path });
   const h = { authorization: `Bearer ${k}`, ...headers };
   let payload = form;
   if (!form) {

@@ -16,6 +16,12 @@
 # /opt/myassistant/deploy.sh by hand.
 set -euo pipefail
 cd /opt/myassistant
+# Backups hold every user's data; the secrets files hold every key: owner
+# only (2026-11-15). Not a global umask — the unpacked source must stay
+# readable to the container's non-root user.
+# (firebase-adminsdk.json is NOT here: it is bind-mounted and read by the
+# container's `node` user — restrict it with `chown root:1000; chmod 640`.)
+chmod 600 .env pg.env 2>/dev/null || true
 exec 9>/opt/myassistant/.deploy.lock
 flock -n 9 || { echo "another deploy is running" >&2; exit 1; }
 
@@ -29,9 +35,9 @@ tar -x -C src-new
   echo "the upload is not the backend repo" >&2; rm -rf src-new; exit 1; }
 
 say "2/5 database backup"
-mkdir -p backups
+mkdir -p backups && chmod 700 backups
 STAMP=$(date +%Y%m%d%H%M%S)
-docker compose exec -T postgres pg_dump -U myassistant myassistant | gzip > "backups/predeploy-$STAMP.sql.gz"
+( umask 077; docker compose exec -T postgres pg_dump -U myassistant myassistant | gzip > "backups/predeploy-$STAMP.sql.gz" )
 gzip -t "backups/predeploy-$STAMP.sql.gz"
 ls -1t backups/*.sql.gz | tail -n +15 | xargs -r rm -f
 echo "backup: backups/predeploy-$STAMP.sql.gz ($(du -h "backups/predeploy-$STAMP.sql.gz" | cut -f1))"
@@ -54,7 +60,9 @@ docker compose up -d --no-build --force-recreate backend || rollback "restart fa
 
 say "5/5 health"
 for _ in $(seq 1 40); do
-  if curl -fsS -m 5 http://127.0.0.1/health 2>/dev/null | grep -q '"ok":true'; then
+  # Straight to the container (Caddy's :80 now redirects to HTTPS except
+  # /health); the old probe through Caddy stays as the fallback.
+  if docker compose exec -T backend node -e "fetch('http://localhost:3000/health').then(r=>r.text()).then(t=>{process.stdout.write(t)}).catch(()=>process.exit(1))" 2>/dev/null | grep -q '"ok":true'      || curl -fsS -m 5 http://127.0.0.1/health 2>/dev/null | grep -q '"ok":true'; then
     echo "healthy"
     docker image prune -f >/dev/null
     exit 0

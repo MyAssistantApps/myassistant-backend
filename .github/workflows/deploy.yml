@@ -25,9 +25,21 @@ concurrency:
   group: deploy-vps
   cancel-in-progress: false
 
+# Least privilege for the job token (2026-11-15).
+permissions:
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Only the hardening branch deploys — a manual run from any other
+    # branch used to ship that branch to production (2026-11-15).
+    if: github.ref == 'refs/heads/hardening'
+    # Move VPS_SSH_KEY / VPS_KNOWN_HOSTS into this environment's secrets
+    # and give it a required reviewer + "hardening only" branch rule
+    # (repo Settings → Environments → production): then no other branch's
+    # workflow can ever read the production deploy key. See SECURITY.md.
+    environment: production
     # The smoke test boots the app, which needs a database (a throwaway one).
     services:
       postgres:

@@ -1,0 +1,68 @@
+# SECURITY CHECKS — every push, every pull request and once a week.
+#
+# Added 2026-11-15 after the production OpenAI key was stolen and used
+# directly. Three independent gates, each of which fails the run:
+#
+#  1. secrets   — gitleaks scans the WHOLE history (this repo is public: a
+#                 key that was ever committed must be rotated, not deleted).
+#  2. deps      — npm audit of the production dependency tree; any HIGH or
+#                 CRITICAL advisory fails. Fix with `npm audit fix` or an
+#                 `overrides` entry in package.json (see image-size there).
+#  3. sast      — CodeQL's security-extended JavaScript queries (injection,
+#                 SSRF, path traversal, XSS, unsafe crypto…). Results land in
+#                 the repo's Security → Code scanning tab.
+#
+# The weekly run catches advisories published after the code last changed.
+name: security
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The gitleaks CLI image, not gitleaks-action (which needs a paid
+      # licence for organisation repos). --redact keeps any hit's value out
+      # of the public CI log.
+      - name: gitleaks (full history)
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.3 \
+            detect --source /repo --redact --verbose --exit-code 1
+          # Reviewed findings already in history are baselined, by
+          # fingerprint, in .gitleaksignore (read automatically).
+
+  deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: npm audit (production dependencies, high and above)
+        run: npm audit --omit=dev --audit-level=high
+
+  sast:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript"

@@ -135,7 +135,9 @@ async function timed(name, fn, fields = {}) {
 function redactPath(p) {
   return String(p || "")
     .replace(/\/(webhook|tool|inbound|hook|cb|callback)\/[A-Za-z0-9_-]{16,}/gi, "/$1/:secret")
+    // Plivo's per-call token: /inbound/plivo/<call>/<token>/gather (2026-11-15).
+    .replace(/(\/plivo\/[^/]+\/)[A-Za-z0-9_-]{12,}(?=\/|$)/gi, "$1:secret")
     .replace(/\/[A-Fa-f0-9]{32,}(?=\/|$)/g, "/:secret");
 }
 
-module.exports = { logger, requestId, timed, count, observe, snapshot, redact, METRICS };
+module.exports = { logger, requestId, timed, count, observe, snapshot, redact, redactPath, METRICS };

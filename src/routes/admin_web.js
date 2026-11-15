@@ -116,9 +116,8 @@ router.post("/api/login", (req, res) => {
     return res.status(429).json({ error: "Too many attempts — wait 10 minutes." });
   }
   const got = String(req.body?.key || "");
-  const ok =
-    got.length === key.length &&
-    crypto.timingSafeEqual(Buffer.from(got), Buffer.from(key));
+  // Hash-then-compare: the length check used to leak the key's length.
+  const ok = require("../services/safeCompare").safeEqual(got, key);
   if (!ok) {
     attempts.set(ip, [...(attempts.get(ip) || []), Date.now()]);
     return res.status(401).json({ error: "Wrong admin key." });

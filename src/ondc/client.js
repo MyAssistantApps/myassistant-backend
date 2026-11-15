@@ -42,7 +42,9 @@ async function send(action, { domain, transactionId, bppId, bppUri, city, messag
   let ack = "NACK";
   let error = null;
   try {
-    const r = await fetch(target, {
+    // bppUri arrives from the app; safeFetch refuses private, loopback and
+    // metadata addresses so a signed ONDC request can't be aimed inward.
+    const r = await require("../services/safeFetch").safeFetch(target, {
       method: "POST",
       headers: {
         "content-type": "application/json",

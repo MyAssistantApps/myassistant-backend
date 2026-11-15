@@ -5,3 +5,9 @@ node_modules
 !.env.example
 *.log
 README.md
+firebase-adminsdk.json
+data
+*.pem
+*.p12
+*.jks
+*.keystore

@@ -145,11 +145,17 @@ const os = require("os");
 const path = require("path");
 const { execFile } = require("child_process");
 
+const AUDIO_EXTS = new Set([".m4a", ".mp4", ".aac", ".mp3", ".wav", ".ogg", ".opus", ".amr", ".3gp", ".webm", ".flac"]);
+
 const recUpload = multer({
   storage: multer.diskStorage({
     destination: os.tmpdir(),
     filename: (_req, file, cb) => {
-      const ext = String(file.originalname || "").toLowerCase().match(/\.\w+$/)?.[0] || ".m4a";
+      // Known audio containers only (2026-11-15): ffmpeg reads the input by
+      // its extension, and a playlist (.m3u8, .concat) can make it open
+      // other files or URLs.
+      const found = String(file.originalname || "").toLowerCase().match(/\.\w+$/)?.[0];
+      const ext = AUDIO_EXTS.has(found) ? found : ".m4a";
       cb(null, `meeting-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
     },
   }),
@@ -173,7 +179,7 @@ function splitAudio(file) {
     const ext = path.extname(file) || ".m4a";
     const base = file.slice(0, -ext.length) + "-part";
     execFile("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-y", "-i", file,
+      "-hide_banner", "-loglevel", "error", "-y", "-protocol_whitelist", "file", "-i", file,
       "-f", "segment", "-segment_time", String(SEGMENT_S),
       "-reset_timestamps", "1", "-c", "copy", `${base}%03d${ext}`,
     ], { timeout: 120_000 }, (err) => {

@@ -1,6 +1,24 @@
+# Production reverse proxy (/opt/myassistant/Caddyfile — copy by hand; the
+# deploy does not update it). Caddy gets and renews the TLS certificate.
 backend.envisionsit.in {
+	header {
+		# helmet sets HSTS too; here it also covers Caddy's own answers.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
 	reverse_proxy backend:3000
 }
+
+# Plain HTTP (any host, the bare IP included) used to proxy the WHOLE API,
+# so passwords, session tokens and the admin key could travel in clear
+# (2026-11-15, security hardening). Now only /health answers here — the
+# deploy script's probe — and everything else is sent to HTTPS. 308 keeps
+# a POST a POST.
 :80 {
-	reverse_proxy backend:3000
+	handle /health {
+		reverse_proxy backend:3000
+	}
+	handle {
+		redir https://backend.envisionsit.in{uri} 308
+	}
 }
