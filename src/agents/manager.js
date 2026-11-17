@@ -94,14 +94,14 @@ const SPECIALISTS = {
       "open_public_pdf", "get_horoscope", "going_out_check"],
   },
   commerce: {
-    scope: "shopping, food, rides, tickets, recharge, payments, money",
+    scope: "shopping, food, rides, tickets, hotels and Airbnb stays, recharge, payments, money",
     label: "Shopping and money",
     role: "You are handling SHOPPING AND MONEY: the shopping list, orders, rides, tickets, " +
       "recharges and payments. Anything that spends or requests money needs their clear yes first.",
-    cues: /\b(buy|order|shopping|grocer\w*|cart|swiggy|zomato|blinkit|zepto|amazon|flipkart|uber|ola|cab|taxi|ride|airport|station|ticket|movie|recharge|pay|upi|rupees?|rs\.?|₹|payment|paid|owe|emi|loan|salary|budget|finance|pantry|run out of|dinner|lunch|breakfast|food|hungry|biryani|pizza|groceries)\b/i,
+    cues: /\b(buy|order|shopping|grocer\w*|cart|swiggy|zomato|blinkit|zepto|amazon|flipkart|uber|ola|cab|taxi|ride|airport|station|ticket|movie|hotels?|airbnb|air bnb|homestay|resort|recharge|pay|upi|rupees?|rs\.?|₹|payment|paid|owe|emi|loan|salary|budget|finance|pantry|run out of|dinner|lunch|breakfast|food|hungry|biryani|pizza|groceries)\b/i,
     tools: ["shopping_list_add", "shopping_list_show", "shopping_list_check", "shopping_list_remove",
       "shopping_list_clear", "shopping_list_clear_all", "shop_from_list", "share_shopping_list",
-      "pantry_update", "order_food", "book_ride", "book_movie_tickets", "mobile_recharge",
+      "pantry_update", "order_food", "book_ride", "book_movie_tickets", "book_stay", "mobile_recharge",
       "open_service_app", "pay_by_upi", "save_upi_id", "collect_payment", "check_payments",
       "list_my_errands", "check_task_outcomes", "add_finance_item", "update_finance_item",
       "remove_finance_item", "get_finance_plan"],

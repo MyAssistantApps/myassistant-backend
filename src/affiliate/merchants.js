@@ -58,6 +58,9 @@ const MERCHANTS = [
   { id: "goibibo", name: "Goibibo", category: "Travel & stays", url: "https://www.goibibo.com/", program: "network", color: "#EC5B24", pkg: "com.goibibo" },
   { id: "booking", name: "Booking.com", category: "Travel & stays", url: "https://www.booking.com/", program: "network", color: "#003580", pkg: "com.booking" },
   { id: "agoda", name: "Agoda", category: "Travel & stays", url: "https://www.agoda.com/", program: "network", color: "#5392F9", pkg: "com.agoda.mobile.consumer" },
+  // Airbnb (2026-11-16): homes and villas beside the hotels. Airbnb closed
+  // its affiliate programme, so it is opened plainly until a partnership.
+  { id: "airbnb", name: "Airbnb", category: "Travel & stays", url: "https://www.airbnb.co.in/", program: "partner", color: "#FF385C", pkg: "com.airbnb.android" },
   // Entertainment
   { id: "bookmyshow", name: "BookMyShow", category: "Movies & events", url: "https://in.bookmyshow.com/", program: "network", color: "#F84464", pkg: "com.bt.bms" },
   // Insurance

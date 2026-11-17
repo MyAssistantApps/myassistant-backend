@@ -275,7 +275,7 @@ async function handoff({ userId, kind, provider, link, title, venue, whenMs, det
 
 function labelForKind(kind) {
   return (
-    { food: "Order", ride: "Ride", movie: "Tickets", appointment: "Appointment", table: "Table" }[kind] ||
+    { food: "Order", ride: "Ride", movie: "Tickets", stay: "Stay", appointment: "Appointment", table: "Table" }[kind] ||
     "Task"
   );
 }

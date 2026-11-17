@@ -6097,7 +6097,8 @@ function registerBuiltins() {
       "Open a shopping or grocery app for the user — Blinkit, Zepto, Amazon, " +
       "Flipkart, MakeMyTrip, YouTube — searching for something if given. " +
       "For food delivery use order_food, for cabs use book_ride, for cinema " +
-      "tickets use book_movie_tickets: those resolve the real target first.\n" +
+      "tickets use book_movie_tickets, for hotels and Airbnb use book_stay: " +
+      "those resolve the real target first.\n" +
       "THE SERVICE MUST BE ONE OF THE LISTED VALUES. If the user named " +
       "anything else — Swiggy, Zomato, Uber, Ola, BookMyShow — use " +
       "open_named_app. NEVER pick the nearest value from this list instead: " +
@@ -8234,6 +8235,93 @@ function registerBuiltins() {
       return {
         ok: true,
         data: { task_id: out.task.id, handoff: true },
+        deviceAction: { type: "open_url", url: out.url },
+        speak: out.speak,
+      };
+    },
+  });
+
+  // STAYS (2026-11-16): "book an Airbnb in Goa for the weekend", "find me
+  // a hotel in Ooty from the 20th to the 22nd". Nobody offers a booking
+  // API to us, so — like rides and tickets — the search is set up with the
+  // place, dates and guests, and the user picks a place and pays.
+  registry.register({
+    name: "book_stay",
+    description:
+      "Book a stay — an Airbnb home, or a hotel on Booking.com, Agoda, MakeMyTrip or Goibibo. " +
+      "Opens the app on a search already set to the place, dates and guests; the user picks a " +
+      "place and pays. Use for 'book an Airbnb in Goa', 'find a hotel in Ooty this weekend', " +
+      "'homestay in Coorg for 4 people'. provider: airbnb when they say Airbnb, a home, villa, " +
+      "apartment or homestay; booking for a hotel when they named no site. Give dates as " +
+      "YYYY-MM-DD in the user's own calendar, and only dates they said — omit them otherwise.",
+    risk: "low",
+    deviceAction: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        place: { type: "string", description: "City, area or property, e.g. 'Goa', 'Baga Beach', 'Ooty'" },
+        provider: {
+          type: "string",
+          enum: ["airbnb", "booking", "agoda", "makemytrip", "goibibo"],
+          description: "airbnb for homes; booking (default) for hotels",
+        },
+        check_in: { type: "string", description: "YYYY-MM-DD" },
+        check_out: { type: "string", description: "YYYY-MM-DD" },
+        nights: { type: "integer", description: "Nights, when they gave a length instead of a check-out" },
+        guests: { type: "integer", description: "Adults. Default 2" },
+        rooms: { type: "integer", description: "Rooms, hotels only. Default 1" },
+      },
+      required: ["place"],
+    },
+    async execute(args, ctx) {
+      const deeplinks = require("../fulfillment/deeplinks");
+      const fulfil = require("../fulfillment/service");
+      const provider = args.provider || "booking";
+      const place = String(args.place || "").trim().slice(0, 120);
+      if (!place) return { ok: false, error: "say where you want to stay" };
+      const tz = Number.isFinite(ctx.tzOffsetMin) ? ctx.tzOffsetMin : 330;
+      const today = new Date(Date.now() + tz * 60_000).toISOString().slice(0, 10);
+      const link = deeplinks.stay({
+        provider,
+        place,
+        checkIn: args.check_in,
+        checkOut: args.check_out,
+        nights: args.nights,
+        adults: args.guests,
+        rooms: args.rooms,
+        today,
+        platform: ctx.platform,
+      });
+      if (!link) return { ok: false, error: `I can't open ${provider} for stays.` };
+
+      const kind = provider === "airbnb" ? "stays" : "hotels";
+      const when = link.dates ? `, ${link.dates.checkIn} to ${link.dates.checkOut}` : "";
+      const what = `${kind} in ${place}${when}`;
+      const label = deeplinks.labelFor(provider);
+      if (!ctx.userId) {
+        return { ok: true, deviceAction: { type: "open_url", url: link.url },
+          speak: deeplinks.speakFor({ precision: link.precision, providerLabel: label, what }) };
+      }
+      const out = await fulfil.handoff({
+        userId: ctx.userId,
+        kind: "stay",
+        provider,
+        link,
+        title: `${provider === "airbnb" ? "Airbnb" : "Hotel"} in ${place}`,
+        venue: place,
+        whenMs: link.dates ? Date.parse(`${link.dates.checkIn}T12:00:00Z`) - tz * 60_000 : null,
+        details: {
+          place,
+          check_in: link.dates?.checkIn || null,
+          check_out: link.dates?.checkOut || null,
+          guests: args.guests || 2,
+          rooms: args.rooms || 1,
+        },
+        what,
+      });
+      return {
+        ok: true,
+        data: { task_id: out.task.id, handoff: true, dates: link.dates || null },
         deviceAction: { type: "open_url", url: out.url },
         speak: out.speak,
       };

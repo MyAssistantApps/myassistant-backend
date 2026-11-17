@@ -113,6 +113,57 @@ test("a shop link is 'search' only when it carries the search (MakeMyTrip's does
   assert.strictEqual(mmt.note, "MakeMyTrip home");
 });
 
+section("stays — Airbnb and hotels");
+
+test("an Airbnb stay opens a dated search for the place, in the Airbnb app on Android", () => {
+  const l = deeplinks.stay({ provider: "airbnb", place: "North Goa", checkIn: "2026-12-20",
+    checkOut: "2026-12-23", adults: 4, today: "2026-11-16", platform: "android" });
+  assert.strictEqual(l.precision, "search");
+  assert.ok(l.url.startsWith("intent://www.airbnb.co.in/s/North%20Goa/homes?"), l.url);
+  assert.ok(l.url.includes("package=com.airbnb.android"), l.url);
+  for (const part of ["adults=4", "checkin=2026-12-20", "checkout=2026-12-23"]) assert.ok(l.url.includes(part), part);
+});
+
+test("hotel stays carry dates, guests and rooms on Booking.com and Agoda", () => {
+  const b = deeplinks.stay({ provider: "booking", place: "Ooty", checkIn: "2026-12-01", nights: 2, adults: 2, rooms: 1, today: "2026-11-16" });
+  assert.ok(b.url.includes("ss=Ooty") && b.url.includes("checkout=2026-12-03") && b.url.includes("no_rooms=1"), b.url);
+  const a = deeplinks.stay({ provider: "agoda", place: "Ooty", checkIn: "2026-12-01", today: "2026-11-16" });
+  assert.ok(a.url.includes("checkIn=2026-12-01") && a.url.includes("checkOut=2026-12-02"), a.url);
+});
+
+test("dates nobody gave, or impossible ones, are left out — never invented", () => {
+  const none = deeplinks.stay({ provider: "airbnb", place: "Goa", today: "2026-11-16" });
+  assert.ok(!/checkin/i.test(none.url) && none.dates === null, none.url);
+  assert.strictEqual(deeplinks.stayDates({ checkIn: "2026-11-10", today: "2026-11-16" }), null, "past");
+  assert.strictEqual(deeplinks.stayDates({ checkIn: "2026-12-05", checkOut: "2026-12-04" }), null, "backwards");
+  assert.strictEqual(deeplinks.stayDates({ checkIn: "2026-02-30" }), null, "no such day");
+});
+
+test("MakeMyTrip and Goibibo stays open their hotels page and say so", () => {
+  for (const provider of ["makemytrip", "goibibo"]) {
+    const l = deeplinks.stay({ provider, place: "Goa" });
+    assert.strictEqual(l.precision, "app", provider);
+    assert.ok(l.url.endsWith("/hotels/"), l.url);
+  }
+  assert.strictEqual(deeplinks.stay({ provider: "uber", place: "Goa" }), null);
+});
+
+test("'open Airbnb' resolves to the Airbnb app", () => {
+  assert.strictEqual(deeplinks.resolveAppName("air bnb"), "airbnb");
+  assert.strictEqual(deeplinks.launch({ name: "open the airbnb app", platform: "android" }).provider, "airbnb");
+});
+
+test("book_stay hands off to Airbnb without claiming the stay is booked", async () => {
+  const registry = require("../src/tools/registry");
+  require("../src/tools/builtins").registerBuiltins();
+  const tool = registry.get("book_stay");
+  assert.ok(tool, "book_stay must be registered");
+  // No userId: the handoff row is skipped, so no database is needed.
+  const res = await tool.execute({ place: "Goa", provider: "airbnb" }, { platform: "android" });
+  assert.ok(res.ok && res.deviceAction.url.includes("airbnb.co.in"), JSON.stringify(res));
+  assert.ok(/Airbnb/.test(res.speak) && !/\bbooked\b/i.test(res.speak), res.speak);
+});
+
 section("honesty invariants");
 
 test("every handoff sentence tells the user THEY finish the payment", () => {

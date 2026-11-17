@@ -46,6 +46,11 @@ const PROVIDERS = {
   amazon: { label: "Amazon", pkg: "in.amazon.mShop.android.shopping", host: "www.amazon.in" },
   flipkart: { label: "Flipkart", pkg: "com.flipkart.android", host: "www.flipkart.com" },
   makemytrip: { label: "MakeMyTrip", pkg: "com.makemytrip", host: "www.makemytrip.com" },
+  // Stays (2026-11-16): homes and hotels, opened on a dated search.
+  airbnb: { label: "Airbnb", pkg: "com.airbnb.android", host: "www.airbnb.co.in" },
+  booking: { label: "Booking.com", pkg: "com.booking", host: "www.booking.com" },
+  agoda: { label: "Agoda", pkg: "com.agoda.mobile.consumer", host: "www.agoda.com" },
+  goibibo: { label: "Goibibo", pkg: "com.goibibo", host: "www.goibibo.com" },
 };
 
 function isProvider(name) {
@@ -215,6 +220,85 @@ function shop({ provider, query, platform }) {
 }
 
 /**
+ * STAYS — Airbnb homes, or hotels on Booking.com / Agoda.  SEARCH precision.
+ *
+ * Airbnb, Booking.com and Agoda take the place, dates and guests in their
+ * public search URL, so the user lands on real, dated results and only
+ * picks one and pays. MakeMyTrip and Goibibo need their own city codes in
+ * a search link, so they open on their hotels page ("app" precision) and
+ * are said as that.
+ *
+ * Dates are only put in the link when the user gave them: inventing
+ * "tomorrow, one night" would show prices for a stay nobody asked for.
+ */
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+function isoDay(v) {
+  const s = String(v == null ? "" : v).trim();
+  if (!ISO_DAY.test(s)) return null;
+  const d = new Date(`${s}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? null : s;
+}
+function addDays(iso, n) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The dates a stay link may carry: both or neither. A check-out on or
+ * before check-in, or a check-in before [today], drops the dates rather
+ * than sending the provider an impossible search.
+ */
+function stayDates({ checkIn, checkOut, nights, today }) {
+  const a = isoDay(checkIn);
+  if (!a) return null;
+  const t = isoDay(today);
+  if (t && a < t) return null;
+  const n = Math.round(Number(nights));
+  let b = isoDay(checkOut) || (Number.isFinite(n) && n > 0 && n <= 90 ? addDays(a, n) : addDays(a, 1));
+  if (b <= a) return null;
+  return { checkIn: a, checkOut: b };
+}
+
+function stay({ provider = "airbnb", place, checkIn, checkOut, nights, adults, rooms, today, platform }) {
+  const key = String(provider || "airbnb").toLowerCase();
+  const p = PROVIDERS[key];
+  if (!p || !["airbnb", "booking", "agoda", "makemytrip", "goibibo"].includes(key)) return null;
+  const where = String(place || "").trim();
+  const dates = stayDates({ checkIn, checkOut, nights, today });
+  const guests = Math.min(16, Math.max(1, Math.round(Number(adults)) || 2));
+  const roomCount = Math.min(8, Math.max(1, Math.round(Number(rooms)) || 1));
+
+  let url = null;
+  if (key === "airbnb" && where) {
+    url = `https://www.airbnb.co.in/s/${enc(where)}/homes?adults=${guests}`;
+    if (dates) url += `&checkin=${dates.checkIn}&checkout=${dates.checkOut}`;
+  } else if (key === "booking" && where) {
+    url = `https://www.booking.com/searchresults.html?ss=${enc(where)}&group_adults=${guests}&no_rooms=${roomCount}`;
+    if (dates) url += `&checkin=${dates.checkIn}&checkout=${dates.checkOut}`;
+  } else if (key === "agoda" && where) {
+    url = `https://www.agoda.com/search?textToSearch=${enc(where)}&adults=${guests}&rooms=${roomCount}`;
+    if (dates) url += `&checkIn=${dates.checkIn}&checkOut=${dates.checkOut}`;
+  }
+  const searched = !!url;
+  if (!url) {
+    url = {
+      airbnb: "https://www.airbnb.co.in/",
+      booking: "https://www.booking.com/",
+      agoda: "https://www.agoda.com/",
+      makemytrip: "https://www.makemytrip.com/hotels/",
+      goibibo: "https://www.goibibo.com/hotels/",
+    }[key];
+  }
+  return {
+    url: wrap(url, p.pkg, platform),
+    precision: searched ? "search" : "app",
+    note: searched ? `${p.label} search for stays in ${where}` : `${p.label} home`,
+    dates,
+  };
+}
+
+/**
  * The sentence Hari SAYS when handing off. This is the honesty seam: the
  * user is told they finish the last step, every time, in every path.
  *
@@ -261,6 +345,10 @@ const ALIASES = {
   "amazon shopping": "amazon",
   olacabs: "ola",
   "ola cabs": "ola",
+  "air bnb": "airbnb",
+  "booking.com": "booking",
+  "booking dot com": "booking",
+  "go ibibo": "goibibo",
 };
 
 function resolveAppName(name) {
@@ -307,6 +395,8 @@ module.exports = {
   ride,
   movie,
   shop,
+  stay,
+  stayDates,
   speakFor,
   _wrap: wrap, // tests
 };
