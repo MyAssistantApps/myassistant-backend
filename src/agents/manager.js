@@ -113,7 +113,7 @@ const SPECIALISTS = {
       "music. Ask one short question only when the request is too vague to make anything good.",
     cues: /\b(draw|image|picture of|poster|design|generate|create (a|an)|make (a|an|me)|video|edit (my|this|the) photo|background|look like|try (on|a look)|write (a|an|me)|draft|essay|letter|speech|document|pdf|ppt|presentation|spreadsheet|play|song|music|playlist)\b/i,
     tools: ["generate_image", "generate_video", "edit_my_photo", "try_a_look", "create_document",
-      "draft_text", "edit_draft", "present_text", "play_music", "open_video_mode"],
+      "draft_text", "edit_draft", "present_text", "play_music"],
   },
   device: {
     scope: "phone settings, apps, camera, screenshots, shortcuts",

@@ -485,7 +485,7 @@ router.get("/api/users/:id", async (req, res) => {
   const reviewable = await helpImprove.effective(id).catch(() => false);
 
   const [assistant, instructions, google, counts, recent] = await Promise.all([
-    sq("SELECT name, gender, voice, style, avatar_id FROM assistant_profiles WHERE user_id=$1", [id]),
+    sq("SELECT name, gender, voice, style FROM assistant_profiles WHERE user_id=$1", [id]),
     sq("SELECT id, instruction FROM user_instructions WHERE user_id=$1 ORDER BY id", [id]),
     sq("SELECT 1 AS ok FROM google_tokens WHERE user_id=$1", [String(id)]),
     Promise.all([
@@ -1833,7 +1833,6 @@ router.get("/api/debug", async (req, res) => {
   const env = (k) => Boolean(process.env[k] && process.env[k].length > 2);
   const integrations = {
     openai: env("OPENAI_API_KEY"),
-    heygen_avatar: env("HEYGEN_API_KEY"),
     razorpay_payments: env("RAZORPAY_KEY_ID"),
     google_places: env("GOOGLE_PLACES_API_KEY"),
     youtube: env("YOUTUBE_API_KEY"),
@@ -1851,12 +1850,6 @@ router.get("/api/debug", async (req, res) => {
       });
       probes.openai = r.ok ? "ok" : `HTTP ${r.status}`;
     } catch (e) { probes.openai = e.message; }
-    // HeyGen: public avatar catalog.
-    try {
-      const heygen = require("../avatar/heygen");
-      const faces = await heygen.listFaces();
-      probes.heygen = faces.length ? `ok (${faces.length} faces)` : "empty catalog";
-    } catch (e) { probes.heygen = e.message; }
   }
 
   res.json({

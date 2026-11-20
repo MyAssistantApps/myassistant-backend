@@ -2,7 +2,7 @@
 #
 # ██ DO NOT `kubectl apply` THIS FILE TO PRODUCTION YET. ██
 # The live Deployment also carries ~25 env vars set by hand with
-# `kubectl set env` — model names, avatar/LiveKit settings AND several
+# `kubectl set env` — model names, provider settings AND several
 # secrets — which are not (and must not be) in this file. Applying it
 # would delete them. Change the live spec with `kubectl patch` until those
 # values have been moved into the myassistant-secrets Secret and the

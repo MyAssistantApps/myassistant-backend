@@ -463,13 +463,11 @@ async function closeLiveSessions(uid) {
 }
 
 /**
- * The transaction failed, so the account still exists: lift the marks
- * abortUser/closeUser left, or this pod would refuse the user's
- * conversations and recordings until it restarts. A session already
- * ended stays ended.
+ * The transaction failed, so the account still exists: lift the mark
+ * closeUser left, or this pod would refuse the user's conversations until
+ * it restarts. A session already ended stays ended.
  */
 function cancelLiveErase(uid) {
-  try { recorder.cancelErase(uid); } catch (_) {}
   try { require("../ai/sessions").cancelErase(uid); } catch (_) {}
 }
 
@@ -510,15 +508,11 @@ async function deleteUserEverywhere(userId, { reason = "" } = {}) {
   report.revoked.google = await revokeGoogle(uid);
   report.revoked.notion = await revokeNotion(uid);
   report.revoked.mcpConnections = await closeMcp(uid, cols);
-  // A call still open on this pod would write audio after its row is gone.
-  report.revoked.liveRecordings = await recorder.abortUser(uid).catch(() => 0);
-  // ...and the call itself would carry on (review, 2026-09-25): the live
+  // A call still open would carry on (review, 2026-09-25): the live
   // socket checks the account once, when it opens, so a user deleted
   // mid-call kept talking to the assistant, and every turn after this
   // point wrote conversation_turns, executed_actions and the like under
   // the erased id — the admin Conversations page showed them again.
-  // After abortUser on purpose: closing the call stops its recording, and
-  // a stop that got there first would merge the audio into a new file.
   // Known limit: a tool already running when the call is cut can still
   // finish and write its one row; the Leftovers card finds that.
   report.revoked.liveSessions = await closeLiveSessions(uid);

@@ -521,10 +521,6 @@ async function init() {
   // The spend meter: what every paid call cost, per user (admin dashboard).
   await require("./ops/spend").migrate((sql) => pool.query(sql));
 
-  // Live avatar persistence: per-user personas (the brain hookup),
-  // session records, and the rolling recent-conversation window.
-
-
   // SERIAL ids come back from pg as integers; BIGINT columns come back as
   // strings by default — parse them so Date-math keeps working.
   const types = require("pg").types;

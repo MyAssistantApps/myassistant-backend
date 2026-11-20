@@ -28,12 +28,10 @@ RUN npm ci --omit=dev
 # ---------- Stage 2: runtime ----------
 FROM node:22-slim
 
-# ca-certificates is REQUIRED, not cosmetic. @livekit/rtc-node's WebRTC
-# layer is native Rust and validates TLS against the SYSTEM trust store,
-# which node:22-slim ships empty. Node's own fetch bundles its CAs, so
-# HTTPS calls to BeyondPresence succeed while the LiveKit connection dies
-# with "no native root CA certificates found" — the avatar fails and
-# nothing else does. Keep this even if the image is slimmed further.
+# ca-certificates: node:22-slim ships an empty SYSTEM trust store. Node's
+# own fetch bundles its CAs, but native code and child processes validate
+# TLS against the system store and fail without it. Keep this even if
+# the image is slimmed further.
 #
 # ffmpeg is for VIDEO GENERATION. Veo produces real video but only on a
 # paid Gemini key; until billing is enabled the assistant could only say

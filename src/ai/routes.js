@@ -281,13 +281,6 @@ async function serveGreeting(req, res) {
   }
 }
 
-// Keep old paths working for installed builds. v4 invalidates clips generated
-// with an earlier voice source.
-router.get("/voices/:id/greeting", serveGreeting);
-router.get("/voices/:id/greeting-v3", serveGreeting);
-router.get("/voices/:id/greeting-v4", serveGreeting);
-// v5: the path every current build asks for.
-router.get("/voices/:id/greeting-v5", serveGreeting);
 // v6 (2026-11-04): the faster hello — a new path so phones fetch it again.
 router.get("/voices/:id/greeting-v6", serveGreeting);
 

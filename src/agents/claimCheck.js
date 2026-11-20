@@ -106,7 +106,7 @@ const FAMILIES = [
     // screen was open in front of the user.
     tools: [
       "open_app", "open_named_app", "do_in_app", "open_webpage", "open_public_pdf", "open_service_app",
-      "open_video_mode", "phone_control", "start_navigation",
+      "phone_control", "start_navigation",
       // "Opening GPay with ₹500 for Ravi" — the UPI app on screen.
       "pay_by_upi",
       // "Opening Jio's recharge with the ₹349 plan" — the operator's page.

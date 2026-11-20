@@ -17,7 +17,7 @@
  *   avatar_profiles  one row per user: consent (when, which wording), the
  *                    "send as you" switch, and the key of their recorded
  *                    identity video (plus the photo / voice sample that
- *                    builds <= 117 still upload).
+ *                    builds <= 117 uploaded; read-only now).
  *   avatar_renders   one row per video note: who asked, for whom, the
  *                    script, where it is in the manual pipeline, and how
  *                    it was delivered. The owner's waiting is a STATUS
@@ -56,7 +56,7 @@ async function migrate(exec) {
       -- Which teleprompter wording they read — it carries a spoken consent
       -- sentence, so the version is part of the consent record.
       script_version    INTEGER NOT NULL DEFAULT 0,
-      -- Builds <= 117 upload a photo and a voice sample instead.
+      -- Photo / voice sample builds <= 117 uploaded; no longer written.
       face_key          TEXT    NOT NULL DEFAULT '',
       voice_key         TEXT    NOT NULL DEFAULT '',
       updated_at        BIGINT  NOT NULL DEFAULT 0
@@ -280,26 +280,6 @@ async function setVideo(userId, v) {
 
 const consentRequired = () => Object.assign(new Error("consent_required"), { http: 403 });
 
-/**
- * Face photo / voice sample from builds <= 117. Returns the replaced key.
- * Consent under the row lock, as in setVideo: a photo landing after
- * "Delete everything" or a withdrawal is refused, not stored unreferenced.
- */
-async function setAsset(userId, kind, key) {
-  const col = kind === "face" ? "face_key" : "voice_key";
-  return tx(async (c) => {
-    const cur = (await c.query(
-      `SELECT ${col} AS k, consented FROM avatar_profiles WHERE user_id = $1 FOR UPDATE`, [userId]
-    )).rows[0];
-    if (!cur || Number(cur.consented) !== 1) throw consentRequired();
-    await c.query(
-      `UPDATE avatar_profiles SET ${col} = $2, updated_at = $3 WHERE user_id = $1`,
-      [userId, key, Date.now()]
-    );
-    return cur?.k || "";
-  });
-}
-
 async function deleteProfile(userId) {
   return one(`DELETE FROM avatar_profiles WHERE user_id = $1 RETURNING *`, [userId]);
 }
@@ -522,7 +502,7 @@ async function countByStatus() {
 module.exports = {
   migrate,
   CONSENT_VERSION, STATUSES, UNDELIVERED, scriptVersion, teleprompter, senderGate,
-  getProfile, toClient, setConsent, setEnabled, setVideo, setAsset, deleteProfile,
+  getProfile, toClient, setConsent, setEnabled, setVideo, deleteProfile,
   createRender, createRenderFromProfile, getRender, updateRender, transition, cancelOpen,
   attachOutput, finishDelivery, markIdentityChecked, listRenders, countByStatus,
 };

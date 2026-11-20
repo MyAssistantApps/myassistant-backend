@@ -85,8 +85,7 @@
     "nodemailer": "^10.0.10",
     "pdfkit": "^0.15.2",
     "pg": "^8.22.0",
-    "pptxgenjs": "^3.12.0",
-    "ws": "^8.21.3"
+    "pptxgenjs": "^3.12.0"
   },
   "overrides": {
     "image-size": "^2.1.0"

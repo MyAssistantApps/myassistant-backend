@@ -52,7 +52,6 @@ const path = require("path");
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "erase-test-"));
 process.env.DATA_DIR = path.join(TMP, "data");
 process.env.LIVE_RECORD_DIR = path.join(TMP, "recordings");
-process.env.LIVE_RECORD = "1";
 const FILES = path.join(TMP, "data", "files");
 const RECS = path.join(TMP, "recordings");
 const OUTSIDE = path.join(TMP, "outside");
@@ -431,19 +430,6 @@ const tell = (from, toPhone, message) => db.one(
     // Joined by hand: path.join would fold the ".." away before it is stored.
     [A, `esc-${stamp}`, Date.now(), [RECS, DAY, "..", "..", "outside", "a-escape.m4a"].join(path.sep),
      `abs-${stamp}`, absolute]);
-  // A call A is on right now: its raw audio is being written.
-  const liveSession = `live-${A}-${stamp}`;
-  const handle = recorder.begin(A, liveSession);
-  for (let i = 0; i < 100; i++) {
-    if (await db.one(`SELECT 1 FROM live_recordings WHERE session_id = $1`, [liveSession])) break;
-    await new Promise((r) => setTimeout(r, 20));
-  }
-  await new Promise((r) => setTimeout(r, 30));
-  handle.user(Buffer.alloc(3200));
-  const liveDay = new Date().toISOString().slice(0, 10);
-  const livePcm = path.join(RECS, liveDay, `${liveSession}.user.pcm`);
-  assert.ok(exists(livePcm), "the live call never started recording");
-
   // B as the deletes must leave them: everything, less the two messages
   // B sent to A and C — messages to a deleted account's number go too.
   const bBefore = await rowsOf(B);
@@ -486,14 +472,13 @@ const tell = (from, toPhone, message) => db.one(
     assert.strictEqual(reportA.ok, true);
     assert.strictEqual(reportA.existed, true);
     assert.strictEqual(reportA.rows.users, 1);
-    // The seeded one, the call in progress, and the two with bad paths.
-    assert.strictEqual(reportA.rows.live_recordings, 4);
+    // The seeded one and the two with bad paths.
+    assert.strictEqual(reportA.rows.live_recordings, 3);
     assert.strictEqual(reportA.rows.conversation_turns, 1);
     assert.strictEqual(reportA.rows.email_accounts, 1);
     assert.strictEqual(reportA.files.recordings, 3, "the .m4a and both raw halves");
     assert.strictEqual(reportA.files.documents, 2);
     assert.strictEqual(reportA.revoked.google, "revoked");
-    assert.strictEqual(reportA.revoked.liveRecordings, 1);
     assert.strictEqual(reportA.revoked.mcpConnections, 1);
     assert.strictEqual(reportA.revoked.firebase, "deleted");
     assert.strictEqual(reportA.totalRows,
@@ -510,7 +495,6 @@ const tell = (from, toPhone, message) => db.one(
     for (const ext of [".m4a", ".user.pcm", ".agent.pcm"]) {
       assert.ok(!exists(recStem(A) + ext), `${ext} still on disk`);
     }
-    assert.ok(!exists(livePcm), "the call in progress kept writing");
     const listed = await recorder.list({ limit: 200 });
     assert.ok(!listed.some((r) => Number(r.user_id) === A));
   });
@@ -917,54 +901,6 @@ const tell = (from, toPhone, message) => db.one(
     await privacy.deleteUserEverywhere(F, { reason: "erase-test cleanup" });
   });
   await new Promise((r) => aiServer.close(r));
-
-  await atest("a recording still starting when the delete runs removes itself", async () => {
-    // Its INSERT is held back (a lock on the table) until the delete has
-    // looked for open recordings, so the delete cannot see it: the
-    // recording has to notice by itself.
-    const E = (await db.createUser({ email: `erase-e-${stamp}@example.test`, name: "Erase e" })).id;
-    await optIn(E);
-    const session = `race-${E}-${stamp}`;
-    let release;
-    let locked = false;
-    const held = new Promise((r) => { release = r; });
-    const locker = db.tx(async (c) => {
-      await c.query(`LOCK TABLE live_recordings IN EXCLUSIVE MODE`);
-      locked = true;
-      await held;
-    });
-    const waiting = (pattern) => db.one(
-      `SELECT count(*)::int AS n FROM pg_stat_activity
-        WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE $1`,
-      [pattern]).then((r) => r.n > 0);
-    const day = path.join(RECS, new Date().toISOString().slice(0, 10));
-    const raw = [".user.pcm", ".agent.pcm"].map((ext) => path.join(day, session + ext));
-    let handle = null;
-    try {
-      await until(() => locked, "lock");
-      handle = recorder.begin(E, session);
-      await until(() => waiting("%INSERT INTO live_recordings%"), "the recording's INSERT waits");
-      assert.ok(raw.every(exists), "the raw halves are open while it starts");
-      const deleting = privacy.deleteUserEverywhere(E, { reason: "race test" });
-      // The delete has passed abortUser once its own transaction queues
-      // behind the same lock.
-      await until(() => waiting("DELETE FROM live_recordings%"), "the delete's transaction waits");
-      release();
-      await locker;
-      const report = await deleting;
-      assert.strictEqual(report.revoked.liveRecordings, 0, "the delete saw it: this is not the race");
-      // Not stopped from here: a real call would keep sending audio. The
-      // recording has to give up on its own, row and raw halves together.
-      await until(() => raw.every((p) => !exists(p)), "still recording a deleted account's call");
-      assert.strictEqual(
-        (await db.one(`SELECT count(*)::int AS n FROM live_recordings WHERE session_id = $1`, [session])).n, 0);
-      assert.ok(!exists(path.join(day, session + ".m4a")));
-    } finally {
-      release();
-      await locker.catch(() => {});
-      if (handle) await handle.stop();
-    }
-  });
 
   await atest("Bills by email: addresses, received mail, raw files and email documents all go", async () => {
     process.env.MAILIN_ENABLED = "1";

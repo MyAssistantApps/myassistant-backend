@@ -44,8 +44,6 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
 const configRoute = require("./routes/config");
 const chatRoute = require("./routes/chat");
 const regionRoute = require("./routes/region");
-// The app's old model routes answer 426 "update the app" (src/ai/gone.js).
-const { gone } = require("./ai/gone");
 const authRoute = require("./routes/auth");
 const db = require("./db");
 const { appAuth, appFnAuth } = require("./middleware/auth");
@@ -69,7 +67,7 @@ app.use(helmet());
 app.use(require("./infra/safeErrors").middleware());
 
 // CORS — native mobile apps don't enforce it, but web-origin callers do:
-// any future web client, the avatar WebView page, and local dev tools.
+// any future web client and local dev tools.
 // Permissive-by-default is safe here because real protection is the auth
 // layer (JWT / app key), not the origin.
 app.use((req, res, next) => {
@@ -295,20 +293,12 @@ app.use("/inbound", appAuth, inbound.router);
 // on one mount runs the middleware once and keeps the order (groups are
 // matched first; chat.js registers /thread/:phone, never a bare /:phone,
 // so nothing was ever at risk of being shadowed either way).
-// The assistant's own chat turns (POST /chat, /chat/stream, /chat/greeting)
-// are the app's model now: an old build that asks is told to update. The
-// human chat below (threads, send, groups) is unchanged.
-app.post("/chat", gone);
-app.all(["/chat/stream", "/chat/greeting"], gone);
 app.use("/chat", appAuth, perUserLimit, require("./routes/chatGroups"), chatRoute);
 
 // THE ASSISTANT (2026-09-29) — the app runs its models itself (Gemini Nano
 // on the phone, Gemini through Firebase AI Logic); this server is its tool
 // server and memory: context, tools, approvals and the record (src/ai/).
 app.use("/ai", appAuth, aiLimit, require("./ai/routes"));
-// The voice loop that came before it (session, SSE stream, audio and text
-// turns, confirmations) is gone: old builds are told to update.
-app.use("/assistant", gone);
 
 // Onboarding survey + profile view (feeds users table + agent memory).
 app.use("/profile", appAuth, require("./routes/profile"));
@@ -494,11 +484,6 @@ app.get("/tools/astrology", appAuth, async (req, res) => {
   }
 });
 
-// Speech in, speech out and "what is this" with the camera are the app's
-// own now (on-device recognition, Gemini TTS and Nano/cloud vision through
-// Firebase AI Logic). Old builds are told to update.
-app.use(["/stt", "/tts", "/vision"], gone);
-
 // Group B+ — SAVED documents: hospital reports, receipts… Hari remembers
 // them and pulls them back up from a voice request (see routes/docs.js).
 app.use("/docs", appAuth, ...paidUploadLimit, require("./routes/docs"));
@@ -642,13 +627,6 @@ require("./agents/runtime");
     ` ${sealed.counts.repeatGuarded} repeat-guarded)`
   );
 }
-
-// Avatar routes stay under /live (the app's avatar screen). The Live
-// speech-to-speech socket and its probe are gone (the app runs its models
-// itself): GET /live and a plain request to /live/ws say "update the app",
-// and so does the /live/ws upgrade (attached after listen, src/ai/gone.js).
-app.use("/live/avatar", appAuth, require("./avatar/routes").router());
-app.all(["/live", "/live/ws"], gone);
 
 // Agent-level metrics (tool latency, job counts, agent turns). Mounted at
 // /metrics/agent because /metrics already serves Prometheus process
@@ -815,12 +793,9 @@ require("./db")
     // default; a request on a socket Node had just closed came back 502.
     server.keepAliveTimeout = 65_000;
     server.headersTimeout = 66_000;
-    // The /live/ws upgrade an old build still tries answers 426.
-    require("./ai/gone").attachUpgrade(server);
 
-    // Call recordings are pruned after every session, but a server that
-    // sat idle over a weekend still holds expired ones. Sweep at boot and
-    // once a day, so nothing depends on someone making a call.
+    // Turn recordings past their retention are swept at boot and once a
+    // day, so nothing depends on someone using the app.
     // The same daily pass drops video-note clips kept past their 30 days
     // (videonotes/service.js sweep); the recipient's copy stays. And the
     // photo cards' working photos and drafts untouched for 30 days
@@ -845,25 +820,11 @@ require("./db")
       ]);
       setTimeout(sweep, 30_000).unref?.();
       setInterval(sweep, 24 * 3600_000).unref?.();
-      console.log(
-        `  recordings: ${rec.ENABLED ? `on, kept ${rec.KEEP_DAYS} days` : "off (LIVE_RECORD=0)"}`
-      );
+      console.log(`  recordings: per-turn, kept ${rec.KEEP_DAYS} days`);
     }
 
-    const avatarSessions = require("./avatar/session");
-    console.log(
-      `  avatar: ${
-        !avatarSessions.configured()
-          ? "disabled — missing HEYGEN_API_KEY"
-          : `heygen ${require("./avatar/heygen").avatarId()}${
-              require("./avatar/heygen").sandbox() ? " (SANDBOX — free, ~1 min sessions)" : ""
-            }`
-      }`
-    );
-
-    // A restart must not strand a live avatar room: nothing else would
-    // ever delete it, and BEY keeps billing an empty room until its own
-    // timeout. Deploys send SIGTERM, Ctrl-C sends SIGINT.
+    // Wind down cleanly on a restart. Deploys send SIGTERM, Ctrl-C sends
+    // SIGINT.
     let shuttingDown = false;
     for (const sig of ["SIGTERM", "SIGINT"]) {
       process.on(sig, async () => {
@@ -873,18 +834,10 @@ require("./db")
         // started, while the rest winds down.
         try { require("./infra/jobs").stop(); } catch (_) {}
         try { require("./proactive/scheduler").stop(); } catch (_) {}
-        try {
-          await Promise.race([avatarSessions.stopAll(), new Promise((r) => setTimeout(r, 5000).unref?.())]);
-        } catch (_) {}
-        // server.close() does not close WebSockets, so a live call's
-        // recording would otherwise be abandoned as raw PCM on every
-        // deploy. Bounded, because the exit timer below is not.
+        // Bounded, because the exit timer below is not.
         try {
           await Promise.race([
-            Promise.all([
-              require("./live/recorder").stopAll(),
-              require("./mailin/service").stopReceiver().catch(() => {}),
-            ]),
+            require("./mailin/service").stopReceiver().catch(() => {}),
             new Promise((r) => setTimeout(r, 4000).unref?.()),
           ]);
         } catch (_) {}
@@ -896,7 +849,7 @@ require("./db")
           ]);
           process.exit(0);
         });
-        // Don't let a hung socket hold the paid room open indefinitely.
+        // Don't let a hung socket hold the process open indefinitely.
         setTimeout(() => process.exit(0), 5000).unref();
       });
     }

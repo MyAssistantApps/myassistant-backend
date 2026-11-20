@@ -50,7 +50,6 @@ const assert = require("assert");
 
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "g1-e2e-data-"));
 process.env.DATA_DIR = DATA_DIR;
-process.env.LIVE_RECORD = "0";
 // Background turns need a key; this one never reaches Google (fetch is
 // blocked below).
 process.env.OPENAI_API_KEY = "g1-e2e-not-a-real-key";

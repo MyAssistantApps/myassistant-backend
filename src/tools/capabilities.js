@@ -110,11 +110,6 @@ const INTEGRATIONS = {
     why: "their Notion is not connected",
     fix: "offer to open Connected apps",
   },
-  avatar: {
-    label: "a talking-avatar provider",
-    anyEnv: ["HEYGEN_API_KEY", "BEY_API_KEY", "SIMLI_FACE_ID", "TAVUS_API_KEY"],
-    why: "a video avatar needs a provider configured",
-  },
 };
 
 /** True when every env var an integration needs carries a non-empty value. */

@@ -301,7 +301,7 @@ const SEED_WORLD = new Set([
   "send_document", "send_patient_document", "book_by_calling_business",
   "arrange_meeting_with", "order_food", "book_ride", "book_movie_tickets",
   "collect_payment", "open_app", "open_webpage", "open_public_pdf", "open_service_app",
-  "open_video_mode", "start_navigation", "phone_control", "play_music",
+  "start_navigation", "phone_control", "play_music",
   "capture_document", "analyze_camera", "set_alarm", "create_reminder",
   "update_reminder", "schedule_task", "schedule_patient_recall",
   "record_entry", "amend_last_entry", "record_patient_payment",

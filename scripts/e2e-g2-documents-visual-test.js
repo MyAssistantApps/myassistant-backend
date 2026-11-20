@@ -711,7 +711,7 @@ const MIME = {
 
     // (The camera's own questions — "what is this", a PDF, a screenshot's
     // event — were POST /vision until 2026-09-29. The app answers them with
-    // its own models now; /vision answers 426 (scripts/ai-toolserver-test.js).)
+    // its own models now.)
 
     /* ============================================================== */
     console.log("\nbusiness card → contact (the real card reader, model stubbed)");

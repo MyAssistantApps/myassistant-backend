@@ -58,7 +58,6 @@ Object.assign(process.env, {
   DATA_DIR: path.join(TMP, "data"),
   MEDIA_DIR: path.join(TMP, "media"),
   MEDIA_BACKEND: "local",
-  LIVE_RECORD: "0",
   LOG_LEVEL: "error",
 });
 process.chdir(TMP); // no .env here
@@ -200,7 +199,7 @@ function stable(cfg) {
     assert.strictEqual(rt.status, 200, rt.text);
     assert.strictEqual(realtime[0].voice, pick, "the realtime session is opened in the pick");
     spoken.length = 0;
-    const g = await api("GET", `/ai/voices/${pick}/greeting-v5?line=${encodeURIComponent("Hello Sir.")}`, { token: A.token, raw: true });
+    const g = await api("GET", `/ai/voices/${pick}/greeting-v6?line=${encodeURIComponent("Hello Sir.")}`, { token: A.token, raw: true });
     assert.strictEqual(g.status, 200);
     assert.ok(spoken.some((s) => s.voice === pick), "the greeting is in the pick");
   });

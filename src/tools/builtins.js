@@ -6155,27 +6155,6 @@ function registerBuiltins() {
     },
   });
 
-  registry.register({
-    name: "open_video_mode",
-    // HIDDEN (2026-09-29): face-to-face video rode the Live socket, which is
-    // gone — the app answers open_video with "not available". Offered, the
-    // model said "Opening video mode." and the next line took it back.
-    available: () => false,
-    description:
-      "Switch to the face-to-face video avatar conversation. Use only when " +
-      "the user asks for video/face mode — NOT for calling a contact.",
-    risk: "medium",
-    deviceAction: true,
-    inputSchema: { type: "object", properties: {} },
-    async execute() {
-      return {
-        ok: true,
-        deviceAction: { type: "open_video" },
-        speak: "Opening video mode.",
-      };
-    },
-  });
-
   // ---------------- WEB SEARCH (interface defined, key required) ----------
 
   registry.register({

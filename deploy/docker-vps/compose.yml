@@ -15,7 +15,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
     restart: unless-stopped
-    # Room for the shutdown hook (avatar rooms, recordings, pool) before SIGKILL.
+    # Room for the shutdown hook (jobs, scheduler, pool) before SIGKILL.
     stop_grace_period: 20s
     volumes:
       - ./data:/app/data

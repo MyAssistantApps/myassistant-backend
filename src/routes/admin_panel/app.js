@@ -1166,7 +1166,6 @@ async function viewUserDetail(id) {
             h("div", { class: "stat-mini" }, h("span", { class: "k" }, "Name"), h("span", { class: "v" }, asst.name || "Assistant")),
             h("div", { class: "stat-mini" }, h("span", { class: "k" }, "Voice"), h("span", { class: "v" }, asst.voice || "default")),
             h("div", { class: "stat-mini" }, h("span", { class: "k" }, "Style"), h("span", { class: "v" }, asst.style || "default")),
-            h("div", { class: "stat-mini" }, h("span", { class: "k" }, "Face"), h("span", { class: "v" }, asst.avatar_id ? asst.avatar_id.slice(0, 8) + "…" : "default")),
           ] : h("div", { class: "faint" }, "Not configured yet.")),
         h("div", { class: "card section-gap" },
           h("h3", {}, "Data footprint"),
@@ -2077,7 +2076,7 @@ async function viewBroadcast() {
 const FLAG_DESC = {
   voice_mode: "Speak in → spoken reply out.",
   morning_briefing: "Automatic morning brief push.",
-  face_mode: "Video avatar entry points in the app.",
+  face_mode: "Retired video avatar (old builds only); keep off.",
   face_interview: "Face-to-face interview mode.",
   video_briefing: "Video versions of the daily brief.",
   photo_questions: "Photo & receipt questions via the camera.",
@@ -2355,8 +2354,7 @@ async function viewRecordings() {
         `${d.usage.count} call${d.usage.count === 1 ? "" : "s"} · ` +
         `${fmtLen(d.usage.ms)} of audio · ${fmtBytes(d.usage.bytes)} on disk · ` +
         `kept ${d.usage.keepDays} days` +
-        (d.usage.failed ? ` · ${d.usage.failed} failed` : "") +
-        (d.usage.enabled ? "" : " · RECORDING IS OFF")));
+        (d.usage.failed ? ` · ${d.usage.failed} failed` : "")));
     }
     moreBtn.disabled = d.recordings.length < 50;
   }

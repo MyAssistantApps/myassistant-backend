@@ -68,7 +68,7 @@ async function migrate(exec) {
       style      TEXT NOT NULL DEFAULT '',      -- concise|friendly|formal|''
       updated_at BIGINT NOT NULL
     );
-    -- Video-avatar face chosen in Settings; '' = the deployment default.
+    -- Retired video-avatar face id; old rows may hold one, nothing reads it.
     ALTER TABLE assistant_profiles ADD COLUMN IF NOT EXISTS avatar_id TEXT NOT NULL DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS user_instructions (
@@ -110,9 +110,8 @@ async function getProfile(userId) {
   return {
     user: u,
     assistant: a
-      ? { name: nameOrDefault(a.name), gender: a.gender, voice: a.voice, style: a.style,
-          avatar_id: a.avatar_id || "" }
-      : { name: DEFAULT_ASSISTANT_NAME, gender: "", voice: "", style: "", avatar_id: "" },
+      ? { name: nameOrDefault(a.name), gender: a.gender, voice: a.voice, style: a.style }
+      : { name: DEFAULT_ASSISTANT_NAME, gender: "", voice: "", style: "" },
   };
 }
 
@@ -191,9 +190,8 @@ async function updateProfile(userId, fields = {}) {
  * said "I've changed my voice to sound male", and it went on speaking
  * with Kore — a female voice. Another sentence that was not true.
  *
- * The names are the ones this codebase already uses: avatar/heygen.js
- * maps a female face to Kore and a male face to Charon, and the app's
- * own voice picker labels Kore/Aoede female and Puck/Charon/Fenrir male.
+ * The names are the ones this codebase already uses: the app's own
+ * voice picker labels Kore/Aoede female and Puck/Charon/Fenrir male.
  * Nothing new is invented here.
  */
 const VOICE_FOR_GENDER = { female: "Kore", male: "Charon" };
@@ -207,28 +205,23 @@ async function getAssistantProfile(userId) {
   if (!uidOk(userId)) throw new Error("authenticated userId required");
   const row = await one(`SELECT * FROM assistant_profiles WHERE user_id=$1`, [userId]);
   return row
-    ? { name: row.name, gender: row.gender, voice: row.voice, style: row.style, avatar_id: row.avatar_id }
+    ? { name: row.name, gender: row.gender, voice: row.voice, style: row.style }
     : null;
 }
 
-async function setAssistantProfile(userId, { name, gender, voice, style, avatar_id } = {}) {
+async function setAssistantProfile(userId, { name, gender, voice, style } = {}) {
   if (!uidOk(userId)) throw new Error("authenticated userId required");
   // An EXPLICIT voice always wins — someone who picked Fenrir in Settings
   // and then says "be male" keeps Fenrir. Only a gender change with no
   // voice of its own moves the voice.
   const g = String(gender || "").toLowerCase().trim();
   if (!voice && VOICE_FOR_GENDER[g]) voice = VOICE_FOR_GENDER[g];
-  // "neutral" clears back to automatic (the face's voice, else the
-  // deployment default) rather than picking a gendered one.
+  // "neutral" clears back to automatic (the deployment default) rather
+  // than picking a gendered one.
   if (!voice && g === "neutral") voice = "default";
-  // avatar_id: undefined/'' keeps the current face; the literal 'default'
-  // clears the choice back to the deployment default.
-  const face =
-    avatar_id === "default" ? "" : String(avatar_id || "").slice(0, 80);
-  const faceKeep = avatar_id === undefined || avatar_id === "";
   await run(
-    `INSERT INTO assistant_profiles (user_id,name,gender,voice,style,avatar_id,updated_at)
-     VALUES ($1, COALESCE(NULLIF($2,''),'Assistant'), $3, $4, $5, $7, $6)
+    `INSERT INTO assistant_profiles (user_id,name,gender,voice,style,updated_at)
+     VALUES ($1, COALESCE(NULLIF($2,''),'Assistant'), $3, $4, $5, $6)
      ON CONFLICT (user_id) DO UPDATE SET
        name  = COALESCE(NULLIF($2,''), assistant_profiles.name),
        gender= COALESCE(NULLIF($3,''), assistant_profiles.gender),
@@ -237,11 +230,9 @@ async function setAssistantProfile(userId, { name, gender, voice, style, avatar_
                     ELSE COALESCE(NULLIF($4,''), assistant_profiles.voice) END,
        style = CASE WHEN $5 = 'default' THEN ''
                     ELSE COALESCE(NULLIF($5,''), assistant_profiles.style) END,
-       avatar_id = CASE WHEN $8 THEN assistant_profiles.avatar_id ELSE $7 END,
        updated_at = $6`,
     [userId, String(name || "").slice(0, 40), String(gender || "").toLowerCase(),
-     String(voice || "").slice(0, 40), String(style || "").slice(0, 30), Date.now(),
-     face, faceKeep]
+     String(voice || "").slice(0, 40), String(style || "").slice(0, 30), Date.now()]
   );
   // getProfile returns null when there is no row in `users` — an account
   // mid-creation, or a test id. Reaching straight through it threw
@@ -252,8 +243,8 @@ async function setAssistantProfile(userId, { name, gender, voice, style, avatar_
   if (full && full.assistant) return full.assistant;
   const row = await one(`SELECT * FROM assistant_profiles WHERE user_id=$1`, [userId]);
   return row
-    ? { name: nameOrDefault(row.name), gender: row.gender, voice: row.voice, style: row.style, avatar_id: row.avatar_id }
-    : { name: DEFAULT_ASSISTANT_NAME, gender: "", voice: "", style: "", avatar_id: "" };
+    ? { name: nameOrDefault(row.name), gender: row.gender, voice: row.voice, style: row.style }
+    : { name: DEFAULT_ASSISTANT_NAME, gender: "", voice: "", style: "" };
 }
 
 /* ---------------- standing instructions (§14) ---------------- */

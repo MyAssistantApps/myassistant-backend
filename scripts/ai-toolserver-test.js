@@ -5,8 +5,7 @@
  * AI Logic; Gemini Nano was removed the same night) and this server is its
  * tool server and
  * memory: GET /ai/config, POST /ai/context, /ai/tool, /ai/turn and
- * /ai/firebase-token. The old model routes (/live/ws, /assistant, /stt,
- * /tts, /vision, the assistant's /chat turns) answer 426.
+ * /ai/firebase-token.
  *
  * Boots the REAL server (real appAuth, real routes, real tools, real
  * Postgres) with every outbound call answered locally. No model is called
@@ -26,20 +25,18 @@ const os = require("os");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const http = require("http");
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "ai-toolserver-"));
 process.env.DATA_DIR = path.join(TMP, "data");
 process.env.MEDIA_DIR = path.join(TMP, "media");
 process.env.MEDIA_BACKEND = "local";
 process.env.LIVE_RECORD_DIR = path.join(TMP, "recordings");
-process.env.LIVE_RECORD = "0";
 process.env.LOG_LEVEL = "error";
 process.env.JWT_SECRET = "ai-toolserver-" + crypto.randomBytes(16).toString("hex");
 for (const k of [
   "OPENAI_API_KEY", "GEMINI_MODEL", "GEMINI_LIVE_MODEL", "GEMINI_TTS_MODEL", "OPENAI_API_KEY",
   "AUTH_DISABLED", "ALLOW_APP_KEY", "APP_API_KEY", "METRICS_TOKEN", "PLIVO_AUTH_TOKEN",
-  "BOLNA_API_KEY", "TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "GOOGLE_CSE_KEY", "HEYGEN_API_KEY",
+  "BOLNA_API_KEY", "TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "GOOGLE_CSE_KEY",
   "AI_CLOUD_MODEL", "AI_CLOUD_FAST_MODEL", "AI_TTS_MODEL", "AI_TTS_VOICE", "AI_LIVE_MODEL",
   "AI_LIVE_VOICE", "AI_NANO", "AI_APPROVAL_SECRET", "SHORTCUTS",
 ]) delete process.env[k];
@@ -852,42 +849,11 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
     });
 
     /* ============================================================ */
-    console.log("\nthe old ways in");
+    console.log("\nhuman chat");
     /* ============================================================ */
 
-    await atest("the removed model routes answer 426 with one plain sentence", async () => {
-      for (const [m, p] of [
-        ["POST", "/assistant/session"], ["GET", "/assistant/stream/abc?token=x"], ["POST", "/assistant/abc/message"],
-        ["POST", "/stt"], ["POST", "/tts"], ["POST", "/vision"], ["POST", "/chat"], ["POST", "/chat/stream"],
-        ["POST", "/chat/greeting"], ["GET", "/live"], ["GET", "/live/ws"],
-      ]) {
-        const r = await api(m, p, { token: A.token, body: m === "POST" ? {} : undefined });
-        assert.strictEqual(r.status, 426, `${m} ${p} → ${r.status}`);
-        assert.deepStrictEqual(r.json, { error: "Update the app to keep talking to your assistant." }, p);
-      }
-      // What stays: human chat, and the avatar screen's routes under /live.
+    await atest("human chat answers on the single /chat mount", async () => {
       assert.strictEqual((await api("GET", "/chat/threads", { token: A.token })).status, 200);
-      assert.notStrictEqual((await api("GET", "/live/avatar", { token: A.token })).status, 426);
-    });
-
-    await atest("the /live/ws upgrade answers 426 too", async () => {
-      const res = await new Promise((resolve, reject) => {
-        const req = http.request({
-          host: "127.0.0.1", port: Number(process.env.PORT), path: `/live/ws?token=${A.token}`,
-          headers: { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13",
-            "Sec-WebSocket-Key": crypto.randomBytes(16).toString("base64") },
-        });
-        req.on("upgrade", () => reject(new Error("upgraded")));
-        req.on("response", (r) => {
-          let b = "";
-          r.on("data", (d) => { b += d; });
-          r.on("end", () => resolve({ status: r.statusCode, body: b }));
-        });
-        req.on("error", reject);
-        req.end();
-      });
-      assert.strictEqual(res.status, 426);
-      assert.deepStrictEqual(JSON.parse(res.body), { error: "Update the app to keep talking to your assistant." });
     });
 
     await atest("nothing here called a model", () => {

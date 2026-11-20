@@ -1,78 +1,36 @@
 /**
- * LIVE CALL RECORDING — hearing what the transcript cannot show.
- * -------------------------------------------------------------
+ * TURN RECORDINGS — hearing what the transcript cannot show.
+ * ----------------------------------------------------------
  * A transcript tells you what the recogniser THOUGHT it heard. It does
  * not tell you that the user trailed off, that two people were talking,
  * that the assistant spoke over them, or that "Love illah" was a clear
- * sentence badly recognised. Every hard bug in this product so far has
- * been diagnosed from a transcript that looked fine.
+ * sentence badly recognised.
  *
- * So both halves of a live call are written to disk as they pass through
- * the proxy, and the admin panel plays them back.
+ * The phone posts both halves of a live turn, for users who said yes to
+ * "Help improve", and live/turnAudio.js writes one WAV per turn into the
+ * `live_recordings` table and the ROOT directory kept here. This module
+ * owns that store: the table, retention (keep-window and a total ceiling),
+ * the admin panel's Recordings page (list/get/destroy/usage) and the
+ * file removal that account erasure and the "Help improve" switch-off use.
  *
- * THE TIMELINE IS WALL-CLOCK, NOT ARRIVAL ORDER. Each chunk is written at
- * the byte offset matching the moment it belongs to, so a thirty-second
- * silence is thirty seconds of silence on playback rather than being
- * edited out. The files are sparse: a gap costs no disk at all, because
- * a hole in a file reads back as zeroes, and zeroes in PCM are silence.
- *
- * The two sides stay separate until the end — the user on the left
- * channel, the assistant on the right — which is what makes an interrupt
- * audible as an interrupt instead of a jumble.
- *
- * NOTHING HERE MAY BREAK A CALL. Every path is wrapped and every failure
- * is logged and swallowed. A recording is worth exactly nothing compared
- * to the conversation it is recording. Concretely that means: writes are
- * batched so the call's audio path is not competing with this for libuv's
- * four threads, the in-flight queue is bounded so a stalled disk drops
- * audio instead of growing without limit, and the ffmpeg merge runs one
- * at a time on a single thread because the pod's whole CPU budget is
- * 500m and live calls are sharing it.
+ * Rows with format 'm4a' and leftover .pcm files are from the earlier
+ * proxied-call recorder; retention and erasure still clean them up.
  */
-const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
-const { execFile } = require("child_process");
 const { query, run } = require("../db");
 
-const ENABLED = String(process.env.LIVE_RECORD ?? "1") !== "0";
-
-/**
- * "Help improve the assistant" is off for this user (users/helpImprove.js):
- * nothing is recorded. A sentinel, so begin() stays silent for it.
- */
-const OPTED_OUT = new Error("help improve is off");
-const allowsReview = (uid) => require("../users/helpImprove").allowsReview(uid);
 // Under DATA_DIR (/app/data in the Docker image); a fixed "/app/data"
 // failed on a host without /app (the VPS, 2026-10-31).
 const ROOT = process.env.LIVE_RECORD_DIR ||
   path.join(path.resolve(process.env.DATA_DIR || path.join(__dirname, "..", "..", "data")), "recordings");
 
-/** The two ends of the call arrive at different rates. */
-const USER_RATE = 16000; // mic, PCM16 mono, as the app captures it
-const AGENT_RATE = 24000; // Gemini's reply, PCM16 mono
-const BYTES_PER_SAMPLE = 2;
-
-/** A runaway session must not fill the disk. */
+/** The longest a proxied call could run; its stale leftovers are older. */
 const MAX_MINUTES = Number(process.env.LIVE_RECORD_MAX_MIN || 90);
 
 /** How long a recording is kept, and the ceiling on all of them together. */
 const KEEP_DAYS = Number(process.env.LIVE_RECORD_KEEP_DAYS || 14);
 const MAX_TOTAL_MB = Number(process.env.LIVE_RECORD_MAX_MB || 2048);
-
-/**
- * Speech, two channels. The two channels here are the least correlated
- * pair a stereo coder can be handed — two different people — so this is
- * higher than a single-voice recording would need. AAC in .m4a because it
- * is the one format every browser plays without a plugin.
- */
-const BITRATE = process.env.LIVE_RECORD_BITRATE || "48k";
-
-/** Batch writes into blocks instead of one syscall per 20 ms of audio. */
-const FLUSH_BYTES = 64 * 1024;
-
-/** A stalled disk drops audio rather than growing a queue without limit. */
-const MAX_INFLIGHT = 4 * 1024 * 1024;
 
 let migrated = null;
 function migrate() {
@@ -98,370 +56,6 @@ function migrate() {
     });
   }
   return migrated;
-}
-
-/* ------------------------------------------------------------------ *
- * One stream — the user's half or the assistant's half
- * ------------------------------------------------------------------ */
-
-/**
- * A single mono PCM track written on a wall-clock timeline.
- *
- * `pos` is how far the track has been filled. A chunk goes at whichever
- * is LATER: where the clock says it belongs, or the end of what is
- * already there. That second case is the one that matters — Gemini
- * streams a whole spoken sentence down in a burst far faster than real
- * time, and placing each chunk by its arrival instant would stack a
- * three-second reply into a quarter-second of garbage. Appending keeps
- * the sentence intact; the clock only decides where the NEXT sentence,
- * after a pause, begins.
- *
- * Because appending runs AHEAD of the clock, `pos` has to be brought back
- * whenever the audio it represents stops being real — see rollbackTo(),
- * which is what a barge-in needs.
- */
-class Track {
-  constructor(file, rate) {
-    this.file = file;
-    this.rate = rate;
-    this.pos = 0;
-    this.fh = null;
-    this.queue = Promise.resolve();
-    this.inflight = 0;
-    this.failed = false;
-    // The unflushed run: contiguous chunks, and where the run starts.
-    this.buf = [];
-    this.bufBytes = 0;
-    this.bufAt = 0;
-  }
-
-  get bytesPerSecond() {
-    return this.rate * BYTES_PER_SAMPLE;
-  }
-
-  async open() {
-    this.fh = await fsp.open(this.file, "w");
-  }
-
-  /** Byte offset of a moment, rounded down to a whole sample. */
-  offsetAt(elapsedMs) {
-    const ms = Math.max(0, elapsedMs);
-    return Math.floor((ms * this.rate) / 1000) * BYTES_PER_SAMPLE;
-  }
-
-  /**
-   * @param buf        PCM16 bytes
-   * @param elapsedMs  how long into the call they belong, taken when the
-   *                   frame ARRIVED, not when it reached this queue
-   */
-  write(buf, elapsedMs) {
-    if (!this.fh || this.failed || !buf || !buf.length) return;
-    // Half a sample is not a sample. One odd-length frame would shift
-    // every byte after it by one and turn the rest of the track into
-    // noise, so the stray byte is dropped rather than carried.
-    if (buf.length % BYTES_PER_SAMPLE) buf = buf.subarray(0, buf.length - 1);
-    if (!buf.length) return;
-
-    const at = Math.max(this.offsetAt(elapsedMs), this.pos);
-    // A chunk that does not continue the buffered run starts a new one.
-    if (this.bufBytes && this.bufAt + this.bufBytes !== at) this.flush();
-    if (!this.bufBytes) this.bufAt = at;
-    this.buf.push(buf);
-    this.bufBytes += buf.length;
-    this.pos = at + buf.length;
-    if (this.bufBytes >= FLUSH_BYTES) this.flush();
-  }
-
-  /** Hands the buffered run to the filesystem, at its own offset. */
-  flush() {
-    if (!this.bufBytes || !this.fh || this.failed) {
-      this.buf = [];
-      this.bufBytes = 0;
-      return;
-    }
-    const block = this.buf.length === 1 ? this.buf[0] : Buffer.concat(this.buf, this.bufBytes);
-    const at = this.bufAt;
-    this.buf = [];
-    this.bufBytes = 0;
-
-    if (this.inflight + block.length > MAX_INFLIGHT) {
-      // The disk is not keeping up. Losing the rest of this recording is
-      // the correct outcome; queueing until the pod is OOM-killed is not.
-      this.failed = true;
-      console.warn(`recorder: ${path.basename(this.file)} dropped — write queue full`);
-      return;
-    }
-    this.inflight += block.length;
-    this.queue = this.queue
-      .then(() => this.fh.write(block, 0, block.length, at))
-      .catch((e) => {
-        if (!this.failed) {
-          this.failed = true;
-          console.warn("recorder: write failed —", e.message);
-        }
-      })
-      .finally(() => { this.inflight -= block.length; });
-  }
-
-  /**
-   * Throws away everything after a moment — the reply the user talked
-   * over, which nobody ever heard.
-   *
-   * Without this the unplayed tail stays in the file AND `pos` stays past
-   * the clock, so every later sentence is pushed further out of step and
-   * the two channels drift apart for the rest of the call.
-   */
-  async rollbackTo(elapsedMs) {
-    if (!this.fh || this.failed) return;
-    this.buf = [];
-    this.bufBytes = 0;
-    const at = this.offsetAt(elapsedMs);
-    if (at >= this.pos) return;
-    this.pos = at;
-    try {
-      await this.queue;
-      await this.fh.truncate(at);
-    } catch (e) {
-      console.warn("recorder: rollback failed —", e.message);
-    }
-  }
-
-  /** Fix the track to an exact length so both sides line up for merging. */
-  async close(durationMs) {
-    if (!this.fh) return;
-    this.flush();
-    try {
-      await this.queue;
-      // Authoritative in BOTH directions. Padding alone left the agent
-      // track longer than the call, because appending runs ahead of the
-      // clock — and merge() assumes the two files are the same duration.
-      const want = this.offsetAt(durationMs);
-      if (want !== this.pos) await this.fh.truncate(want);
-      this.pos = want;
-    } catch (e) {
-      console.warn("recorder: close failed —", e.message);
-    }
-    try { await this.fh.close(); } catch (_) {}
-    this.fh = null;
-  }
-}
-
-/* ------------------------------------------------------------------ *
- * One recording
- * ------------------------------------------------------------------ */
-
-/** Every recording currently open, so a deploy can finish them. */
-const live = new Set();
-
-/**
- * Users abortUser() has dropped: their account is being deleted. A
- * recording still starting then (its INSERT in flight, so not yet in
- * `live` for abortUser to see) checks this and abandons itself, instead
- * of recording a whole call for an account that no longer exists
- * (review, 2026-09-25). Ids are never reused, so a mark is never wrong
- * once the delete has gone through; if it fails, cancelErase() lifts it.
- */
-const erasedUsers = new Set();
-
-/** The delete failed and the account is still there: record them again. */
-function cancelErase(userId) {
-  erasedUsers.delete(Number(userId));
-}
-
-class Recording {
-  constructor(userId, sessionId) {
-    this.userId = Number(userId) || 0;
-    this.sessionId = String(sessionId || "");
-    this.startedAt = Date.now();
-    this.turns = 0;
-    this.stopped = false;
-    this.dir = "";
-    this.out = "";
-    this.user = null;
-    this.agent = null;
-  }
-
-  elapsed(nowMs) {
-    return (nowMs || Date.now()) - this.startedAt;
-  }
-
-  get expired() {
-    return this.elapsed() > MAX_MINUTES * 60_000;
-  }
-
-  async start() {
-    // Only people who said yes to "Help improve" are recorded. Checked
-    // before anything touches the disk.
-    if (!(await allowsReview(this.userId))) throw OPTED_OUT;
-    const day = new Date(this.startedAt).toISOString().slice(0, 10);
-    this.dir = path.join(ROOT, day);
-    await fsp.mkdir(this.dir, { recursive: true });
-    const stem = path.join(this.dir, safeName(this.sessionId));
-    this.user = new Track(stem + ".user.pcm", USER_RATE);
-    this.agent = new Track(stem + ".agent.pcm", AGENT_RATE);
-    this.out = stem + ".m4a";
-    await Promise.all([this.user.open(), this.agent.open()]);
-    try {
-      await migrate();
-      if (erasedUsers.has(this.userId)) throw new Error("account deleted");
-      await run(
-        `INSERT INTO live_recordings (user_id, session_id, started_at, file, state)
-              VALUES ($1, $2, $3, $4, 'recording')`,
-        [this.userId, this.sessionId, this.startedAt, this.out]
-      );
-      // Deleted while that INSERT was in flight. The delete's transaction
-      // may already have run and missed this row, so it is ours to remove.
-      // Checked in the same tick as live.add() below: abortUser either
-      // finds this recording in `live` or this check finds the mark.
-      if (erasedUsers.has(this.userId)) {
-        await run(`DELETE FROM live_recordings WHERE session_id = $1`, [this.sessionId])
-          .catch(() => {});
-        throw new Error("account deleted");
-      }
-    } catch (e) {
-      // The handles are already open; leaving them dangling would leak a
-      // file descriptor and two files for the life of the process.
-      await this.user.close(0).catch(() => {});
-      await this.agent.close(0).catch(() => {});
-      await this.cleanupRaw();
-      throw e;
-    }
-    live.add(this);
-  }
-
-  addUser(buf, atMs) {
-    if (this.stopped || this.expired) return;
-    this.user.write(buf, this.elapsed(atMs));
-  }
-
-  addAgent(buf, atMs) {
-    if (this.stopped || this.expired) return;
-    this.agent.write(buf, this.elapsed(atMs));
-  }
-
-  /** The user talked over the reply: drop what was never spoken aloud. */
-  interrupted(atMs) {
-    if (this.stopped) return Promise.resolve();
-    return this.agent.rollbackTo(this.elapsed(atMs)).catch(() => {});
-  }
-
-  countTurn() {
-    this.turns++;
-  }
-
-  async stop() {
-    if (this.stopped) return;
-    this.stopped = true;
-    live.delete(this);
-    // Capture stops at MAX_MINUTES, so the output must stop there too —
-    // otherwise a socket left open overnight pads both tracks to twelve
-    // hours of silence and hands ffmpeg a day's work.
-    const durationMs = Math.min(this.elapsed(), MAX_MINUTES * 60_000);
-    await this.user.close(durationMs);
-    await this.agent.close(durationMs);
-
-    // Switched off while this call was open (a start that was already in
-    // flight): discard BEFORE the merge, so no encode is spent on audio
-    // that has to be deleted.
-    if (!(await allowsReview(this.userId))) {
-      await this.discard();
-      return;
-    }
-
-    // A socket that opened and closed with nobody speaking is not a
-    // conversation; leaving those around buries the real ones.
-    if (this.user.pos < this.user.bytesPerSecond &&
-        this.agent.pos < this.agent.bytesPerSecond) {
-      await this.discard();
-      return;
-    }
-
-    try {
-      await merge(this.user.file, this.agent.file, this.out);
-      const st = await fsp.stat(this.out);
-      await run(
-        `UPDATE live_recordings
-            SET duration_ms = $2, bytes = $3, turns = $4, state = 'ready'
-          WHERE session_id = $1`,
-        [this.sessionId, durationMs, st.size, this.turns]
-      );
-      await this.cleanupRaw();
-    } catch (e) {
-      console.warn("recorder: merge failed —", e.message);
-      await run(
-        `UPDATE live_recordings SET state = 'failed', duration_ms = $2
-          WHERE session_id = $1`, [this.sessionId, durationMs]
-      ).catch(() => {});
-      // ffmpeg runs with -y, so a mid-encode failure leaves a partial
-      // file that nothing else would ever remove.
-      await fsp.unlink(this.out).catch(() => {});
-      await this.cleanupRaw();
-    }
-    prune().catch(() => {});
-  }
-
-  async cleanupRaw() {
-    await Promise.all([
-      this.user && fsp.unlink(this.user.file).catch(() => {}),
-      this.agent && fsp.unlink(this.agent.file).catch(() => {}),
-    ]);
-  }
-
-  async discard() {
-    await this.cleanupRaw();
-    await run(`DELETE FROM live_recordings WHERE session_id = $1`, [this.sessionId])
-      .catch(() => {});
-  }
-}
-
-/* ------------------------------------------------------------------ *
- * Merge: two mono tracks at different rates -> one stereo file
- * ------------------------------------------------------------------ */
-
-/**
- * ONE AT A TIME, ON ONE THREAD.
- *
- * This pod's CPU limit is 500m and it is relaying live audio for everyone
- * else while it encodes. Two people hanging up together must not turn
- * into two unbounded ffmpeg processes competing with the calls still in
- * progress, so every merge queues behind the last one.
- */
-let mergeQueue = Promise.resolve();
-function merge(userPcm, agentPcm, out) {
-  const run = () => new Promise((resolve, reject) => {
-    execFile(
-      "ffmpeg",
-      [
-        "-hide_banner", "-loglevel", "error", "-y", "-threads", "1",
-        "-f", "s16le", "-ar", String(USER_RATE), "-ac", "1", "-i", userPcm,
-        "-f", "s16le", "-ar", String(AGENT_RATE), "-ac", "1", "-i", agentPcm,
-        // The user on the left, the assistant on the right. Both tracks
-        // were fixed to the same DURATION before this ran, so the mapping
-        // has nothing to guess about once the 16 kHz side is resampled up.
-        //
-        // join, not amerge. Raw PCM carries no channel layout, so amerge
-        // is handed two mono streams it cannot tell apart and gives up:
-        // "the following filters could not choose their formats". join
-        // takes the output layout as an argument, which is the whole
-        // question being asked here.
-        "-filter_complex",
-        `[0:a]aresample=${AGENT_RATE}[u];[u][1:a]join=inputs=2:channel_layout=stereo[a]`,
-        "-map", "[a]", "-ac", "2",
-        "-c:a", "aac", "-b:a", BITRATE,
-        "-movflags", "+faststart",
-        out,
-      ],
-      { timeout: 180_000, maxBuffer: 1 << 20 },
-      (err, _stdout, stderr) => {
-        if (err) return reject(new Error(String(stderr || err.message).slice(0, 300)));
-        resolve(out);
-      }
-    );
-  });
-  const next = mergeQueue.then(run, run);
-  // The queue must survive a failed merge, or one bad file blocks the rest.
-  mergeQueue = next.catch(() => {});
-  return next;
 }
 
 /* ------------------------------------------------------------------ *
@@ -636,8 +230,7 @@ async function get(id) {
 
 /**
  * Deletes one recording on request — the bytes go too, not just the row.
- * Only a finished one: deleting a row mid-call would orphan the audio the
- * session is still about to write.
+ * Rows still in 'recording' are left to reclaimOrphans().
  */
 async function destroy(id) {
   await migrate();
@@ -667,107 +260,15 @@ async function usage() {
     failed: Number(u.failed || 0),
     keepDays: KEEP_DAYS,
     maxMb: MAX_TOTAL_MB,
-    enabled: ENABLED,
   };
-}
-
-/* ------------------------------------------------------------------ *
- * Entry point used by the live proxy
- * ------------------------------------------------------------------ */
-
-/**
- * Begins recording a live session, or returns null when recording is off
- * or the session is anonymous. Never throws: the caller is mid-call.
- *
- * Every timestamp is taken at the CALL SITE, the instant the frame
- * arrived — not inside the callback below, which may not run until the
- * directory has been made and the row inserted. Timing the audio by when
- * the bookkeeping finished would push the opening seconds of every call
- * out of step.
- */
-function begin(userId, sessionId) {
-  if (!ENABLED) return null;
-  if (!(Number(userId) > 0) || !sessionId) return null;
-  const rec = new Recording(userId, sessionId);
-  const ready = rec.start().catch((e) => {
-    if (e !== OPTED_OUT) console.warn("recorder: start failed —", e.message);
-    rec.stopped = true;
-    live.delete(rec);
-  });
-  return {
-    user: (b) => { const t = Date.now(); ready.then(() => rec.addUser(b, t)).catch(() => {}); },
-    agent: (b) => { const t = Date.now(); ready.then(() => rec.addAgent(b, t)).catch(() => {}); },
-    interrupt: () => { const t = Date.now(); ready.then(() => rec.interrupted(t)).catch(() => {}); },
-    turn: () => rec.countTurn(),
-    stop: () => ready.then(() => rec.stop()).catch(() => {}),
-  };
-}
-
-/**
- * Finishes every open recording. Called on SIGTERM, because a deploy is
- * the one thing guaranteed to interrupt calls: server.close() does not
- * close WebSockets, so without this every recording in flight during a
- * rollout is left as raw PCM with a row stuck on 'recording'.
- */
-async function stopAll() {
-  const open = [...live];
-  if (!open.length) return;
-  console.log(`recorder: finishing ${open.length} recording(s) before shutdown`);
-  await Promise.allSettled(open.map((r) => r.stop()));
-}
-
-/**
- * ACCOUNT DELETED MID-CALL: DROP THE RECORDING, DO NOT FINISH IT.
- *
- * Owner, 2026-09-25: "delete old user accounts and data's from the
- * database", then "i ran but db files have not yet deleted" — the
- * Recordings page still listed the calls of accounts already deleted.
- *
- * Account deletion removes this user's live_recordings rows. A call still
- * open on this pod would otherwise carry on writing, find no row to
- * update when it stops, and leave an .m4a that nothing points at. So the
- * open recording is closed here without a merge and its raw halves are
- * unlinked; the caller deletes the rows. Returns how many were dropped.
- */
-async function abortUser(userId) {
-  return closeOpen(userId, { markErased: true });
-}
-
-/**
- * "Help improve" switched off mid-call: drop this user's open recordings
- * the same way, without marking the account as erased.
- */
-async function dropOpen(userId) {
-  return closeOpen(userId, { markErased: false });
-}
-
-async function closeOpen(userId, { markErased }) {
-  const uid = Number(userId);
-  // Marked before looking, in the same tick: see erasedUsers.
-  if (markErased && uid > 0) erasedUsers.add(uid);
-  const mine = [...live].filter((r) => r.userId === uid);
-  for (const r of mine) {
-    r.stopped = true;
-    live.delete(r);
-    try {
-      await r.user?.close(0);
-      await r.agent?.close(0);
-    } catch (_) { /* closing is best effort; the unlink below is what counts */ }
-    await r.cleanupRaw();
-    if (r.out) await fsp.unlink(r.out).catch(() => {});
-  }
-  return mine.length;
-}
-
-function safeName(s) {
-  return String(s).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 90);
 }
 
 module.exports = {
-  begin, stopAll, list, get, destroy, usage, prune, ENABLED, KEEP_DAYS,
+  list, get, destroy, usage, prune, KEEP_DAYS,
+  // Per-turn recordings (live/turnAudio.js) write into the table and ROOT.
   // Account erasure (src/routes/privacy.js) finds the files through the
   // rows, checks every path is under ROOT, and tidies the day folders.
-  migrate, abortUser, cancelErase, sweepEmptyDays, ROOT, MAX_MINUTES,
+  migrate, sweepEmptyDays, ROOT, MAX_MINUTES,
   // "Help improve" switch-off (users/helpImprove.js).
-  dropOpen, unlinkAll, OPTED_OUT,
+  unlinkAll,
 };

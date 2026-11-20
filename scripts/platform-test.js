@@ -39,7 +39,6 @@ process.env.DATA_DIR = path.join(TMP, "data");
 process.env.MEDIA_DIR = path.join(TMP, "media");
 process.env.MEDIA_BACKEND = "local";
 process.env.LIVE_RECORD_DIR = path.join(TMP, "recordings");
-process.env.LIVE_RECORD = "0";
 process.env.LOG_LEVEL = "error";
 process.env.JWT_SECRET = "platform-" + crypto.randomBytes(16).toString("hex");
 process.env.PUBLIC_BASE_URL = "https://api.example.test";
@@ -47,7 +46,7 @@ process.env.PLATFORM_RATE_PER_MIN = "100000";
 for (const k of [
   "OPENAI_API_KEY", "GEMINI_MODEL", "GEMINI_LIVE_MODEL", "GEMINI_TTS_MODEL",
   "AUTH_DISABLED", "ALLOW_APP_KEY", "APP_API_KEY", "METRICS_TOKEN", "PLIVO_AUTH_TOKEN", "PLIVO_AUTH_ID",
-  "BOLNA_API_KEY", "TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "GOOGLE_CSE_KEY", "HEYGEN_API_KEY",
+  "BOLNA_API_KEY", "TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "GOOGLE_CSE_KEY",
   "AI_APPROVAL_SECRET", "SHORTCUTS",
 ]) delete process.env[k];
 const BACKEND = path.resolve(__dirname, "..");
