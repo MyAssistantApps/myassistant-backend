@@ -54,7 +54,8 @@
     "test:listings": "node scripts/listings-test.js",
     "test:callcode": "node scripts/call-code-test.js",
     "test:hardening": "node scripts/hardening-test.js",
-    "test:audit": "node scripts/audit-test.js"
+    "test:audit": "node scripts/audit-test.js",
+    "loadtest": "node loadtest/run.js"
   },
   "engines": {
     "node": ">=22"
@@ -89,5 +90,8 @@
   },
   "overrides": {
     "image-size": "^2.1.0"
+  },
+  "devDependencies": {
+    "autocannon": "^8.0.0"
   }
 }

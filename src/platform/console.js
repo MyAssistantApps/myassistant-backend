@@ -92,7 +92,7 @@ async function consoleAuth(req, res, next) {
   if (!authz.startsWith("Bearer ")) return res.status(401).json({ error: "sign in to the developer console" });
   let p;
   try {
-    p = jwt.verify(authz.slice(7), process.env.JWT_SECRET, { algorithms: ["HS256"] });
+    p = jwt.verify(authz.slice(7), require("../infra/jwtKey").sessionKey(), { algorithms: ["HS256"] });
   } catch (_) {
     return res.status(401).json({ error: "your console sign-in has expired — sign in again" });
   }

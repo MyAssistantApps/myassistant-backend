@@ -291,7 +291,10 @@ function generate(date) {
 /** What the phone shows: the line, and every picture that exists. */
 async function today() {
   const date = indiaDate();
-  let day = readJson(path.join(dayDir(date), "day.json"), null);
+  // Every home screen asks: the day record is read from a short cache
+  // (infra/fileCache.js) instead of disk each time. A miss is not cached
+  // for long — generation writes the file moments later.
+  let day = require("../infra/fileCache").readJson(path.join(dayDir(date), "day.json"), null, 5000);
   if (!day && on()) {
     try {
       day = await ensureDay(date);

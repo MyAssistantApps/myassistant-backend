@@ -197,7 +197,34 @@ function limitsBlock(deviceCaps) {
   return "WHAT THIS PHONE CANNOT DO RIGHT NOW:\n" + lines.join("\n");
 }
 
+// Declarations are rebuilt for every /ai/config and every turn, but a
+// tool's inputSchema is a fixed object: normalise each one once. Keyed by
+// the schema object itself, so a re-registered (MCP) tool gets a new entry
+// and a dropped one is collected.
+const NORMALIZED = new WeakMap();
 function normalizeSchema(schema) {
+  if (schema && typeof schema === "object") {
+    const hit = NORMALIZED.get(schema);
+    if (hit) return structuredCloneLite(hit);
+    const out = normalizeSchemaUncached(schema);
+    NORMALIZED.set(schema, out);
+    return structuredCloneLite(out);
+  }
+  return normalizeSchemaUncached(schema);
+}
+// Callers own what they get back (some annotate declarations): a cheap
+// deep copy of a plain JSON tree, still far cheaper than re-normalising.
+function structuredCloneLite(v) {
+  if (Array.isArray(v)) return v.map(structuredCloneLite);
+  if (v && typeof v === "object") {
+    const o = {};
+    for (const k in v) o[k] = structuredCloneLite(v[k]);
+    return o;
+  }
+  return v;
+}
+
+function normalizeSchemaUncached(schema) {
   if (!schema || typeof schema !== "object") {
     return { type: "OBJECT", properties: {} };
   }
@@ -206,9 +233,9 @@ function normalizeSchema(schema) {
     if (k === "type" && typeof v === "string") out.type = v.toUpperCase();
     else if (k === "properties" && v && typeof v === "object") {
       out.properties = Object.fromEntries(
-        Object.entries(v).map(([pk, pv]) => [pk, normalizeSchema(pv)])
+        Object.entries(v).map(([pk, pv]) => [pk, normalizeSchemaUncached(pv)])
       );
-    } else if (k === "items") out.items = normalizeSchema(v);
+    } else if (k === "items") out.items = normalizeSchemaUncached(v);
     else if (["description", "required", "enum", "format"].includes(k)) out[k] = v;
     // anything else (additionalProperties, $schema, default…) is dropped:
     // Gemini rejects unknown fields in a declaration.

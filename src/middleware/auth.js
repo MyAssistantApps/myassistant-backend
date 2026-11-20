@@ -78,7 +78,7 @@ const APPFN_ONLY = "this key only works for assistant functions";
 async function verifySession(token, { allowAppFn = false } = {}) {
   let payload;
   try {
-    payload = jwt.verify(String(token || ""), process.env.JWT_SECRET, { algorithms: ["HS256"] });
+    payload = jwt.verify(String(token || ""), require("../infra/jwtKey").sessionKey(), { algorithms: ["HS256"] });
   } catch (_) {
     return { error: "invalid or expired token", status: 401 };
   }

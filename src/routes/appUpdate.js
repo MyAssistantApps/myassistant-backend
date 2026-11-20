@@ -31,16 +31,15 @@ const APK_DIR = path.resolve(
 const META = path.join(APK_DIR, "latest.json");
 
 function readMeta() {
-  try {
-    return JSON.parse(fs.readFileSync(META, "utf8"));
-  } catch {
-    return null; // no build uploaded yet
-  }
+  // Read on every /config (every app launch): cached text, 5 s
+  // (infra/fileCache.js). null = no build uploaded yet.
+  return require("../infra/fileCache").readJson(META, null);
 }
 
 function writeMeta(meta) {
   fs.mkdirSync(APK_DIR, { recursive: true });
   fs.writeFileSync(META, JSON.stringify(meta, null, 2));
+  require("../infra/fileCache").invalidate(META);
 }
 
 /** Called from the admin upload route after multer stored the temp file. */
