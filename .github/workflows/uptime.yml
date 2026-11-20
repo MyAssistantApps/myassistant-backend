@@ -1,0 +1,29 @@
+# UPTIME — an outside check of production every 10 minutes.
+#
+# The monitoring stack runs ON the VPS, so it cannot report the VPS being
+# down. This runs from GitHub: a failed run shows red in Actions and
+# GitHub emails whoever is watching the repo's workflow runs.
+name: uptime
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: /health/ready answers (API and database up)
+        run: |
+          for i in 1 2 3; do
+            if curl -fsS -m 15 -o body.json -w 'HTTP %{http_code} in %{time_total}s\n' https://backend.envisionsit.in/health/ready; then
+              cat body.json; exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::backend.envisionsit.in/health/ready failed three times"
+          exit 1

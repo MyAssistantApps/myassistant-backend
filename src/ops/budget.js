@@ -151,4 +151,4 @@ async function check({ path = "", userId, now = Date.now() } = {}) {
   }
 }
 
-module.exports = { check, BudgetError, limits, _reset() { cache.clear(); alerted.clear(); } };
+module.exports = { check, BudgetError, limits, globalSpend, _reset() { cache.clear(); alerted.clear(); } };

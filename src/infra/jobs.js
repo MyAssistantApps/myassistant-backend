@@ -100,6 +100,7 @@ async function runOne() {
     await run(`UPDATE jobs SET status='done', updated_at=$2 WHERE id=$1`, [
       job.id, Date.now(),
     ]);
+    require("./metrics").jobFinished(job.kind, "done");
   } catch (e) {
     const give_up = job.attempts >= MAX_ATTEMPTS;
     // Exponential backoff; a permanently broken job stops retrying rather
@@ -114,6 +115,7 @@ async function runOne() {
         Date.now(),
       ]
     );
+    if (give_up) require("./metrics").jobFinished(job.kind, "failed");
     logger.error("job_failed", {
       id: Number(job.id), kind: job.kind, attempts: job.attempts,
       willRetry: !give_up, error: e.message,

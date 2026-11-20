@@ -73,6 +73,9 @@ ENV DATA_DIR=/app/data
 USER node
 
 ENV NODE_ENV=production
+# The commit this image was built from; /health reports it (CI passes it).
+ARG GIT_SHA=dev
+ENV GIT_SHA=$GIT_SHA
 EXPOSE 3000
 
 # Health check via node itself — slim ships no wget/curl, and adding one

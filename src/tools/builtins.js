@@ -5745,7 +5745,7 @@ function registerBuiltins() {
             "documents", "clients", "finance", "stocks",
             "diagnostics", "mcp", "meetings", "reminders", "call_notes",
             "news", "focus", "avatar_identity", "connected_apps", "shortcuts",
-            "bills_email", "shopping_list", "calendar", "voice_settings",
+            "shopping_list", "calendar", "voice_settings",
           ],
           description:
             "settings = the assistant's own settings (voice, name, theme). " +
@@ -5755,8 +5755,7 @@ function registerBuiltins() {
             "messages as you (their recorded video for video notes). " +
             "connected_apps = link or unlink Notion, mail and other apps. " +
             "shortcuts = their saved shortcuts (build 120). " +
-            "bills_email = Bills by email (their private address for " +
-            "forwarding bills). shopping_list = their shopping list " +
+            "shopping_list = their shopping list " +
             "(build 124). calendar = this app's calendar: their events, " +
             "reminders and holidays (build 140). voice_settings = choose the " +
             "assistant's voice: hear each voice's sample and pick one ('open " +
@@ -5774,7 +5773,7 @@ function registerBuiltins() {
         "settings", "home", "hub", "chat", "documents", "clients",
         "finance", "stocks", "diagnostics", "mcp", "meetings", "reminders",
         "call_notes", "news", "focus", "avatar_identity", "connected_apps", "shortcuts",
-        "bills_email", "shopping_list", "calendar", "voice_settings",
+        "shopping_list", "calendar", "voice_settings",
       ];
       if (!ALLOWED.includes(screen)) {
         return { ok: false, error: `I don't have a screen called "${args.screen}"` };
@@ -5800,10 +5799,6 @@ function registerBuiltins() {
       }
       // Connected apps arrives in build 120.
       if (screen === "connected_apps" && build < require("../connectors/notion/tools").NOTION_MIN_BUILD) {
-        return { ok: false, error: "that screen needs the latest app update — say so" };
-      }
-      // Bills by email arrives in build 120; an unknown build counts as old.
-      if (screen === "bills_email" && build < require("../mailin/tools").MAILIN_MIN_BUILD) {
         return { ok: false, error: "that screen needs the latest app update — say so" };
       }
       // The shopping list screen arrives in build 124; an unknown build counts as old.

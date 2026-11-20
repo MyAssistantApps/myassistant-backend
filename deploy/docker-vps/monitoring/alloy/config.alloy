@@ -1,0 +1,48 @@
+// Container logs → Loki. Every container on this host, labelled by its
+// compose service; the backend's JSON lines keep their level and event as
+// labels so Grafana can filter "level=error" without parsing every line.
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "30s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.containers.output
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.json.receiver]
+}
+
+loki.process "json" {
+  stage.match {
+    selector = "{service=\"backend\"}"
+    stage.json {
+      expressions = { level = "level", event = "event" }
+    }
+    stage.labels {
+      values = { level = "", event = "" }
+    }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

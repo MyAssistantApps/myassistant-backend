@@ -898,12 +898,12 @@ const IST = (iso) => Date.parse(iso + "+05:30");
     assert.deepStrictEqual(show.deviceAction, { type: "open_app_screen", screen: "bills_email" });
     assert.strictEqual((await registry.get("bills_email").execute({ action: "show" }, { userId: U, appBuild: 119 })).error, "app_too_old");
     assert.ok(registry.limitsFor({ build: 119 }).some((l) => l.tool === "bills_email" && l.reason === "app_too_old"));
+    // The app no longer has the Bills-by-email screen (removed 2026-11-20,
+    // never launched): open_app_screen refuses it on every build.
     const open = registry.get("open_app_screen");
-    for (const appBuild of [119, 0]) {
-      assert.match((await open.execute({ screen: "bills_email" }, { appBuild })).error, /latest app update/);
+    for (const appBuild of [119, 0, 120, 999]) {
+      assert.ok(!(await open.execute({ screen: "bills_email" }, { appBuild })).deviceAction);
     }
-    assert.deepStrictEqual((await open.execute({ screen: "bills_email" }, { appBuild: 120 })).deviceAction,
-      { type: "open_app_screen", screen: "bills_email" });
   });
 
   // (The classic voice loop's legacy recall block — services/intents.js —

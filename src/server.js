@@ -169,7 +169,11 @@ app.use(rateLimit({
 // up to two registry lookups before its signature fails (2026-11-15).
 app.use("/ondc", rateLimit({ windowMs: 60_000, max: 1200, standardHeaders: true }));
 
-app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
+// version: the git sha baked into the image (Dockerfile GIT_SHA), so the
+// pipeline can prove production runs the commit it just tested.
+app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now(), version: process.env.GIT_SHA || "dev" }));
+// App gauges for Prometheus (pg pool, job queue, AI spend) — infra/metrics.js.
+try { require("./infra/metrics").install(); } catch (e) { console.warn("metrics: install failed —", e.message); }
 // READINESS: /health stays a pure liveness check (the process answers);
 // /health/ready also proves the database answers within 2 s, so a deploy
 // gate or load balancer can tell "up" from "up but cannot serve".
