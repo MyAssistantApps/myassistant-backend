@@ -21,6 +21,7 @@ const { offsetOr } = require("../services/tz");
 // The timezone rides along: background work (quiet hours, the morning
 // brief, commitment nudges) has no request to read it from.
 const buildSeen = new Map(); // uid -> { build, tz, at }
+const BUILD_SEEN_MAX = 50_000;
 function noteAppBuild(uid, req) {
   try {
     const build = Number(req.get("X-App-Build")) || 0;
@@ -28,6 +29,9 @@ function noteAppBuild(uid, req) {
     const now = Date.now();
     const prev = buildSeen.get(uid);
     if (prev && prev.build === build && prev.tz === tz && now - prev.at < 3600_000) return;
+    // Bounded: one entry per active user would otherwise grow for the
+    // life of the process. Dropping the oldest only costs a repeat write.
+    if (!prev && buildSeen.size >= BUILD_SEEN_MAX) buildSeen.delete(buildSeen.keys().next().value);
     buildSeen.set(uid, { build, tz, at: now });
     const db2 = require("../db");
     if (build > 0) {

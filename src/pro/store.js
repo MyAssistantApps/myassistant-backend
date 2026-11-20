@@ -262,9 +262,13 @@ async function hearingsNeedingReminder(now = Date.now()) {
   );
 }
 
+/** Claims the one reminder call. False when another sweep already did. */
 async function markHearingReminded(id) {
   await migrate();
-  await run("UPDATE pro_hearings SET reminded_at = $1 WHERE id = $2", [Date.now(), Number(id)]);
+  const n = await run(
+    "UPDATE pro_hearings SET reminded_at = $1 WHERE id = $2 AND reminded_at = 0",
+    [Date.now(), Number(id)]);
+  return n > 0;
 }
 
 /* ================================================================== */

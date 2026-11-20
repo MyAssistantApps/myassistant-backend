@@ -15,7 +15,7 @@
  *
  * Self-migrating like practice/store.js — no db.js change needed.
  */
-const { query, one, run } = require("../db");
+const { query, one, run, tx } = require("../db");
 
 const DAY = 24 * 3600 * 1000;
 const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -308,12 +308,23 @@ async function createAppointment(userId, a, { requireFreeSlot = false, tzOffsetM
   const name = clean(a.patientName, 120);
   if (!name) throw new Error("patient name required");
   const p = await getProfile(userId);
-  if (requireFreeSlot) {
-    const free = await slotsFor(userId, localMidnight(starts, tzOffsetMin), { tzOffsetMin });
-    if (!free.includes(starts)) throw new SlotTakenError();
-  }
+  // Bookings for one professional are serialised: the free-slot check and
+  // the insert used to be separate round trips, so two receptionist calls
+  // could both see 10:15 free and both be told they were booked. The lock
+  // is per professional and held only until the insert commits.
+  return tx(async (c) => {
+    await c.query("SELECT pg_advisory_xact_lock(hashtext('clinic_slot'), $1)", [Number(userId)]);
+    if (requireFreeSlot) {
+      const free = await slotsFor(userId, localMidnight(starts, tzOffsetMin), { tzOffsetMin });
+      if (!free.includes(starts)) throw new SlotTakenError();
+    }
+    return insertAppointment(c, userId, a, p, starts, name);
+  });
+}
+
+async function insertAppointment(c, userId, a, p, starts, name) {
   const now = Date.now();
-  const row = await one(
+  const { rows: [row] } = await c.query(
     `INSERT INTO clinic_appointments
        (user_id, client_id, patient_name, patient_phone, starts_at, duration_min, reason,
         status, source, remind_patient, created_at, updated_at)
@@ -370,9 +381,13 @@ async function appointmentsNeedingReminder(now = Date.now()) {
   );
 }
 
+/** Claims the one reminder call. False when another sweep already did. */
 async function markReminded(id) {
   await migrate();
-  await run("UPDATE clinic_appointments SET reminded_at = $1 WHERE id = $2", [Date.now(), Number(id)]);
+  const n = await run(
+    "UPDATE clinic_appointments SET reminded_at = $1 WHERE id = $2 AND reminded_at = 0",
+    [Date.now(), Number(id)]);
+  return n > 0;
 }
 
 module.exports = {

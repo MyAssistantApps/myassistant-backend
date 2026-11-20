@@ -94,6 +94,12 @@ async function start({ userId }) {
     await new Promise((r) => setTimeout(r, 3000 - since));
   }
   lastStartByUser.set(key, Date.now());
+  // Only the last 3 s matter; without pruning this kept one entry per
+  // user who ever opened the avatar, for the life of the process.
+  if (lastStartByUser.size > 1000) {
+    const cutoff = Date.now() - 60_000;
+    for (const [k, t] of lastStartByUser) if (t < cutoff) lastStartByUser.delete(k);
+  }
 
   const room = `heygen-${userId || "anon"}-${crypto.randomBytes(6).toString("hex")}`;
   const conn = new heygen.HeyGenConnection();

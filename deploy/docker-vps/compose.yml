@@ -1,5 +1,13 @@
+# Every request writes a JSON log line; Docker's default json-file driver
+# never rotates, so the VPS disk would eventually fill and take Postgres
+# down with it. 5 x 50 MB per container.
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "50m", max-file: "5" }
+
 services:
   backend:
+    logging: *logging
     build: ./src-repo
     env_file: .env
     environment:
@@ -7,10 +15,13 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
     restart: unless-stopped
+    # Room for the shutdown hook (avatar rooms, recordings, pool) before SIGKILL.
+    stop_grace_period: 20s
     volumes:
       - ./data:/app/data
       - ./firebase-adminsdk.json:/app/firebase-adminsdk.json:ro
   postgres:
+    logging: *logging
     image: postgres:16-alpine
     env_file: pg.env
     environment: { POSTGRES_USER: myassistant, POSTGRES_DB: myassistant }
@@ -21,6 +32,7 @@ services:
       retries: 20
     restart: unless-stopped
   caddy:
+    logging: *logging
     image: caddy:2-alpine
     ports: [ "80:80", "443:443" ]
     volumes:

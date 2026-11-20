@@ -56,6 +56,11 @@ function router() {
   });
 
   r.delete("/session/:room", async (req, res) => {
+    // Only the session's own user may end it (another user's paid room
+    // was one guessed name away). Unknown rooms are a quiet no-op.
+    const rec = session.sessions.get(req.params.room);
+    const me = String(req.user?.sub ?? req.user?.uid ?? "");
+    if (rec && rec.userId !== me) return res.status(404).json({ error: "not found" });
     await session.stop(req.params.room, "app requested teardown");
     res.json({ ok: true });
   });

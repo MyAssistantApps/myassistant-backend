@@ -19,10 +19,24 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
+// Bounded waits. Without connectionTimeoutMillis a request that finds the
+// pool exhausted (a slow query storm, a stuck transaction) queues forever
+// and the phone just spins; with it, it fails in seconds and the error
+// handler answers. idle_in_transaction_session_timeout makes Postgres end
+// a session that opened a transaction and then stalled (a bug that forgot
+// COMMIT, a hung await between statements), releasing its row locks
+// instead of blocking every writer behind it. statement_timeout is opt-in
+// (PG_STATEMENT_TIMEOUT_MS): boot migrations and embedding backfills may
+// legitimately run long.
+const stmtTimeout = Number(process.env.PG_STATEMENT_TIMEOUT_MS) || 0;
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: Number(process.env.PG_POOL_SIZE || 10),
   idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS) || 10_000,
+  idle_in_transaction_session_timeout: Number(process.env.PG_IDLE_TX_TIMEOUT_MS) || 60_000,
+  ...(stmtTimeout > 0 ? { statement_timeout: stmtTimeout } : {}),
+  application_name: "myassistant-backend",
 });
 
 pool.on("error", (e) => console.error("pg pool error:", e.message));
@@ -144,6 +158,11 @@ async function init() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS geo_label TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS geo_at BIGINT NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS idx_users_nearby ON users (profession_shared, geo_lat, geo_lng);
+    -- Social sign-in looks users up by (provider, provider_sub) on every
+    -- Google/Apple login (findByProvider); this was a full-table scan.
+    -- Not UNIQUE: existing data may already hold a duplicate, and a unique
+    -- index that fails to build would stop the server booting.
+    CREATE INDEX IF NOT EXISTS idx_users_provider_sub ON users (provider_sub) WHERE provider_sub IS NOT NULL;
 
     -- Partial: only real numbers compete for uniqueness, so any number of
     -- accounts may sit at NULL while none may share a number.
@@ -560,7 +579,7 @@ async function setBirthday(userId, birthday) {
 /** Find-or-create for social sign-in. Links by provider sub first, then email.
  *  Returns { user, created } — `created` marks a brand-new account so the
  *  app can run the sign-up interview exactly once. */
-async function upsertSocialUser({ provider, sub, email, emailVerified = false, name }) {
+async function upsertSocialUser({ provider, sub, email, emailVerified = false, name }, _retried = false) {
   let user = await findByProvider(provider, sub);
   if (user) {
     if (name && !user.name) {
@@ -599,10 +618,20 @@ async function upsertSocialUser({ provider, sub, email, emailVerified = false, n
       return { user: await findById(existing.id), created: false };
     }
   }
-  return {
-    user: await createUser({ email: verifiedEmail, name, provider, providerSub: sub }),
-    created: true,
-  };
+  try {
+    return {
+      user: await createUser({ email: verifiedEmail, name, provider, providerSub: sub }),
+      created: true,
+    };
+  } catch (e) {
+    // Two first sign-ins at once (the app retrying a slow request): the
+    // loser hits users.email UNIQUE. The winner's row is the account —
+    // answer with it instead of a 500.
+    if (e && e.code === "23505" && !_retried) {
+      return upsertSocialUser({ provider, sub, email, emailVerified, name }, true);
+    }
+    throw e;
+  }
 }
 
 /** Shape sent to clients — never includes password_hash. */

@@ -348,8 +348,10 @@ async function prepare() {
 let timer = null;
 function start() {
   if (timer || !on() || process.env.NODE_ENV === "test") return;
-  setTimeout(() => prepare().catch(() => null), 60_000).unref();
-  timer = setInterval(() => prepare().catch(() => null), 30 * 60_000);
+  // One replica generates (infra/leader.js); the rest find it made.
+  const once = () => require("../infra/leader").exclusive("quotecards.prepare", prepare).catch(() => null);
+  setTimeout(once, 60_000).unref();
+  timer = setInterval(once, 30 * 60_000);
   timer.unref();
 }
 

@@ -64,6 +64,7 @@ async function createSession({ faceId } = {}) {
   const mintToken = (durationS) =>
     fetch(`${API}/v1/sessions/token`, {
       method: "POST",
+      signal: AbortSignal.timeout(15000), // a stalled HeyGen must not hang the request
       headers: {
         "X-API-KEY": process.env.HEYGEN_API_KEY,
         "content-type": "application/json",
@@ -110,6 +111,7 @@ async function createSession({ faceId } = {}) {
 
   const startRes = await fetch(`${API}/v1/sessions/start`, {
     method: "POST",
+    signal: AbortSignal.timeout(20000),
     headers: {
       authorization: `Bearer ${tok.session_token}`,
       "content-type": "application/json",
@@ -272,6 +274,7 @@ class HeyGenConnection {
       if (this._session?.sessionToken) {
         await fetch(`${API}/v1/sessions/stop`, {
           method: "POST",
+          signal: AbortSignal.timeout(5000), // shutdown waits on this
           headers: {
             authorization: `Bearer ${this._session.sessionToken}`,
             "content-type": "application/json",

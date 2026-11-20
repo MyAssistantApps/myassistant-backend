@@ -565,6 +565,20 @@ async function getRequest(userId, id) {
   return r ? requestShape(r) : null;
 }
 
+/**
+ * Moves a request out of 'new' atomically. Null when it was not new (a
+ * double tap, a retry, the other device) — the caller must not act then.
+ */
+async function claimRequest(userId, id, status) {
+  await migrate();
+  const r = await one(
+    `UPDATE listing_requests SET status = $3, updated_at = $4
+     WHERE user_id = $1 AND id = $2 AND status = 'new' RETURNING *`,
+    [Number(userId), Number(id), status, Date.now()]
+  );
+  return r ? requestShape(r) : null;
+}
+
 async function setRequestStatus(userId, id, status, appointmentId = null) {
   await migrate();
   const r = await one(
@@ -662,6 +676,6 @@ module.exports = {
   listingShape, getListing, saveListing, setPublished, unpublishIfNotPro,
   setPhoto, deletePhoto, getPhoto,
   listPosts, createPost, deletePost,
-  createRequest, listRequests, getRequest, setRequestStatus, countNewRequests,
+  createRequest, listRequests, getRequest, claimRequest, setRequestStatus, countNewRequests,
   getPublishedBySlug, bumpViews, listPublishedForSitemap, searchNear, activePostsFor,
 };

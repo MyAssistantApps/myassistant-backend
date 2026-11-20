@@ -172,6 +172,20 @@ app.use(rateLimit({
 app.use("/ondc", rateLimit({ windowMs: 60_000, max: 1200, standardHeaders: true }));
 
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
+// READINESS: /health stays a pure liveness check (the process answers);
+// /health/ready also proves the database answers within 2 s, so a deploy
+// gate or load balancer can tell "up" from "up but cannot serve".
+app.get("/health/ready", async (_req, res) => {
+  try {
+    await Promise.race([
+      require("./db").one("SELECT 1 AS ok"),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("db timeout")), 2000).unref()),
+    ]);
+    res.json({ ok: true, db: true, ts: Date.now() });
+  } catch (_) {
+    res.status(503).json({ ok: false, db: false, ts: Date.now() });
+  }
+});
 // ONDC (2026-11-04): the network's callbacks (public, signed) and the
 // domain verification page ONDC fetches from our root.
 {
@@ -797,6 +811,10 @@ require("./db")
         );
       }
     });
+    // Caddy keeps upstream connections open longer than Node's 5 s
+    // default; a request on a socket Node had just closed came back 502.
+    server.keepAliveTimeout = 65_000;
+    server.headersTimeout = 66_000;
     // The /live/ws upgrade an old build still tries answers 426.
     require("./ai/gone").attachUpgrade(server);
 
@@ -851,7 +869,13 @@ require("./db")
       process.on(sig, async () => {
         if (shuttingDown) return;
         shuttingDown = true;
-        try { await avatarSessions.stopAll(); } catch (_) {}
+        // Stop taking background work first: no new job claimed, no sweep
+        // started, while the rest winds down.
+        try { require("./infra/jobs").stop(); } catch (_) {}
+        try { require("./proactive/scheduler").stop(); } catch (_) {}
+        try {
+          await Promise.race([avatarSessions.stopAll(), new Promise((r) => setTimeout(r, 5000).unref?.())]);
+        } catch (_) {}
         // server.close() does not close WebSockets, so a live call's
         // recording would otherwise be abandoned as raw PCM on every
         // deploy. Bounded, because the exit timer below is not.
@@ -864,7 +888,14 @@ require("./db")
             new Promise((r) => setTimeout(r, 4000).unref?.()),
           ]);
         } catch (_) {}
-        server.close(() => process.exit(0));
+        server.close(async () => {
+          // Return the pool's connections cleanly rather than cutting them.
+          await Promise.race([
+            require("./db").close().catch(() => {}),
+            new Promise((r) => setTimeout(r, 2000).unref?.()),
+          ]);
+          process.exit(0);
+        });
         // Don't let a hung socket hold the paid room open indefinitely.
         setTimeout(() => process.exit(0), 5000).unref();
       });
