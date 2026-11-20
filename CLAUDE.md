@@ -136,7 +136,7 @@ not install over existing ones.
 - **AI**: text goes through the OpenAI router `src/services/ai/router.js`
   (`generateReply(messages, {system, model, json, schema})`); voice is OpenAI
   Realtime; outbound calls are Bolna (`src/agents/agentCall.js`); inbound
-  calls are Plivo (`src/inbound/receptionist.js`). Do not add other AI
+  calls are Bolna too (`src/agents/inboundCalls.js`). Do not add other AI
   SDKs to the app — named Claude models are for development only.
 - **Voice tools** live in `src/tools/builtins.js` (`registry.register`).
 - The app sends its location as `X-Geo-Lat` / `X-Geo-Lng` and timezone as

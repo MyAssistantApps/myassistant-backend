@@ -171,6 +171,18 @@ const LEGACY_TABLES = {
   did_briefings: `user_id INTEGER NOT NULL, day TEXT NOT NULL, talk_id TEXT,
     status TEXT NOT NULL DEFAULT 'creating', result_url TEXT, script TEXT,
     created_at BIGINT NOT NULL, PRIMARY KEY (user_id, day)`,
+  // The Plivo receptionist's tables (removed 2026-11-20).
+  inbound_numbers: `phone TEXT PRIMARY KEY, user_id INTEGER NOT NULL, created_at BIGINT NOT NULL`,
+  inbound_settings: `user_id INTEGER PRIMARY KEY, enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    mode TEXT NOT NULL DEFAULT 'screen_unknown', forward_to TEXT, vip TEXT NOT NULL DEFAULT '',
+    availability TEXT NOT NULL DEFAULT '', may_book BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at BIGINT NOT NULL`,
+  inbound_calls: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL, call_id TEXT NOT NULL,
+    from_number TEXT NOT NULL, caller_name TEXT, known BOOLEAN NOT NULL DEFAULT FALSE,
+    outcome TEXT NOT NULL DEFAULT 'answered', summary TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL DEFAULT '', urgency TEXT NOT NULL DEFAULT 'normal',
+    transcript TEXT NOT NULL DEFAULT '', duration_s INTEGER NOT NULL DEFAULT 0,
+    seen BOOLEAN NOT NULL DEFAULT FALSE, created_at BIGINT NOT NULL`,
 };
 
 /** Creates the legacy tables this database lacks; returns those it made. */

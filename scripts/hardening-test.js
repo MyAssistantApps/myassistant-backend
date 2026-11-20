@@ -319,9 +319,8 @@ function spendDb({ global = 0, user = 0, sessions = 0, fail = false } = {}) {
     assert.match(await extract.extractText(okBuf, extract.PPTX, "x.pptx"), /Quarterly results/);
   });
 
-  await atest("Plivo per-call tokens and webhook secrets are masked in access logs", async () => {
+  await atest("webhook secrets are masked in access logs", async () => {
     const { redactPath } = require("../src/infra/observability");
-    assert.strictEqual(redactPath("/inbound/plivo/42/0123456789abcdef/gather"), "/inbound/plivo/42/:secret/gather");
     assert.ok(!/0123456789abcdef0123456789abcdef/.test(redactPath("/agent-call/bolna/0123456789abcdef0123456789abcdef/x")));
   });
 

@@ -115,8 +115,8 @@ async function send(fcmToken, title, body, data) {
 }
 
 /**
- * Boolean wrapper kept for existing callers (scheduler, receptionist,
- * payments, fares, builtins): true only when FCM accepted the message.
+ * Boolean wrapper kept for existing callers (scheduler, payments,
+ * fares, builtins): true only when FCM accepted the message.
  * Stale-token pruning happens inside send() either way.
  */
 async function sendNotification(fcmToken, title, body, data) {

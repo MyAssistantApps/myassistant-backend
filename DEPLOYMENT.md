@@ -56,7 +56,7 @@ kubectl -n myassistant get certificate    # READY=True within ~2 min
 ```
 
 Also update `PUBLIC_BASE_URL` in the ConfigMap to the real https URL
-(OAuth callbacks and Plivo webhooks depend on it), then restart:
+(OAuth callbacks and Bolna webhooks depend on it), then restart:
 `kubectl -n myassistant rollout restart deploy/myassistant-backend`.
 
 ## 4. Autoscaling — not yet: run ONE replica
@@ -158,35 +158,27 @@ Check these secrets before the deploy that ships Live voice and Poster Studio
 - The image finish (exact crop, sharpen, strip metadata) uses ffmpeg, which the
   Docker image has; local test runs without ffmpeg skip those checks.
 
-Apply with the same `kubectl patch secret` + `rollout restart` as the Plivo
-steps below.
+Apply with the same `kubectl patch secret` + `rollout restart` as the
+agent-calling steps below.
 
-## Plivo agent calling ("call X and tell them Y" — Hari speaks on the call)
+## Agent calling ("call X and tell them Y" — Hari speaks on the call)
 
-Plivo is the ONLY telephony provider. Exotel was removed on 2026-09-13:
-its balance was exhausted, and its dashboard flows cannot be driven by
-response XML, so there was never a usable two-way path. Retell remains in
-the tree as an inert fallback but a configured Plivo always wins — Retell
-is a hosted agent, and the point of Plivo is a number bridged straight to
-our own WebSocket, so the call runs on our model with the user's memory.
+Bolna is the only telephony provider (`src/agents/agentCall.js`); it
+answers inbound calls too (`src/agents/inboundCalls.js`). Calling stays
+hidden — the app falls back to a direct dial — until all three keys and
+`PUBLIC_BASE_URL` are set.
 
-1. Create a Plivo account and finish KYC. **Indian numbers can only be
-   rented by India-registered businesses** (Certificate of Incorporation +
-   GST), so this is a company action, not a developer one.
-2. Rent an Indian number. Published rates at the time of writing:
-   Rs 200/month for the number, Rs 0.38/min domestic — confirm current
-   pricing on their console rather than trusting this line.
-3. Set the credentials (never commit them):
+1. Set the credentials (never commit them):
 
    ```
    kubectl -n myassistant patch secret myassistant-secrets --type=merge \
-     --patch-file /root/plivo.json    # {"stringData":{"PLIVO_AUTH_ID":"…"}}
+     --patch-file /root/bolna.json    # {"stringData":{"BOLNA_API_KEY":"…"}}
    kubectl -n myassistant rollout restart deploy/myassistant-backend
    ```
 
-   `PLIVO_AUTH_ID, PLIVO_AUTH_TOKEN, PLIVO_FROM_NUMBER`
+   `BOLNA_API_KEY, BOLNA_FROM_NUMBER, BOLNA_AGENT_ID`
 
-4. Verify: the admin Debug page reports the active provider, and
+2. Verify: the admin Debug page reports the active provider, and
    `GET /agent-call/:id` returns the call record. `provider()` returns
-   "plivo" as soon as all three are set — no code change or redeploy of
+   "bolna" as soon as all three are set — no code change or redeploy of
    the image is needed, only the rollout above.

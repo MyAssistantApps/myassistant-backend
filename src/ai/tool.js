@@ -229,7 +229,6 @@ async function runTool(uid, body) {
   }
 
   if (name === "stay_silent" && res.ok !== false) t.silent = true;
-  if (res.ok !== false && res.deviceAction) afterDeviceAction(uid, s, res.deviceAction);
 
   const result = fixedLine ? fixedReply(res)
     : name === "stay_silent" && res.ok !== false
@@ -245,59 +244,6 @@ async function runTool(uid, body) {
       ...(res.ok === false ? { error: String(res.error || (res.needsArgs ? "missing arguments" : "failed")) } : {}),
     },
   };
-}
-
-/**
- * What the server still has to do after the phone is handed an action.
- *
- * A business booking or a meeting negotiation is a call the SERVER places
- * and follows: the booking is made from what was agreed, then the owner is
- * told the real outcome (a push; the live socket used to say it aloud).
- * Interpreter mode changes what the model is told for the rest of the
- * session.
- */
-function afterDeviceAction(uid, s, a) {
-  if (a.type === "interpreter_mode") {
-    s.interpreter = a.active === true && a.instructions ? String(a.instructions).slice(0, 2000) : null;
-    return;
-  }
-  if (a.type === "scheduling_call") {
-    (async () => {
-      const out = await require("../scheduling/negotiator").awaitAndBook({
-        userId: uid,
-        taskId: a.task_id,
-        callId: a.call_id,
-        contactName: a.person,
-        purpose: a.purpose,
-        slots: a.slots || [],
-        tzOffsetMin: require("../services/tz").offsetOr(a.tz),
-      });
-      await tell(uid, `Call to ${a.person || "them"} Completed`, out && out.spoken, "call_outcome");
-    })().catch((e) => console.error("ai: scheduling call follow failed:", e.message || e));
-    return;
-  }
-  if (a.type === "fulfillment_call") {
-    (async () => {
-      const outcome = await require("../fulfillment/service").awaitCallOutcome(a.task_id, a.call_id);
-      const said = outcome.result ||
-        (outcome.state === "no_answer"
-          ? `${a.venue} did not answer, so no booking has been made.`
-          : `The call to ${a.venue} could not be connected, so no booking has been made.`);
-      await tell(uid, `Call to ${a.venue || "the business"} Completed`, said, "call_outcome");
-    })().catch((e) => console.error("ai: fulfillment call follow failed:", e.message || e));
-  }
-}
-
-async function tell(uid, title, body, kind) {
-  if (!body) return;
-  try {
-    const u = await require("../db").one(`SELECT fcm_token FROM users WHERE id=$1`, [uid]);
-    if (u && u.fcm_token) {
-      await require("../services/push").sendNotification(u.fcm_token, title, String(body).slice(0, 300), { kind });
-    }
-  } catch (e) {
-    console.warn(`ai: ${kind} push failed:`, e.message);
-  }
 }
 
 module.exports = { runTool, modelResult, fixedReply };

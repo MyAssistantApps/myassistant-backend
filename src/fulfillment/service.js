@@ -1,12 +1,7 @@
 /**
  * FULFILLMENT SERVICE — the part that actually gets things done.
  *
- * Three execution paths, chosen by what the world genuinely allows:
- *
- *   call     Hari phones the business and negotiates. Real autonomy, and
- *            the only path that can end in a genuine 'confirmed' — because
- *            a human on the other end said yes. Used for appointments,
- *            table reservations and direct restaurant orders.
+ * Two execution paths, chosen by what the world genuinely allows:
  *
  *   handoff  Hari resolves the exact target and deep-links the provider
  *            app; the user pays. Ends at 'handed_off', never 'confirmed'
@@ -18,11 +13,9 @@
  *            mocked one is not.
  *
  * The rule every function here obeys: the ledger and the spoken sentence
- * must describe what REALLY happened. A call that nobody answered is a
- * call nobody answered.
+ * must describe what REALLY happened.
  */
 const places = require("../services/tools/places");
-const agentCall = require("../agents/agentCall");
 const store = require("./store");
 const deeplinks = require("./deeplinks");
 
@@ -122,126 +115,6 @@ function nameMatches(query, name) {
 }
 
 /* ------------------------------------------------------------------ *
- * PATH: CALL — Hari rings the business herself
- * ------------------------------------------------------------------ */
-
-/** Phrase the errand as a task the call-script writer can speak naturally. */
-function callTaskFor({ kind, venue, when, partySize, items, purpose }) {
-  const bits = [];
-  if (kind === "table") {
-    bits.push(`ask if they can hold a table for ${partySize || 2}`);
-    if (when) bits.push(`at ${when}`);
-  } else if (kind === "appointment") {
-    bits.push(`ask for an appointment${purpose ? ` for ${purpose}` : ""}`);
-    if (when) bits.push(`at ${when}`);
-  } else if (kind === "food") {
-    bits.push(`ask if they can take an order for ${items || "delivery"}`);
-    if (when) bits.push(`for ${when}`);
-  } else {
-    bits.push(purpose || "ask about availability");
-    if (when) bits.push(`at ${when}`);
-  }
-  return `Call ${venue} and ${bits.join(" ")}, then tell me exactly what they said.`;
-}
-
-/**
- * Starts a real phone call to a business and opens a ledger row for it.
- *
- * Throws nothing: returns a discriminated result so the tool layer can
- * speak the truth in every branch.
- *   { ok:true, task, callId }
- *   { ok:false, reason:"telephony" | "no_phone" | "quota" | "failed", … }
- */
-async function startCallBooking({
-  userId, userName, kind, venue, phone, when, whenMs, partySize, items, purpose, lang,
-}) {
-  if (!agentCall.enabled()) return { ok: false, reason: "telephony" };
-  if (!phone) return { ok: false, reason: "no_phone" };
-
-  const task = callTaskFor({ kind, venue, when, partySize, items, purpose });
-
-  // Ledger FIRST, so a crash mid-call still leaves a traceable errand.
-  const row = await store.create(userId, {
-    kind,
-    provider: "phone",
-    path: "call",
-    title: `${labelForKind(kind)} at ${venue}`,
-    venue,
-    phone,
-    when_at: whenMs || null,
-    party_size: partySize || null,
-    details: { items: items || null, purpose: purpose || null, when: when || null },
-    status: "calling",
-  });
-
-  try {
-    const { id } = await agentCall.start({
-      userId,
-      userName,
-      toNumber: phone,
-      contactName: venue,
-      task,
-      lang: lang || null,
-    });
-    await store.update(row.id, { call_id: id });
-    return { ok: true, task: { ...row, call_id: id }, callId: id };
-  } catch (e) {
-    const reason = e?.code === "quota" ? "quota" : "failed";
-    await store.update(row.id, {
-      status: "failed",
-      outcome:
-        reason === "quota"
-          ? "Daily limit for calls placed on your behalf was reached."
-          : `Could not start the call: ${String(e?.message || e).slice(0, 120)}`,
-    });
-    return { ok: false, reason, taskId: row.id };
-  }
-}
-
-/**
- * Waits for a call to reach a terminal state and writes the TRUE outcome
- * to the ledger.
- *
- * `onStatus` is called with each state change so the SSE layer can keep the
- * user's screen honest while it rings. `isCancelled` lets a user hang up
- * the errand.
- */
-async function awaitCallOutcome(taskId, callId, { onStatus, isCancelled, timeoutMs = 180000 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  let last = null;
-
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 3000));
-    if (isCancelled && isCancelled()) {
-      await store.update(taskId, { status: "cancelled", outcome: "You cancelled this while it was ringing." });
-      return { state: "cancelled", result: null };
-    }
-    const st = agentCall.status(callId);
-    if (!st) break; // record aged out of the in-memory store
-    if (st.state !== last) {
-      last = st.state;
-      if (onStatus) onStatus(st.state);
-    }
-    if (st.state === "completed" || st.state === "no_answer" || st.state === "failed") {
-      // 'completed' means the CALL completed, not that the booking was
-      // agreed — the business's actual words are the outcome, and the
-      // status reflects that distinction.
-      await store.update(taskId, {
-        status: st.state === "completed" ? "confirmed" : "failed",
-        outcome: st.result || null,
-      });
-      return st;
-    }
-  }
-
-  await store.update(taskId, {
-    status: "failed",
-    outcome: "The call didn't finish in time, so I can't tell you what they said.",
-  });
-  return { state: "timeout", result: null };
-}
-
-/* ------------------------------------------------------------------ *
  * PATH: HANDOFF — resolve the target, then open the provider app
  * ------------------------------------------------------------------ */
 
@@ -273,21 +146,10 @@ async function handoff({ userId, kind, provider, link, title, venue, whenMs, det
   };
 }
 
-function labelForKind(kind) {
-  return (
-    { food: "Order", ride: "Ride", movie: "Tickets", appointment: "Appointment", table: "Table" }[kind] ||
-    "Task"
-  );
-}
-
 module.exports = {
   PROVIDER_ADAPTERS,
   adapterFor,
   resolveBusiness,
   nameMatches,
-  startCallBooking,
-  awaitCallOutcome,
   handoff,
-  callTaskFor,
-  labelForKind,
 };

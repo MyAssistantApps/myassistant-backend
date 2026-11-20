@@ -1,19 +1,18 @@
 /**
  * PROFESSIONAL FEATURE TESTS — `npm run test:professional`.
  *
- * Covers the four features built for busy professionals: inbound call
- * screening, commitment tracking, proactive nudging, and meeting capture.
+ * Covers the features built for busy professionals: commitment tracking,
+ * proactive nudging, and meeting capture.
  *
- * No database and no network. What is tested is the DECISION LOGIC — who
- * gets forwarded, what counts as a promise, when it is too late at night to
- * interrupt someone — because those are the judgements that misfire in ways
+ * No database and no network. What is tested is the DECISION LOGIC — what
+ * counts as a promise, when it is too late at night to interrupt someone —
+ * because those are the judgements that misfire in ways
  * a user notices immediately.
  */
 process.env.DATABASE_URL =
   process.env.DATABASE_URL || "postgres://test:test@localhost:5432/test";
 
 const assert = require("assert");
-const receptionist = require("../src/inbound/receptionist");
 const commitments = require("../src/commitments/service");
 const scheduler = require("../src/proactive/scheduler");
 const meetings = require("../src/meetings/service");
@@ -41,82 +40,6 @@ async function atest(name, fn) {
 }
 
 /* ------------------------------------------------------------------ */
-
-console.log("\ninbound call screening");
-
-const base = (over = {}) => ({
-  callerName: null,
-  known: false,
-  ...over,
-  // Merged LAST: spreading `over` afterwards would replace this whole
-  // object with the partial one the case supplied, silently dropping
-  // forward_to and making every forwarding assertion pass for the wrong
-  // reason.
-  settings: {
-    mode: "screen_unknown",
-    forward_to: "+919999999999",
-    vip: "",
-    ...(over.settings || {}),
-  },
-});
-
-test("a saved contact is put straight through", () => {
-  assert.strictEqual(
-    receptionist.shouldForward(base({ known: true, callerName: "Ravi" })),
-    true
-  );
-});
-
-test("an unknown caller is screened, not forwarded", () => {
-  assert.strictEqual(receptionist.shouldForward(base({ known: false })), false);
-});
-
-test("screen_all screens even a known contact", () => {
-  assert.strictEqual(
-    receptionist.shouldForward(
-      base({ known: true, callerName: "Ravi", settings: { mode: "screen_all" } })
-    ),
-    false
-  );
-});
-
-test("a named VIP is forwarded even under screen_all", () => {
-  assert.strictEqual(
-    receptionist.shouldForward(
-      base({
-        known: true,
-        callerName: "Priya Sharma",
-        settings: { mode: "screen_all", vip: "priya, dad" },
-      })
-    ),
-    true
-  );
-});
-
-test("take_messages never forwards anyone", () => {
-  assert.strictEqual(
-    receptionist.shouldForward(
-      base({ known: true, callerName: "Priya", settings: { mode: "take_messages", vip: "priya" } })
-    ),
-    false
-  );
-});
-
-test("with no forwarding number configured, nobody is forwarded", () => {
-  // Otherwise Plivo would <Dial> an empty number and drop the caller.
-  assert.strictEqual(
-    receptionist.shouldForward(
-      base({ known: true, callerName: "Ravi", settings: { forward_to: null } })
-    ),
-    false
-  );
-});
-
-test("Indian numbers normalise to E.164", () => {
-  assert.strictEqual(receptionist.normalize("9876543210"), "+919876543210");
-  assert.strictEqual(receptionist.normalize("+91 98765 43210"), "+919876543210");
-  assert.strictEqual(receptionist.normalize(""), null);
-});
 
 console.log("\ncommitment capture");
 
@@ -208,7 +131,6 @@ console.log("\nmeeting capture");
     const registry = require("../src/tools/registry");
     require("../src/tools/builtins").registerBuiltins();
     for (const n of [
-      "check_my_calls",        // "did anyone call?"
       "list_my_commitments",   // "what did I promise?"
       "complete_commitment",   // "I sent it"
       "recall_meeting",        // "what did we decide?"

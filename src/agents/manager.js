@@ -62,8 +62,7 @@ const SPECIALISTS = {
     cues: /\b(call|ring|dial|phone (him|her|them)|message|msg|text (him|her|them)|sms|whatsapp|e-?mail|mail|inbox|reply|send .+ to|tell \w+|let \w+ know|missed calls?|who called)\b/i,
     tools: ["place_phone_call", "phone_calls", "send_agent_message", "send_whatsapp_message",
       "email_read", "email_reply", "email_send", "email_recipients", "send_document",
-      "send_video_note", "check_my_calls", "call_recall", "book_by_calling_business",
-      "arrange_meeting_with", "lookup_person", "show_address"],
+      "send_video_note", "call_recall", "lookup_person", "show_address"],
   },
   planner: {
     scope: "reminders, calendar, alarms, timers, plans, habits",
@@ -124,7 +123,7 @@ const SPECIALISTS = {
     tools: ["phone_control", "do_in_app", "open_app", "open_named_app", "open_app_screen", "open_webpage",
       "uninstall_app", "update_app", "set_app_theme", "get_app_usage", "enable_usage_tracking",
       "analyze_camera", "look_at_screenshot", "capture_document", "scan_business_card",
-      "translator_mode", "start_interpreter_mode", "stop_interpreter_mode", "run_shortcut",
+      "translator_mode", "run_shortcut",
       "continue_shortcut", "list_shortcuts", "create_shortcut", "update_shortcut", "delete_shortcut"],
   },
   memory: {

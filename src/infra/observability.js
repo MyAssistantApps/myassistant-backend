@@ -105,8 +105,8 @@ function requestId() {
       logger.info("http", {
         rid: req.requestId,
         method: req.method,
-        // Webhook paths carry their secret (Bolna, the tool hook, Plivo's
-        // per-call tokens): logged as ":secret", never the value.
+        // Webhook paths carry their secret (Bolna, the tool hook): logged
+        // as ":secret", never the value.
         path: redactPath(req.path),
         status: res.statusCode,
         ms,
@@ -141,8 +141,6 @@ async function timed(name, fn, fields = {}) {
 function redactPath(p) {
   return String(p || "")
     .replace(/\/(webhook|tool|inbound|hook|cb|callback)\/[A-Za-z0-9_-]{16,}/gi, "/$1/:secret")
-    // Plivo's per-call token: /inbound/plivo/<call>/<token>/gather (2026-11-15).
-    .replace(/(\/plivo\/[^/]+\/)[A-Za-z0-9_-]{12,}(?=\/|$)/gi, "$1:secret")
     .replace(/\/[A-Fa-f0-9]{32,}(?=\/|$)/g, "/:secret");
 }
 

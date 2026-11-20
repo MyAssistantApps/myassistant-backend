@@ -3,15 +3,14 @@
  * -------------------------------------------------------------------------
  *   clinic_profiles      one row per doctor: clinic name, address, phone,
  *                        consultation fee, registration number,
- *                        qualifications, weekly timings, slot length, and
- *                        whether the phone receptionist may book.
+ *                        qualifications, weekly timings and slot length.
  *   clinic_appointments  the appointment book. Booked from the app, by
- *                        voice, or by the receptionist on a live call.
+ *                        voice, or from the public booking page.
  *
  * The slot engine (freeSlots) is a pure function: timings minus what is
- * already booked, in the DOCTOR's timezone. The receptionist offers only
- * slots it produced, and re-checks the slot is still free at the moment of
- * booking, so two callers can never be given the same 10:15.
+ * already booked, in the DOCTOR's timezone. A booking made with
+ * `requireFreeSlot` re-checks the slot is still free at the moment of
+ * booking, so two bookers can never be given the same 10:15.
  *
  * Self-migrating like practice/store.js — no db.js change needed.
  */
@@ -48,7 +47,6 @@ function migrate() {
         qualification      TEXT NOT NULL DEFAULT '',
         hours              TEXT NOT NULL DEFAULT '',
         slot_min           INTEGER NOT NULL DEFAULT 15,
-        receptionist_books INTEGER NOT NULL DEFAULT 0,
         updated_at         BIGINT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS clinic_appointments (
@@ -196,7 +194,6 @@ function profileShape(r, userId) {
     qualification: r?.qualification || "",
     hours: r ? parseHours(r.hours) : cleanHours(DEFAULT_HOURS),
     slotMin: Number(r?.slot_min || 15),
-    receptionistBooks: Number(r?.receptionist_books || 0) === 1,
     configured: Boolean(r),
   };
 }
@@ -223,18 +220,16 @@ async function saveProfile(userId, patch = {}) {
     hours: patch.hours !== undefined ? cleanHours(patch.hours) : cur.hours,
     slotMin: patch.slotMin !== undefined
       ? Math.max(5, Math.min(Math.round(Number(patch.slotMin) || 15), 120)) : cur.slotMin,
-    receptionistBooks: patch.receptionistBooks !== undefined ? patch.receptionistBooks === true : cur.receptionistBooks,
   };
   await run(
     `INSERT INTO clinic_profiles
-       (user_id, clinic_name, address, phone, fee, reg_no, qualification, hours, slot_min, receptionist_books, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       (user_id, clinic_name, address, phone, fee, reg_no, qualification, hours, slot_min, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      ON CONFLICT (user_id) DO UPDATE SET
        clinic_name=$2, address=$3, phone=$4, fee=$5, reg_no=$6, qualification=$7,
-       hours=$8, slot_min=$9, receptionist_books=$10, updated_at=$11`,
+       hours=$8, slot_min=$9, updated_at=$10`,
     [userId, next.clinicName, next.address, next.phone, next.fee, next.regNo,
-     next.qualification, JSON.stringify(next.hours), next.slotMin,
-     next.receptionistBooks ? 1 : 0, Date.now()]
+     next.qualification, JSON.stringify(next.hours), next.slotMin, Date.now()]
   );
   return getProfile(userId);
 }
@@ -297,9 +292,9 @@ class SlotTakenError extends Error {
 }
 
 /**
- * Books an appointment. With `requireFreeSlot` (the receptionist path) the
- * time must be one the slot engine would offer RIGHT NOW — re-checked here,
- * not trusted from the conversation.
+ * Books an appointment. With `requireFreeSlot` the time must be one the
+ * slot engine would offer RIGHT NOW — re-checked here, not trusted from
+ * the caller.
  */
 async function createAppointment(userId, a, { requireFreeSlot = false, tzOffsetMin = 330 } = {}) {
   await migrate();
@@ -309,7 +304,7 @@ async function createAppointment(userId, a, { requireFreeSlot = false, tzOffsetM
   if (!name) throw new Error("patient name required");
   const p = await getProfile(userId);
   // Bookings for one professional are serialised: the free-slot check and
-  // the insert used to be separate round trips, so two receptionist calls
+  // the insert used to be separate round trips, so two concurrent bookings
   // could both see 10:15 free and both be told they were booked. The lock
   // is per professional and held only until the insert commits.
   return tx(async (c) => {
@@ -331,7 +326,7 @@ async function insertAppointment(c, userId, a, p, starts, name) {
      VALUES ($1,$2,$3,$4,$5,$6,$7,'booked',$8,$9,$10,$10) RETURNING *`,
     [userId, a.clientId ? Number(a.clientId) : null, name, clean(a.patientPhone, 40), starts,
      Math.max(5, Math.min(Number(a.durationMin) || p.slotMin, 240)), clean(a.reason, 200),
-     ["app", "voice", "receptionist", "web"].includes(a.source) ? a.source : "app",
+     ["app", "voice", "web"].includes(a.source) ? a.source : "app",
      a.remindPatient === false ? 0 : 1, now]
   );
   return row;

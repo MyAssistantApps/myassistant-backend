@@ -114,6 +114,7 @@ const USER_TABLES = [
   ["user_instructions", "user_id"], // standing rules
   ["developer_feedback", "user_id"], // what the assistant reported for them
   ["automation_runs", "user_id"], // legacy (feature removed 2026-09-29); the table stays until the owner drops it
+  // Legacy (Plivo receptionist removed 2026-11-20); the tables stay until the owner drops them.
   ["inbound_calls", "user_id"],
   ["inbound_numbers", "user_id"],
   ["inbound_settings", "user_id"],

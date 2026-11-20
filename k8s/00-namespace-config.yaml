@@ -20,7 +20,7 @@ data:
   AI_PROVIDER_ORDER: "gemini,groq"
   GEMINI_MODEL: "gemini-2.0-flash"
   # PUBLIC_BASE_URL must match your Ingress host (used for OAuth callbacks
-  # and Plivo webhooks) — change this to your real domain.
+  # and Bolna webhooks) — change this to your real domain.
   PUBLIC_BASE_URL: "https://api.example.com"
 ---
 # SQLite database lives on this volume. ReadWriteOnce is fine because the

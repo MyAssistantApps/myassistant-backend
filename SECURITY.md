@@ -22,11 +22,11 @@ owner, not in a public issue — both repos are public.
 | Rate limits | per IP (global 240/min, `/auth` 20/15 min, ONDC 1200/min); per user on every paid route | `src/server.js` |
 | **Spend circuit-breaker** | Every server-side OpenAI call checks today's metered spend: **global $40/day, per user $3/day, 150 realtime sessions/user/day** (env-tunable); refuses with 402; admin alert at 50/80/100 % | `src/ops/budget.js` |
 | Error hygiene | Provider bodies, key fragments, SQL, stack frames, internal hosts and paths are withheld from clients and logged server-side | `src/infra/safeErrors.js` |
-| Webhooks | Razorpay HMAC over raw body; Bolna/Plivo secrets in constant time; ONDC signatures; "paid" payment status is final | `src/payments`, `src/routes/agentCall.js`, `src/inbound`, `src/ondc` |
+| Webhooks | Razorpay HMAC over raw body; Bolna secrets in constant time; ONDC signatures; "paid" payment status is final | `src/payments`, `src/routes/agentCall.js`, `src/ondc` |
 | SSRF | `safeFetch` pins resolved IPs (private, loopback, link-local, metadata, CGNAT blocked; redirects re-checked); now also on ONDC outbound | `src/services/safeFetch.js` |
 | Uploads | multer size limits; **zip-bomb guard** before Office parsing; ffmpeg limited to audio extensions + `-protocol_whitelist file`; stored documents served `nosniff`, non-passive types as attachments with a sandbox CSP | `src/docs/extract.js`, `src/meetings/routes.js`, `src/routes/docs.js` |
 | Metrics | `/metrics` token-gated (closed in production without a token); 404s no longer create label series (memory-DoS) | `src/server.js` |
-| Logs | webhook and Plivo per-call tokens masked in access logs | `src/infra/observability.js` |
+| Logs | webhook secrets masked in access logs | `src/infra/observability.js` |
 | Transport | Caddy: TLS + HSTS; plain HTTP now redirects (308) except `/health` | `deploy/docker-vps/Caddyfile` |
 | Host | backups written owner-only; `.env`/`pg.env` chmod 600 on every deploy | `deploy/docker-vps/deploy.sh` |
 | Container | non-root `node` user, `npm ci --omit=dev`, secrets mounted not baked; `.dockerignore` excludes keys and data | `Dockerfile`, `.dockerignore` |

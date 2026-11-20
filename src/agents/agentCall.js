@@ -14,7 +14,6 @@
  */
 
 const crypto = require("crypto");
-const { generateReply } = require("../services/ai/router");
 const { DEFAULT_TONE } = require("./callAgentConfig");
 
 function cfg() {
@@ -93,46 +92,6 @@ const ASK_RX =
 
 function detectMode(task) {
   return ASK_RX.test(String(task || "")) ? "ask" : "inform";
-}
-
-/** Preview-only: the opening line the agent would say (LLM round-trip —
- *  live calls never pay it; the hosted agent speaks from its own prompt). */
-async function buildScript({ userName, contactName, task, lang }) {
-  const mode = detectMode(task);
-  const who = userName ? userName : "the caller";
-  const sys =
-    "You write a SHORT phone script for an AI assistant calling someone ON " +
-    "BEHALF OF a user. You speak to the CONTACT, not the user. Warm, brief, " +
-    "natural. Identify yourself in one clause as calling on " +
-    `${who}'s behalf. ` +
-    (mode === "ask"
-      ? "ASK the contact the user's question. "
-      : "INFORM the contact; do not ask a question. ") +
-    "Reply with STRICT JSON only, no markdown: " +
-    '{"speech":"<the main thing you say>","closing":"<a short sign-off>"}. ' +
-    "Keep speech to 1-2 sentences. Use ONLY the language of code " +
-    `"${(lang || "en").slice(0, 2)}" (fallback to simple English). ` +
-    "Never invent details the user did not give.";
-  const user =
-    `User's name: ${who}. Contact's name: ${contactName}. ` +
-    `What the user asked me to do: "${task}".`;
-  try {
-    const { reply } = await generateReply([{ role: "user", content: user }], { system: sys });
-    const parsed = JSON.parse(stripFences(reply));
-    const speech = String(parsed.speech || "").trim();
-    if (speech) return { mode, speech };
-  } catch (_) {}
-  return {
-    mode,
-    speech:
-      mode === "ask"
-        ? `Hello, I'm calling on behalf of ${who}. ${task}`
-        : `Hello, I'm calling on behalf of ${who} with a message. ${task}`,
-  };
-}
-
-function stripFences(s) {
-  return String(s || "").replace(/```json/gi, "").replace(/```/g, "").trim();
 }
 
 // ---------------- BOLNA ----------------
@@ -953,11 +912,6 @@ async function closeStale({ olderThanMs = STALE_MS } = {}) {
 
 // ---------------- PUBLIC API ----------------
 
-async function preview({ userName, contactName, task, lang }) {
-  const script = await buildScript({ userName, contactName, task, lang });
-  return { opening: script.speech, allowed: true, reason: null, mode: script.mode };
-}
-
 /**
  * Place an agent call. Returns { id } (202). Throws { code:"unavailable" }
  * when telephony isn't configured, { code:"quota" } over the daily limit,
@@ -1071,7 +1025,7 @@ async function start({ userId, userName, toNumber, contactName, task, lang, self
 }
 
 /** Poll status. `answer` is the RAW transcript — callers that act on the
- *  reply (the meeting negotiator) need the words, not a summary. */
+ *  reply need the words, not a summary. */
 function status(id) {
   const rec = calls.get(id);
   if (!rec) return null;
@@ -1156,7 +1110,6 @@ module.exports = {
   provider,
   bolnaWebhook,
   stopBolna,
-  preview,
   start,
   status,
   get,

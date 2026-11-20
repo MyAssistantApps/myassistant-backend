@@ -91,8 +91,6 @@ function create(uid, { build = 0 } = {}) {
     // Unread agent messages this session is passing on (ids, and the turn
     // that carried them; marked read when that turn is recorded).
     relay: null,
-    // Interpreter mode, while on: the instructions the tool handed back.
-    interpreter: null,
     // The language question, asked once in a session's first turn.
     languageAsk: "",
     firstTurnDone: false,

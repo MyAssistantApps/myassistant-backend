@@ -73,7 +73,7 @@ const CARD_SHARE_OPEN = "The card is open to share — pick the person and press
 const FAMILIES = [
   {
     id: "call",
-    tools: ["place_phone_call", "book_by_calling_business", "arrange_meeting_with"],
+    tools: ["place_phone_call"],
     // "calling X", "I'll call", "connecting your call", "dialling"
     // "My calling service couldn't place it" names the SERVICE — it is
     // the honest line said when a call fails, and must not itself be

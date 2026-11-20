@@ -58,7 +58,7 @@ async function makeUser(db, name, extra = {}) {
     const free = await clinic.slotsFor(doc, day, { tzOffsetMin: tz });
     assert.ok(free.length, "default hours should offer a slot tomorrow");
     const startsAt = free[0];
-    const book = (n) => clinic.createAppointment(doc, { patientName: n, startsAt, source: "receptionist" },
+    const book = (n) => clinic.createAppointment(doc, { patientName: n, startsAt, source: "app" },
       { requireFreeSlot: true, tzOffsetMin: tz });
     const results = await Promise.allSettled([book("A"), book("B"), book("C")]);
     const ok = results.filter((r) => r.status === "fulfilled");

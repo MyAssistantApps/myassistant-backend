@@ -438,9 +438,6 @@ async function prepare(uid, body) {
       "If they say no, say it will not run. Never say it is done before the tool says so."
     );
   }
-  if (s.interpreter) {
-    notes.push(`[SYSTEM] ${s.interpreter}`);
-  }
   const attachments = (Array.isArray(body.attachments) ? body.attachments : []).slice(0, 10)
     .map((a) => `${String((a && a.kind) || "file").slice(0, 10)}` +
       `${a && a.mime ? ` (${String(a.mime).slice(0, 40)})` : ""}`);

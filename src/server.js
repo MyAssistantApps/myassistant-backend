@@ -122,7 +122,7 @@ app.use(
       ["^/shortcuts/\\d+.*", "/shortcuts/#id"],
       ["^/mailin/messages/\\d+.*", "/mailin/messages/#id"],
       ["^/p/[^/]+", "/p/#slug"],
-      ["^/(inbound/plivo|agent-call/bolna)/.*", "/$1/#hook"],
+      ["^/(agent-call/bolna)/.*", "/$1/#hook"],
     ],
   })
 );
@@ -271,16 +271,6 @@ app.use("/agent-call", appAuth, perUserLimit, agentCall.router);
 // (Hub → Your calling agent was removed on 2026-09-21 at his direction.
 // Every call now uses the one agent defined in agents/callAgentConfig.js,
 // so a change to how it speaks reaches every user at once.)
-
-// INBOUND CALLING — Hari answers the user's own number: screens callers,
-// forwards the ones who matter, takes a message from the rest.
-// Plivo's webhooks are PUBLIC (it cannot send our app key) and so must be
-// mounted before appAuth; the follow-up hooks carry a per-call token in the
-// path. Number assignment is an ADMIN action, guarded by ADMIN_KEY.
-const inbound = require("./inbound/routes");
-app.use("/inbound/plivo", inbound.webhooks);
-app.use("/inbound/admin", rateLimit({ windowMs: 600_000, max: 10, standardHeaders: true }), inbound.adminRouter);
-app.use("/inbound", appAuth, inbound.router);
 
 // Chat requires the app key so strangers can't burn your AI credits.
 // Order: authenticate → per-user throttle → plan allowance → handler.

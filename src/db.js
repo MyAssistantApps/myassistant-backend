@@ -489,10 +489,6 @@ async function init() {
   // not tenant-scoped — see knowledge/schema.js.
   await require("./knowledge/schema").migrate((sql) => pool.query(sql));
 
-  // Inbound calling: the numbers Hari answers, per-user screening rules,
-  // and the call log she files.
-  await require("./inbound/schema").migrate((sql) => pool.query(sql));
-
   // Commitments the user makes ("I'll send it by Friday"), tracked to done.
   await require("./commitments/service").migrate((sql) => pool.query(sql));
 
