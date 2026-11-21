@@ -54,9 +54,12 @@ async function makeUser(db, name, extra = {}) {
     const doc = await makeUser(db, "Dr Race");
     const tz = 330;
     // Tomorrow's first free slot in the doctor's default hours.
-    const day = clinic.localMidnight(Date.now() + 86400_000, tz);
-    const free = await clinic.slotsFor(doc, day, { tzOffsetMin: tz });
-    assert.ok(free.length, "default hours should offer a slot tomorrow");
+    // The next day the default hours are open (Sunday is closed).
+    let free = [];
+    for (let d = 1; d <= 7 && !free.length; d++) {
+      free = await clinic.slotsFor(doc, clinic.localMidnight(Date.now() + d * 86400_000, tz), { tzOffsetMin: tz });
+    }
+    assert.ok(free.length, "default hours should offer a slot this week");
     const startsAt = free[0];
     const book = (n) => clinic.createAppointment(doc, { patientName: n, startsAt, source: "app" },
       { requireFreeSlot: true, tzOffsetMin: tz });
