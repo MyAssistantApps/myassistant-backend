@@ -143,10 +143,10 @@ async function atest(name, fn) {
   console.log("pnv: the routes");
 
   await atest("GET /phone/methods says what the screen may offer", async () => {
-    assert.deepStrictEqual((await call(A.id, "GET", "/methods")).body, { sim: true, typed: false });
+    assert.deepStrictEqual((await call(A.id, "GET", "/methods")).body, { sim: true, call: false, typed: false });
     process.env.ALLOW_DEV_PHONE_VERIFY = "true";
     try {
-      assert.deepStrictEqual((await call(A.id, "GET", "/methods")).body, { sim: true, typed: true });
+      assert.deepStrictEqual((await call(A.id, "GET", "/methods")).body, { sim: true, call: false, typed: true });
     } finally {
       delete process.env.ALLOW_DEV_PHONE_VERIFY;
     }
