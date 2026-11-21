@@ -2,9 +2,8 @@
  * NEW FEATURES, 2026-09-23 — `npm run test:features`.
  *
  * Document expiry alerts, follow-ups after calls, pay by voice (UPI),
- * smart email replies, MCP reconnect after a restart, and the astrology
- * key out of the source. Gemini and mail are stubbed: nothing here pays
- * for a token or sends a real email.
+ * smart email replies and MCP reconnect after a restart. Gemini and mail
+ * are stubbed: nothing here pays for a token or sends a real email.
  */
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ||
@@ -446,12 +445,6 @@ const src = (f) => fs.readFileSync(__dirname + "/../src/" + f, "utf8");
       assert.deepStrictEqual(await mcp.ensureConnectedWithin(UID), []);
       assert.match(src("agents/runtime.js"), /ensureConnectedWithin\(ctx\.userId\)/);
       assert.match(src("ai/context.js"), /ensureConnectedWithin\(uid\)/);
-    });
-
-    await atest("no API key is committed in the astrology tool", () => {
-      const s = src("services/tools/astrology.js");
-      assert.doesNotMatch(s, /["'][A-Za-z0-9]{32,}["']/);
-      assert.match(s, /process\.env\.ASTROLOGY_API_KEY \|\| ""/);
     });
 
     console.log("\nvoice tools: what production turned away (2026-09-27)");

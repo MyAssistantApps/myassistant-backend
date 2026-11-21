@@ -178,7 +178,7 @@ adb reverse tcp:3998 tcp:3998
 
 - Before a public release, review production's `.env` with
   `npm run test:production` — it prints warnings for unsafe settings.
-- Missing on production: `SERPAPI_KEY` (web search / places),
+- Missing on production: `SERPAPI_KEY` (flight search and fare watch),
   `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET`
   (payment links).
 - `e2e-g5`'s forget_memory test is occasionally flaky; rerun before chasing it.

@@ -43,7 +43,6 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
 
 const configRoute = require("./routes/config");
 const chatRoute = require("./routes/chat");
-const regionRoute = require("./routes/region");
 const authRoute = require("./routes/auth");
 const db = require("./db");
 const { appAuth, appFnAuth } = require("./middleware/auth");
@@ -319,8 +318,6 @@ app.use("/finance", appAuth, require("./routes/finance").router);
 // TODAY BRIEF — one aggregate fetch for the home dashboard (agenda,
 // promises, unread agent messages, circle, weather, headlines).
 app.use("/brief", appAuth, require("./routes/brief"));
-// FLIGHTS PAGE (2026-11-04): the flight list the app draws.
-app.use("/travel", appAuth, require("./routes/travel"));
 // EVERYDAY SERVICES (2026-11-04): partner links with our affiliate tracking.
 app.use("/go", appAuth, require("./routes/go"));
 // PROFESSIONAL ASSISTANTS' "TODAY" (2026-11-03) — the Doctor's / Advocate's /
@@ -339,23 +336,8 @@ app.use("/email", appAuth, require("./routes/email"));
 const adminKeyLimit = rateLimit({ windowMs: 600_000, max: 10, standardHeaders: true });
 app.use("/admin", adminKeyLimit, require("./routes/admin"));
 
-// Live data for the Today screen (weather card, headlines, astrology).
+// Home's weather card and the Calendar extras.
 const wxTool = require("./services/tools/weather");
-const newsTool = require("./services/tools/news");
-const astroTool = require("./services/tools/astrology");
-app.get("/tools/weather", appAuth, async (req, res) => {
-  try {
-    const w = await wxTool.getWeather({
-      lat: parseFloat(req.query.lat),
-      lng: parseFloat(req.query.lng),
-      city: req.query.city,
-    });
-    if (!w) return res.status(400).json({ error: "lat/lng or city required" });
-    res.json(w);
-  } catch (e) {
-    res.status(502).json({ error: "weather unavailable" });
-  }
-});
 // Home's weather card (2026-09-30): now, 24 hours and the week, named by
 // the area the phone is in. Location from the query or the X-Geo headers
 // every app request carries; the name is looked up once a day per ~1 km
@@ -405,41 +387,6 @@ app.get("/tools/weather/forecast", appAuth, async (req, res) => {
 app.get("/tools/calendar/extras", appAuth, (req, res) =>
   require("./services/tools/calendarExtras").handler(req, res)
 );
-app.get("/tools/news", appAuth, async (req, res) => {
-  try {
-    res.json({
-      headlines: await newsTool.getHeadlines({
-        topic: req.query.topic,
-        max: Math.min(Number(req.query.max) || 6, 30),
-      }),
-    });
-  } catch (e) {
-    res.status(502).json({ error: "news unavailable" });
-  }
-});
-app.get("/tools/astrology", appAuth, async (req, res) => {
-  try {
-    const uid = Number(req.user?.sub);
-    let birthday = req.query.birthday;
-    let name = "Friend";
-    if (uid) {
-      const u = await db.findById(uid);
-      if (u) {
-        if (!birthday && u.birthday) birthday = u.birthday;
-        if (u.name) name = u.name;
-      }
-    }
-    const reading = await astroTool.getAstrologyReading({
-      birthday,
-      name,
-      lat: parseFloat(req.query.lat),
-      lng: parseFloat(req.query.lng),
-    });
-    res.json(reading);
-  } catch (e) {
-    res.status(502).json({ error: "astrology unavailable" });
-  }
-});
 
 // Group B+ — SAVED documents: hospital reports, receipts… Hari remembers
 // them and pulls them back up from a voice request (see routes/docs.js).
@@ -465,15 +412,10 @@ app.use("/studio", appAuth, perUserLimit, require("./routes/studio"));
 // for everyone. The pictures are public (Image.network sends no header).
 const quoteCards = require("./routes/quoteCards");
 app.use("/quote-cards/img", quoteCards.images);
-// Before the signed-in mount, which would otherwise answer it with 401.
-app.use("/quote-cards/public", posterLimit, quoteCards.publicRouter);
 app.use("/quote-cards", appAuth, posterLimit, quoteCards.router);
 // NOTIFICATIONS (2026-10-19): the phone asks what to do with each new
 // notification — reply, inform, remember or nothing (src/notify/triage.js).
 app.use("/notify", appAuth, perUserLimit, require("./routes/notify"));
-// BORN TODAY (2026-10-19) — Home's birthday card: well-known Indians born
-// on this date, from Wikidata, fetched once a day for everyone.
-app.use("/birthdays", appAuth, posterLimit, require("./routes/birthdays"));
 // SHORTCUTS — "office mode": one word, several things (routes/shortcuts.js).
 app.use("/shortcuts", appAuth, shortcutLimit, require("./routes/shortcuts"));
 // THE SHOPPING LIST and THE KITCHEN (2026-09-29) — one list for anything
@@ -522,9 +464,6 @@ app.use("/clinic", appAuth, require("./clinic/routes"));
 // admin panel. See routes/outcomes.js and outcomes/store.js.
 app.use("/outcomes", appAuth, require("./routes/outcomes"));
 
-// Group C — nearby places search (ratings, distance, call & directions).
-app.use("/places", appAuth, require("./routes/places"));
-
 // ---------------- STOCKS API ----------------
 app.use("/stocks", appAuth, require("./routes/stocks"));
 
@@ -549,9 +488,6 @@ app.use("/legal", require("./routes/legal"));
   app.use("/listing", appAuth, listings.proRouter);
   app.use("/listings", appAuth, listings.searchRouter);
 }
-
-// Regional language from the caller's IP (no app permissions needed)
-app.use("/region", regionRoute);
 
 // MCP servers are per-user configuration, so the route sits behind the
 // same auth as the rest of the API.

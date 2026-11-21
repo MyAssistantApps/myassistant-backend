@@ -88,26 +88,11 @@ async function atest(name, fn) {
     assert.strictEqual(flights.resolveAirport("somewhere"), null);
   });
 
-  test("the Amadeus host follows the environment", () => {
-    // Test and production are separate hosts AND separate credentials —
-    // pointing live keys at the sandbox returns unbookable inventory.
-    const saved = process.env.AMADEUS_ENV;
-    delete process.env.AMADEUS_ENV;
-    assert.ok(flights.amadeusHost().includes("test.api.amadeus.com"));
-    process.env.AMADEUS_ENV = "production";
-    assert.strictEqual(flights.amadeusHost(), "https://api.amadeus.com");
-    if (saved) process.env.AMADEUS_ENV = saved;
-    else delete process.env.AMADEUS_ENV;
-  });
-
   await atest("an unreadable date is questioned, not silently made tomorrow", async () => {
-    const saved = process.env.AMADEUS_CLIENT_ID;
-    const saved2 = process.env.AMADEUS_CLIENT_SECRET;
-    process.env.AMADEUS_CLIENT_ID = "x";
-    process.env.AMADEUS_CLIENT_SECRET = "y";
+    const saved = process.env.SERPAPI_KEY;
+    process.env.SERPAPI_KEY = "x";
     const out = await flights.search({ from: "BLR", to: "DEL", date: "sometime-ish" });
-    if (saved) process.env.AMADEUS_CLIENT_ID = saved; else delete process.env.AMADEUS_CLIENT_ID;
-    if (saved2) process.env.AMADEUS_CLIENT_SECRET = saved2; else delete process.env.AMADEUS_CLIENT_SECRET;
+    if (saved) process.env.SERPAPI_KEY = saved; else delete process.env.SERPAPI_KEY;
     assert.ok(out.needsArgs, `should ask, got ${JSON.stringify(out)}`);
   });
 
