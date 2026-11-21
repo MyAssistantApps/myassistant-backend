@@ -325,7 +325,13 @@ const tmpUploads = () => filesIn(os.tmpdir()).filter((f) => /^(avatar|note)-\d+-
     assert.strictEqual(noteR.script_version, 1);
     assert.strictEqual(noteR.consent_version, store.CONSENT_VERSION);
     assert.strictEqual(noteR.identity_checked_at, null);
-    const out = await db.one(`SELECT * FROM task_outcomes WHERE external_id = $1`, [`video_note:${noteR.id}`]);
+    // The outcome is written in the background: give it a moment.
+    let out = null;
+    for (let i = 0; i < 40 && !out; i++) {
+      out = await db.one(`SELECT * FROM task_outcomes WHERE external_id = $1`, [`video_note:${noteR.id}`]);
+      if (!out) await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(out, "the outcome row is written");
     assert.strictEqual(out.status, "requested");
     assert.strictEqual(out.kind, "message");
   });
