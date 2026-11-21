@@ -213,9 +213,13 @@ async function unreadFor(profile) {
        LEFT JOIN users u ON u.id = m.from_user_id
       WHERE m.status = 'unread' AND m.to_phone_number = $1
         AND m.media = ''
-      ORDER BY m.created_at ASC`,
+      ORDER BY m.created_at DESC
+      LIMIT 20`,
     [phone]
-  ).catch(() => []);
+  ).then((rows) => rows.reverse()).catch(() => []);
+  // The newest 20, oldest first: other people's words go into this
+  // user's prompt, so a flood of messages must not crowd out everything
+  // else (audit 2026-11-21).
 }
 
 /**

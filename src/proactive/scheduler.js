@@ -495,6 +495,7 @@ async function sweepPatientRecalls() {
         contactName: r.client_name,
         task,
         lang: null,
+        system: true,
       });
       // The Calls row is agentCall.start()'s; a second one here was never
       // settled and stayed "in progress" beside it.
@@ -560,6 +561,7 @@ async function sweepAppointmentReminders() {
         userName: first,
         toNumber: a.patient_phone,
         contactName: a.patient_name,
+        system: true,
         task:
           `Remind them of their appointment with Dr. ${first || "the doctor"} on ${whenTxt}` +
           `${a.reason ? ` (${a.reason})` : ""}. Ask whether they will be able to come. ` +
@@ -602,6 +604,7 @@ async function sweepHearingReminders() {
         userName: first,
         toNumber: h.client_phone,
         contactName: h.client_name,
+        system: true,
         task:
           `Remind them that their case "${h.case_title}" has a hearing${h.court ? ` at ${h.court}` : ""} on ${whenTxt}` +
           `${h.purpose ? ` (${h.purpose})` : ""}. Their advocate asks them to be on time and to bring any ` +

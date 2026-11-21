@@ -723,7 +723,15 @@ router.post("/invoices/:id/paid", only("business", "advocate"), async (req, res)
   const row = await pro.getInvoiceRow(uid, req.params.id).catch(() => null);
   if (!row || row.kind !== "invoice") return res.status(404).json({ error: "invoice not found" });
   if (row.status === "paid") return res.json({ invoice: pro.invoiceShape(row) });
-  const fresh = await pro.setInvoiceFields(uid, row.id, { status: "paid" });
+  // The claim is the conditional update: a double tap (or the payment
+  // webhook at the same moment) records the payment once, not twice
+  // (audit 2026-11-21).
+  const claimed = await one(
+    `UPDATE pro_invoices SET status = 'paid', updated_at = $3
+      WHERE id = $1 AND user_id = $2 AND status <> 'paid' RETURNING id`,
+    [row.id, uid, Date.now()]).catch(() => null);
+  const fresh = await pro.getInvoiceRow(uid, row.id);
+  if (!claimed) return res.json({ invoice: pro.invoiceShape(fresh || row) });
   if (row.client_id) {
     await practice.addLedger(uid, { clientId: row.client_id, amount: pro.toRupees(row.total_paise), kind: "paid", note: `${row.number} paid` }).catch(() => {});
   }

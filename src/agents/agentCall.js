@@ -20,6 +20,7 @@ function cfg() {
   return {
     base: (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, ""),
     dailyLimit: Number(process.env.AGENT_CALL_DAILY_LIMIT || 20),
+    systemDailyLimit: Number(process.env.AGENT_CALL_SYSTEM_DAILY_LIMIT || 150),
     bolnaKey: process.env.BOLNA_API_KEY || "",
     bolnaFrom: process.env.BOLNA_FROM_NUMBER || "",
     bolnaAgent: process.env.BOLNA_AGENT_ID || "",
@@ -82,6 +83,65 @@ function bumpDaily(userId) {
 }
 function dailyCount(userId) {
   return dayCounts.get(`${userId}:${new Date().toISOString().slice(0, 10)}`) || 0;
+}
+
+/**
+ * THE DAILY LIMIT SURVIVES RESTARTS AND PARALLEL REQUESTS (audit
+ * 2026-11-21). The count lived only in memory, so every deploy reset it,
+ * and the check ran before an await while the bump ran after, so ten
+ * requests at once all passed. Now the day's count is seeded from the
+ * calls already filed today (task_outcomes), and the check and the bump
+ * happen together with no await between them. A refused call gives its
+ * slot back (refundDaily).
+ */
+async function reserveDaily(key0, limit, userId) {
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `${key0}:${day}`;
+  if (!dayCounts.has(key)) {
+    let filed = 0;
+    // Only the user's own allowance is seeded from what was filed today;
+    // the scheduled-reminder allowance starts from memory.
+    if (!String(key0).startsWith("sys:")) {
+      try {
+        const r = await require("../db").one(
+          `SELECT COUNT(*)::int AS n FROM task_outcomes
+            WHERE user_id = $1 AND kind = 'agent_call' AND created_at >= $2 AND status <> 'failed'`,
+          [userId, Date.parse(`${day}T00:00:00Z`)]);
+        filed = Number(r?.n) || 0;
+      } catch { /* table not there yet: nothing filed today */ }
+    }
+    for (const k of dayCounts.keys()) if (!k.endsWith(day)) dayCounts.delete(k);
+    if (!dayCounts.has(key)) dayCounts.set(key, filed);
+  }
+  const n = dayCounts.get(key);
+  if (n >= limit) return false;
+  dayCounts.set(key, n + 1);
+  return true;
+}
+function refundDaily(key0) {
+  const key = `${key0}:${new Date().toISOString().slice(0, 10)}`;
+  const n = dayCounts.get(key) || 0;
+  if (n > 0) dayCounts.set(key, n - 1);
+}
+
+/**
+ * WHERE A CALL MAY GO (audit 2026-11-21): Indian numbers only by default.
+ * normalizeNumber accepted any "+<digits>", so a scripted account could
+ * ring international or premium-rate numbers on our telephony bill.
+ * AGENT_CALL_ALLOWED_PREFIXES (comma list, e.g. "+91,+971") widens it.
+ */
+function allowedDestination(e164) {
+  const prefixes = String(process.env.AGENT_CALL_ALLOWED_PREFIXES || "+91")
+    .split(",").map((x) => x.trim()).filter(Boolean);
+  if (!prefixes.some((p) => e164.startsWith(p))) return false;
+  // +91: ten digits after the code; the 1900 premium range and the
+  // 1800/1860 service numbers are refused.
+  if (e164.startsWith("+91")) {
+    const rest = e164.slice(3);
+    if (!/^\d{10}$/.test(rest)) return false;
+    if (/^(1800|1860|1900)/.test(rest)) return false;
+  }
+  return /^\+\d{8,15}$/.test(e164);
 }
 
 // ---------------- TASK MODE ----------------
@@ -919,11 +979,17 @@ async function closeStale({ olderThanMs = STALE_MS } = {}) {
  * the calling service refused — `message` is a plain sentence, never the
  * service's reply (see noteProviderFailure).
  */
-async function start({ userId, userName, toNumber, contactName, task, lang, selfCall, retryTimes, retryGapMinutes, tone, gender, live }) {
+async function start({ userId, userName, toNumber, contactName, task, lang, selfCall, retryTimes, retryGapMinutes, tone, gender, live, system }) {
   if (!enabled()) throw { code: "unavailable" };
   const to = normalizeNumber(toNumber);
-  if (!to) throw { code: "bad_number" };
-  if (userId && dailyCount(userId) >= cfg().dailyLimit) throw { code: "quota" };
+  if (!to || !allowedDestination(to)) throw { code: "bad_number" };
+  // Scheduled reminders the professional set up (appointment, recall,
+  // hearing) have their own, larger allowance: a busy clinic sees more
+  // than 20 patients a day, and a reminder dropped for the quota was
+  // never retried (audit 2026-11-21).
+  const quotaKey = system ? `sys:${userId}` : userId;
+  const limit = system ? cfg().systemDailyLimit : cfg().dailyLimit;
+  if (userId && !(await reserveDaily(quotaKey, limit, userId))) throw { code: "quota" };
 
   const rec = {
     id: crypto.randomBytes(12).toString("hex"),
@@ -999,8 +1065,8 @@ async function start({ userId, userName, toNumber, contactName, task, lang, self
 
   try {
     rec.providerRef = await placeByProvider(rec);
-    if (userId) bumpDaily(userId);
   } catch (e) {
+    if (userId) refundDaily(quotaKey);
     const reason = noteProviderFailure(e);
     rec.state = "failed";
     rec.result = `I couldn't start the call to ${contactName} just now — the calling service ` +
@@ -1122,6 +1188,8 @@ module.exports = {
   // For tests: the failure bookkeeping, and a way to clear it.
   _trouble: trouble,
   redactNumbers,
+  normalizeNumber,
+  allowedDestination,
   // For tests: how a call addresses the person it rings.
   _addressFor: addressFor,
   _resetTrouble() {

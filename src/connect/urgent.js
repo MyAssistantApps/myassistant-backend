@@ -142,6 +142,7 @@ function register(jobs) {
 }
 
 // The host's alerts (the words are also in their inbox, agent_messages).
-const USER_TABLES = [["connect_urgent", "user_id"]];
+// The caller's own words live here too: their erase removes them.
+const USER_TABLES = [["connect_urgent", "user_id"], ["connect_urgent", "caller_id"]];
 
 module.exports = { migrate, start, ack, onJob, register, gapAfter, USER_TABLES, JOB };

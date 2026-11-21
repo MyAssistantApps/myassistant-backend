@@ -256,7 +256,9 @@ async function onClinicChange(hostId, appt) {
   }
 }
 
-const USER_TABLES = [["connect_bookings", "caller_id"]];
+// Both parties: a host's export shows the bookings made with them, and an
+// erase (either side) takes the booking with it (audit 2026-11-21).
+const USER_TABLES = [["connect_bookings", "caller_id"], ["connect_bookings", "host_id"]];
 
 module.exports = {
   migrate, record, sameDay, withHost, upcomingFor, findActive, cancelByCaller, reschedule,

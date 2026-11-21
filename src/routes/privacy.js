@@ -286,7 +286,10 @@ const NOT_PERSONAL = {
 };
 
 /** The column names the schema guard treats as "this row is a user's". */
-const USER_COLUMNS = ["user_id", "from_user_id", "owner_id", "created_by"];
+const USER_COLUMNS = ["user_id", "from_user_id", "owner_id", "created_by",
+  // The other party's column in two-sided tables (audit 2026-11-21): the
+  // guard only checked the four above, so these escaped every erase.
+  "host_id", "caller_id", "from_user"];
 
 /**
  * kv has no user column, so no table list can find these keys: the
@@ -817,8 +820,16 @@ async function findOrphans() {
   const tables = {};
   const put = (name, n) => { if (Number(n) > 0) tables[name] = Number(n); };
 
+  // A table listed under two columns (a booking's caller and host) is
+  // counted once with both conditions, as the purge deletes it: a row
+  // matching both goes in the first DELETE and is not counted again.
+  const byTable = new Map();
   for (const [table, col] of await existingUserTables(cols)) {
-    const r = await one(`SELECT count(*)::int AS n FROM ${q(table)} x WHERE ${orphanWhere(col)}`);
+    byTable.set(table, [...(byTable.get(table) || []), col]);
+  }
+  for (const [table, list] of byTable) {
+    const where = list.map((c) => `(${orphanWhere(c)})`).join(" OR ");
+    const r = await one(`SELECT count(*)::int AS n FROM ${q(table)} x WHERE ${where}`);
     put(table, r?.n);
   }
   for (const t of docPartsIn(cols)) {
@@ -985,7 +996,10 @@ router.get("/export", async (req, res) => {
     try {
       // table/col come from OUR whitelist above (never user input) and were
       // verified against information_schema — safe to interpolate.
-      data[table] = (
+      // A table listed for two columns (a booking's caller and its host)
+      // exports both sides under separate keys.
+      const key = data[table] === undefined ? table : `${table}.${col}`;
+      data[key] = (
         await query(`SELECT * FROM ${q(table)} WHERE ${q(col)} = $1`, [String(uid)])
       ).map(redactRow);
     } catch (e) {

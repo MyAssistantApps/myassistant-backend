@@ -289,6 +289,9 @@ async function seedRow(table, userCol, uid, over = {}) {
     if (c.is_generated === "ALWAYS" || c.is_identity === "YES") continue;
     if (n in over) { names.push(n); vals.push(over[n]); continue; }
     if (n === userCol) { names.push(n); vals.push(String(uid)); continue; }
+    // The other party in a two-sided table (a booking's host) is this
+    // user too, so the row is theirs whichever column is checked.
+    if (privacy.USER_COLUMNS.includes(n) && c.is_nullable === "NO") { names.push(n); vals.push(String(uid)); continue; }
     if (c.column_default !== null || c.is_nullable === "YES") continue;
     names.push(n);
     vals.push(filler(c, uid));
@@ -357,8 +360,15 @@ async function optIn(uid) {
 
 async function rowsOf(uid) {
   const out = {};
+  // A table listed under two columns (a booking's caller and host) is one
+  // count: rows where the user is either party.
+  const byTable = new Map();
   for (const [table, col] of await privacy.existingUserTables()) {
-    const r = await db.one(`SELECT count(*)::int AS n FROM ${table} WHERE ${col} = $1`, [String(uid)]);
+    byTable.set(table, [...(byTable.get(table) || []), col]);
+  }
+  for (const [table, list] of byTable) {
+    const where = list.map((c) => `${c} = $1`).join(" OR ");
+    const r = await db.one(`SELECT count(*)::int AS n FROM ${table} WHERE ${where}`, [String(uid)]);
     out[table] = r.n;
   }
   return out;

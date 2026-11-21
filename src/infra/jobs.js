@@ -20,6 +20,10 @@ let running = false;
 
 const POLL_MS = Number(process.env.JOB_POLL_MS) || 2000;
 const MAX_ATTEMPTS = 3;
+const JOB_TIMEOUT_MS = Number(process.env.JOB_TIMEOUT_MS) || 10 * 60_000;
+// Finished jobs are kept this long for diagnosis, then deleted: document
+// jobs carry the full extracted text, and the table only ever grew.
+const JOB_RETAIN_MS = Number(process.env.JOB_RETAIN_MS) || 7 * 86_400_000;
 
 async function migrate(exec) {
   await exec(`
@@ -93,16 +97,27 @@ async function runOne() {
   }
 
   inFlight.add(Number(job.id));
+  // A DEADLINE PER JOB (audit 2026-11-21). The worker runs jobs one at a
+  // time and the heartbeat kept every in-flight job alive, so a handler
+  // that never returned (a hung socket, a stuck model call) blocked the
+  // queue for good — urgent re-pings included. Past the deadline the job
+  // is failed, not retried (it may already have had side effects, as with
+  // the reaper below), and the worker moves on.
+  let timer = null;
   try {
-    await timed(`job.${job.kind}`, () => handler(job.payload, job), {
-      jobId: Number(job.id),
-    });
+    await Promise.race([
+      timed(`job.${job.kind}`, () => handler(job.payload, job), { jobId: Number(job.id) }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Object.assign(new Error(`timed out after ${JOB_TIMEOUT_MS} ms`), { timedOut: true })), JOB_TIMEOUT_MS);
+        if (timer.unref) timer.unref();
+      }),
+    ]);
     await run(`UPDATE jobs SET status='done', updated_at=$2 WHERE id=$1`, [
       job.id, Date.now(),
     ]);
     require("./metrics").jobFinished(job.kind, "done");
   } catch (e) {
-    const give_up = job.attempts >= MAX_ATTEMPTS;
+    const give_up = job.attempts >= MAX_ATTEMPTS || Boolean(e?.timedOut);
     // Exponential backoff; a permanently broken job stops retrying rather
     // than spinning forever.
     await run(
@@ -121,6 +136,7 @@ async function runOne() {
       willRetry: !give_up, error: e.message,
     });
   } finally {
+    clearTimeout(timer);
     inFlight.delete(Number(job.id));
   }
   return true;
@@ -167,12 +183,23 @@ async function reapStale(now = Date.now()) {
   return n;
 }
 
+/** Deletes finished jobs older than JOB_RETAIN_MS. Returns the count. */
+async function prune(now = Date.now()) {
+  return run(`DELETE FROM jobs WHERE status IN ('done','failed') AND updated_at < $1`, [now - JOB_RETAIN_MS]);
+}
+let lastPrune = 0;
+
 function start() {
   if (timer) return;
   reapStale().catch((e) => logger.error("jobs_reap_failed", { error: e.message }));
   heartbeat = setInterval(() => {
     touchInFlight()
       .then(() => reapStale())
+      .then(() => {
+        if (Date.now() - lastPrune < 3600_000) return;
+        lastPrune = Date.now();
+        return prune();
+      })
       .catch((e) => logger.error("jobs_heartbeat_failed", { error: e.message }));
   }, HEARTBEAT_MS);
   if (heartbeat.unref) heartbeat.unref();
@@ -198,4 +225,4 @@ function stop() {
   heartbeat = null;
 }
 
-module.exports = { migrate, register, enqueue, drain, runOne, start, stop, reapStale, HANDLERS, LEASE_MS };
+module.exports = { migrate, register, enqueue, drain, runOne, start, stop, reapStale, prune, HANDLERS, LEASE_MS, JOB_TIMEOUT_MS };

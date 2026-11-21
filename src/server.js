@@ -184,9 +184,15 @@ app.use("/config", configRoute);
 app.use("/app", require("./routes/appUpdate").router);
 
 // Sign-up/sign-in — extra-tight limit to slow brute-force attempts
+// Only the credential routes count: /auth/me runs on every launch and
+// Indian carriers put many phones behind one address (CGNAT), so counting
+// it locked real users out at peak hours (product audit 2026-11-21).
 app.use(
   "/auth",
-  rateLimit({ windowMs: 15 * 60_000, max: 20, standardHeaders: true }),
+  rateLimit({
+    windowMs: 15 * 60_000, max: 20, standardHeaders: true,
+    skip: (req) => req.path === "/me" || req.path === "/logout-all",
+  }),
   authRoute
 );
 
@@ -436,7 +442,10 @@ app.use("/console", platform.consoleRouter);
 app.use("/clients", appAuth, require("./routes/clients"));
 // CLINIC — the doctor's workspace (today, follow-ups, dues). Doctors only:
 // the router itself enforces persona === 'doctor' after appAuth.
-app.use("/clinic", appAuth, require("./clinic/routes"));
+// Per-user buckets (audit 2026-11-21): transcription, drafting and the
+// running-late calls each cost money; only writes count, so browsing the
+// day's appointments never does.
+app.use("/clinic", appAuth, paidUploadLimit, require("./clinic/routes"));
 // WORKSPACE — the dashboard for every profession without a Pro workspace
 // (engineers, teachers, CAs, students…): packs, routines, the day plan.
 app.use("/workspace", appAuth, require("./workspace/routes"));

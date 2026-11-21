@@ -668,6 +668,8 @@ const USER_TABLES = [
   ["listing_photos", "user_id"],
   ["listing_posts", "user_id"],
   ["listing_requests", "user_id"],
+  // A request an app user sent: their name and number, theirs to erase.
+  ["listing_requests", "from_user"],
 ];
 
 module.exports = {

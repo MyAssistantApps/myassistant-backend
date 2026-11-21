@@ -9,6 +9,8 @@
 const registry = require("./registry");
 const { normalizePhone } = require("../users/phone");
 const { safeFetch } = require("../services/safeFetch");
+// A spoken name as a LIKE literal: "%" and "_" must not widen the match.
+const likeEscape = (s) => String(s).replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /// Parses a model-supplied datetime as the USER's wall-clock time.
 /// Models routinely emit bare ISO strings ("2026-09-04T17:00:00"); the old
@@ -279,8 +281,8 @@ async function resolveRecipient(userId, spokenName) {
     const users = await query(
       `SELECT phone_number FROM users
         WHERE phone_verified_at IS NOT NULL AND phone_number IS NOT NULL
-          AND (lower(name) = $1 OR lower(name) LIKE $1 || ' %')`,
-      [contactLower]
+          AND (lower(name) = $1 OR lower(name) LIKE $2 || ' %' ESCAPE '\\')`,
+      [contactLower, likeEscape(contactLower)]
     ).catch(() => []);
     if (users.length === 1) contactPhone = users[0].phone_number;
   }
@@ -7573,8 +7575,8 @@ function registerBuiltins() {
         const users = await query(
           `SELECT id, name, fcm_token, phone_number FROM users
             WHERE phone_verified_at IS NOT NULL AND phone_number IS NOT NULL
-              AND (lower(name) = $1 OR lower(name) LIKE $1 || ' %')`,
-          [contactLower]
+              AND (lower(name) = $1 OR lower(name) LIKE $2 || ' %' ESCAPE '\\')`,
+          [contactLower, likeEscape(contactLower)]
         ).catch(() => []);
         if (users.length === 1) {
           appUser = users[0];
