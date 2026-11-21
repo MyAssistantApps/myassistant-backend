@@ -317,6 +317,8 @@ app.use("/momentum", appAuth, require("./momentum/routes"));
 app.use("/messages", appAuth, require("./routes/messages"));
 // Help & Feedback and the Pro early-access list (feedback/routes.js).
 app.use("/feedback", appAuth, perUserLimit, require("./feedback/routes"));
+// A cab booked by voice: its status for the Home strip, and Cancel.
+app.use("/rides", appAuth, perUserLimit, require("./rides/routes"));
 app.use("/usage", appAuth, require("./routes/usage").router);
 app.use("/finance", appAuth, require("./routes/finance").router);
 

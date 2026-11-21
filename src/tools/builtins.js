@@ -7924,24 +7924,86 @@ function registerBuiltins() {
   });
 
   registry.register({
+    name: "ride_status",
+    description:
+      "The user's booked cab right now: status, driver, car number, OTP and " +
+      "arrival time. Use for 'where is my cab', 'what is my OTP', 'who is the driver'.",
+    risk: "low",
+    available: () => require("../rides/service").canBook(),
+    inputSchema: { type: "object", properties: {} },
+    async execute(_args, ctx) {
+      const ride = await require("../rides/service").active(Number(ctx.userId));
+      if (!ride) return { ok: true, data: { ride: null }, speak: "You have no cab booked right now." };
+      const bits = [
+        `${ride.providerLabel} to ${ride.drop}: ${ride.status.replace("_", " ")}`,
+        ride.driver?.name ? `driver ${ride.driver.name}` : "",
+        ride.vehicle?.plate ? `car ${ride.vehicle.plate}` : "",
+        ride.otp ? `OTP ${ride.otp.split("").join(" ")}` : "",
+        ride.etaMin != null && ["accepted", "arriving"].includes(ride.status) ? `about ${ride.etaMin} min away` : "",
+      ].filter(Boolean);
+      return { ok: true, data: { ride }, speak: bits.join(", ") + "." };
+    },
+  });
+
+  registry.register({
+    name: "cancel_ride",
+    description: "Cancel the user's booked cab. Use for 'cancel my cab', 'cancel the ride'.",
+    risk: "low",
+    available: () => require("../rides/service").canBook(),
+    inputSchema: { type: "object", properties: {} },
+    async execute(_args, ctx) {
+      const ride = await require("../rides/service").cancel(Number(ctx.userId));
+      if (!ride) return { ok: false, error: "no active ride", speak: "You have no cab booked right now." };
+      return { ok: true, data: { ride }, speak: `Done, your ${ride.providerLabel} ride to ${ride.drop} is cancelled.` };
+    },
+  });
+
+  registry.register({
     name: "book_ride",
     description:
-      "Book a cab through Uber or Ola to a destination. Resolves the real " +
-      "address and opens the app with the trip already set up; the user " +
-      "confirms and pays. Use for 'book a cab to the airport', 'get me an Uber home'.",
+      "Book a cab to a destination, from a named pickup or from where the " +
+      "user is now. Use for 'book a cab from Yeshwanthpur to Majestic', " +
+      "'book a cab to the airport', 'get me an Uber home'. Do NOT ask which " +
+      "company when none was named: the cheapest available is chosen. When " +
+      "booking is live it BOOKS the ride and the result says so — tell the " +
+      "user it is booked, the fare, and that the driver, car and OTP follow. " +
+      "If the result asks to confirm a high fare, ask in one line and call " +
+      "again with confirm_fare true. Otherwise it opens the provider's app " +
+      "with the trip set up and the user confirms there.",
     risk: "low",
     deviceAction: true,
     inputSchema: {
       type: "object",
       properties: {
         destination: { type: "string", description: "Where the user wants to go" },
-        provider: { type: "string", enum: ["uber", "ola"], description: "Default uber" },
+        pickup: { type: "string", description: "Where to be picked up, only if the user named it ('from Yeshwanthpur'). Omit for the current location." },
+        provider: { type: "string", enum: ["uber", "ola"], description: "Only when the user named the company." },
+        confirm_fare: { type: "boolean", description: "true only after the user said yes to a quoted high fare." },
       },
       required: ["destination"],
     },
     async execute(args, ctx) {
       const deeplinks = require("../fulfillment/deeplinks");
       const fulfil = require("../fulfillment/service");
+      const rides = require("../rides/service");
+
+      // REAL BOOKING when a provider can book (partner access, or the test
+      // provider while building): booked, confirmed, then followed.
+      if (ctx.userId && rides.canBook()) {
+        const here = Number.isFinite(Number(ctx.lat)) ? { lat: Number(ctx.lat), lng: Number(ctx.lng) } : null;
+        const r = await rides.book({
+          userId: Number(ctx.userId), from: args.pickup, to: args.destination,
+          provider: args.provider, confirmFare: args.confirm_fare === true, here,
+        });
+        if (r.ok) {
+          return { ok: true, data: { booked: true, ride: r.ride }, speak: r.speak,
+            deviceAction: { type: "ride_booked", ride: r.ride } };
+        }
+        if (r.error !== "no_provider") {
+          return { ok: false, error: r.error, needs_details: r.needs ? [r.needs] : undefined,
+            data: { fare: r.fare, ride: r.ride }, speak: r.speak };
+        }
+      }
       const provider = args.provider || "uber";
 
       // Coordinates are what make a ride link land on a real quoted trip
@@ -7958,13 +8020,21 @@ function registerBuiltins() {
         resolvedName = place.name || resolvedName;
       }
 
+      let pickupLat = ctx.lat, pickupLng = ctx.lng;
+      if (args.pickup) {
+        const from = await fulfil.resolveBusiness({ query: args.pickup, lat: ctx.lat, lng: ctx.lng }).catch(() => null);
+        if (from && Number.isFinite(Number(from.lat))) {
+          pickupLat = from.lat;
+          pickupLng = from.lng;
+        }
+      }
       const link = deeplinks.ride({
         provider,
         destination: resolvedName,
         lat,
         lng,
-        pickupLat: ctx.lat,
-        pickupLng: ctx.lng,
+        pickupLat,
+        pickupLng,
         platform: ctx.platform,
       });
 

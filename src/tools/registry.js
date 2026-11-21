@@ -298,7 +298,7 @@ function missingRequired(tool, args) {
  */
 const SEED_WORLD = new Set([
   "place_phone_call", "send_agent_message", "send_whatsapp_message",
-  "send_document", "send_patient_document", "order_food", "book_ride",
+  "send_document", "send_patient_document", "order_food", "book_ride", "cancel_ride",
   "book_movie_tickets", "collect_payment", "open_app", "open_webpage", "open_public_pdf", "open_service_app",
   "start_navigation", "phone_control", "play_music",
   "capture_document", "analyze_camera", "set_alarm", "create_reminder",
@@ -420,7 +420,7 @@ const MEM_STOP = new Set(
 const SEED_REPEAT = new Set([
   "place_phone_call", "send_agent_message",
   "send_whatsapp_message", "send_document", "send_patient_document",
-  "order_food", "book_ride", "book_movie_tickets",
+  "order_food", "book_ride", "cancel_ride", "book_movie_tickets",
   "collect_payment", "open_app", "open_webpage", "open_public_pdf", "open_service_app",
   "start_navigation", "play_music",
   // Every look costs money at a paid image model, so a stutter must not

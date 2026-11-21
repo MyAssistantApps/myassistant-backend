@@ -812,6 +812,7 @@ function install() {
   // The rest of a plan the turn's time budget cut short (taskDriver.handOff).
   jobs.register("task_continue", taskContinue);
   require("../connect/urgent").register(jobs); // urgent alerts that escalate
+  require("../rides/service").register(jobs); // a booked cab, followed until the trip ends
   jobs.register("deep_research", deepResearch);
   jobs.register("generate_video", videoJob);
   // A call retry that survives a restart — see agentCall.handleNoAnswer.
