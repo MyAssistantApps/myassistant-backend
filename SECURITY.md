@@ -74,7 +74,7 @@ Do these in order. Each one closes a hole that code cannot.
 7. **`ALLOW_DEV_PHONE_VERIFY=true`** lets any account claim any unregistered
    number (messages addressed to that number then reach the claimant). Either
    set it to `false` (call-code verification covers India) or list the testers
-   in `DEV_PHONE_VERIFY_USERS`. Mirror the change in `deploy/vps/production.flags`.
+   in `DEV_PHONE_VERIFY_USERS`. Mirror the change in `deploy/docker-vps/production.flags`.
 8. **Copy the new `Caddyfile` and `deploy.sh`** to `/opt/myassistant/` (the
    deploy does not update them), then `docker compose restart caddy`. Then
    `chown root:1000 firebase-adminsdk.json && chmod 640 firebase-adminsdk.json`.

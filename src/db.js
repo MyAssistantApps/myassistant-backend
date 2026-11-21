@@ -3,8 +3,8 @@
  *
  * Why Postgres (was better-sqlite3): SQLite allows exactly ONE writer
  * process, which pinned the Deployment to a single replica. Postgres
- * supports many concurrent writers → the k8s HPA can finally scale the
- * backend horizontally.
+ * supports many concurrent writers, so the database no longer limits the
+ * backend to one process.
  *
  * Env: DATABASE_URL, e.g. postgres://user:pass@host:5432/myassistant
  *

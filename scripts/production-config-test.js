@@ -2,7 +2,7 @@
  * THE SERVER, WITH PRODUCTION'S OWN SETTINGS (2026-11-01).
  *
  * Every other suite runs with test defaults. Production runs one specific
- * combination (deploy/vps/production.flags: GPT_LIVE=off, OpenAI as the
+ * combination (deploy/docker-vps/production.flags: GPT_LIVE=off, OpenAI as the
  * provider, app builds 175+) and that combination went untested: the voice
  * picker offered GPT-Live voices while the server spoke only "coral", and
  * nothing failed until the owner tried it.
@@ -32,7 +32,7 @@ const crypto = require("crypto");
 const assert = require("assert");
 
 const BACKEND = path.resolve(__dirname, "..");
-const FLAGS_FILE = path.join(BACKEND, "deploy/vps/production.flags");
+const FLAGS_FILE = path.join(BACKEND, "deploy/docker-vps/production.flags");
 const SNAPSHOT = path.join(__dirname, "fixtures/production-config.json");
 // The oldest build production still serves, and the newest in the field.
 const BUILDS = [175, 179];

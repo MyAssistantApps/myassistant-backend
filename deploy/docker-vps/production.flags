@@ -3,8 +3,7 @@
 # scripts/production-config-test.js runs the server with exactly these, so
 # CI tests the combination users actually get (2026-11-01: the voice picker
 # offered GPT-Live voices while production ran without GPT-Live, and nobody
-# noticed until the owner did). deploy.sh warns when the VPS's .env
-# drifts from this file.
+# noticed until the owner did).
 #
 # KEY=<secret> means "set on the server, value never stored here"; the
 # test fills it with a dummy. Change this file in the same PR as the .env.
@@ -28,7 +27,6 @@ OPENAI_API_KEY=<secret>
 # Photo edits (Style Studio try-ons): the edits endpoint rejects
 # gpt-image-1 on this account (2026-11-03).
 OPENAI_IMAGE_EDIT_MODEL=gpt-image-1.5
-# Flights page: Google Flights via SerpApi (2026-11-04; free plan 250/month).
 GPT_LIVE=off
 BOLNA_API_KEY=<secret>
 BOLNA_FROM_NUMBER=+917965860041

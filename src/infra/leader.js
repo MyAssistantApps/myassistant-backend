@@ -3,7 +3,7 @@
  *
  * The proactive sweep, the daily housekeeping pass and the quote-card
  * generator run on a setInterval in every backend process. With one
- * replica that is fine; with two (a rollout overlap, or the k8s HPA) each
+ * replica that is fine; with two (a rollout overlap, or a second replica) each
  * would nudge, ring and generate twice. `exclusive(name, fn)` takes a
  * Postgres session advisory lock on a dedicated connection for the length
  * of fn: whoever gets it runs, everyone else skips this round. The lock

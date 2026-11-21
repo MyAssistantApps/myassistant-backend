@@ -60,7 +60,7 @@ mkdir -p backups && chmod 700 backups
 STAMP=$(date +%Y%m%d%H%M%S)
 ( umask 077; docker compose exec -T postgres pg_dump -U myassistant myassistant | gzip > "backups/predeploy-$STAMP.sql.gz" )
 gzip -t "backups/predeploy-$STAMP.sql.gz"
-ls -1t backups/*.sql.gz | tail -n +15 | xargs -r rm -f
+ls -1t backups/predeploy-*.sql.gz | tail -n +15 | xargs -r rm -f
 echo "backup: backups/predeploy-$STAMP.sql.gz ($(du -h "backups/predeploy-$STAMP.sql.gz" | cut -f1))"
 
 say "3/5 keeping the running image as :previous"

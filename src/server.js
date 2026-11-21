@@ -538,7 +538,7 @@ app.use((err, _req, res, _next) => {
 const port = process.env.PORT || 3000;
 // Postgres: create the schema BEFORE accepting any request — a request
 // racing table creation would 500. Boot fails loudly if the DB is down,
-// which is exactly what Kubernetes needs to restart/backoff the pod.
+// which is exactly what Docker's restart policy needs to retry the container.
 require("./db")
   .init()
   // CALL NOTES — before the listener, so a fresh upload is never caught

@@ -13,7 +13,7 @@ router.use(require("../middleware/adminKey").requireAdminKey);
 //     -F apk=@build/app/outputs/flutter-apk/app-release.apk \
 //     -F versionCode=2 -F versionName=1.0.1 \
 //     -F changelog="Fixed fingerprint unlock" -F changelog="Faster chat" \
-//     https://api.hariassistant.tech/admin/apk
+//     https://backend.envisionsit.in/admin/apk
 const multer = require("multer");
 const os = require("os");
 const appUpdate = require("./appUpdate");

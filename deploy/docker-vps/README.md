@@ -1,9 +1,8 @@
 # Production VPS — backend.envisionsit.in
 
 **Production since 2026-11-14.** The app's default server and the GitHub
-deploy both point here. (The old shared host, `myassistant.wishme.today` /
-`myass620@168.119.64.101`, is described in `deploy/vps/` and is no longer
-deployed to.)
+deploy both point here. (The old shared host, `myassistant.wishme.today`,
+is retired and no longer deployed to.)
 
 - Host: `189.72.146.77` (Ubuntu, root, Docker Compose)
 - Domain: `backend.envisionsit.in` (Caddy gets the HTTPS certificate)
@@ -19,30 +18,27 @@ file to `/opt/myassistant/` by hand.
 |---|---|
 | `compose.yml` | backend (built from `src-repo/`), postgres 16, caddy |
 | `Caddyfile` | HTTPS reverse proxy to the backend |
-| `.env` | the backend's settings and secrets (never in git) — mirror of `deploy/vps/production.flags` |
+| `.env` | the backend's settings and secrets (never in git) — mirror of `production.flags` (this folder) |
 | `pg.env` | the Postgres password (never in git) |
 | `firebase-adminsdk.json` | push notifications (never in git) |
 | `deploy.sh` | the deploy script (below) |
+| `backup.sh` | the nightly database backup (below) |
 | `src-repo/`, `src-prev/` | the running code and the previous one (rollback) |
 | `data/` | uploads, files, remote config (mounted at `/app/data`) |
 | `pgdata/` | the database files |
-| `backups/` | `pg_dump` before every deploy, newest 14 kept |
+| `backups/` | `pg_dump` nightly (`nightly-*`) and before every deploy (`predeploy-*`), newest 14 of each kept |
 
 ## How a deploy works
 
-Every push to `hardening` runs `.github/workflows/deploy.yml`: the gate tests,
-then `git archive HEAD | ssh root@189.72.146.77 deploy`. The deploy key in
-root's `authorized_keys` has a forced command, so it can only run
-`/opt/myassistant/deploy.sh`, which:
+`/opt/myassistant/deploy.sh` (see Pipeline below for how CI reaches it):
 
-1. unpacks the commit next to the running code
+1. loads the image CI built (or, as a fallback, unpacks a source tar and
+   builds it here)
 2. backs up the database
 3. tags the running image `:previous`
-4. builds and restarts the backend
-5. waits for `/health` — and on any failure puts the previous code and image back
-
-GitHub secrets: `VPS_SSH_KEY` (the deploy key's private half) and
-`VPS_KNOWN_HOSTS` (`ssh-keyscan 189.72.146.77`).
+4. restarts the backend on the new image
+5. waits for `/health/ready` — and on any failure puts the previous image
+   (and code) back
 
 ## By hand
 
@@ -50,7 +46,7 @@ GitHub secrets: `VPS_SSH_KEY` (the deploy key's private half) and
 cd /opt/myassistant
 docker compose ps
 docker compose logs backend --tail 100
-git -C <your clone> archive origin/hardening | ssh root@189.72.146.77 /opt/myassistant/deploy.sh
+git -C <your clone> archive origin/production | ssh <sudo-user>@189.72.146.77 sudo /opt/myassistant/deploy.sh deploy
 # roll back to the previous image:
 docker image tag myassistant-backend:previous myassistant-backend:latest
 docker compose up -d --no-build --force-recreate backend
@@ -78,6 +74,52 @@ sudo cp deploy/docker-vps/Caddyfile /opt/myassistant/Caddyfile
 # 3. GitHub: environment "production" → secrets VPS_SSH_KEY (private half),
 #    VPS_KNOWN_HOSTS (ssh-keyscan 189.72.146.77); branch policy: production only
 ```
+
+## One backend process only
+
+Never scale the `backend` service or run a second backend against this
+database. Assistant sessions, agent-call records, the daily call quota,
+rate limits and the proactive scheduler live in process memory: with two
+processes a voice session's follow-up can land on the one that never saw
+it, a call's webhook on the one that did not place it, and both run the
+scheduler (a patient recall could be phoned twice). Scaling out needs that
+state moved into Postgres first.
+
+## Backups and restore
+
+`backup.sh` dumps the database nightly to `backups/nightly-<stamp>.sql.gz`,
+checks the dump is complete before rotating, and keeps the newest 14.
+`deploy.sh` also writes a `predeploy-*` dump before every deploy. Install
+the nightly job once:
+
+```sh
+sudo install -m 700 deploy/docker-vps/backup.sh /opt/myassistant/backup.sh
+# root's crontab (sudo crontab -e): 21:00 UTC = 02:30 IST
+0 21 * * * /opt/myassistant/backup.sh >> /opt/myassistant/backups/nightly.log 2>&1
+```
+
+**Restore** (replaces the database with the dump; take a fresh backup
+first so the current state is recoverable too). The dump is loaded into a
+side database and the names are swapped, so a bad dump never overwrites
+the live data:
+
+```sh
+cd /opt/myassistant
+docker compose stop backend
+docker compose exec -T postgres sh -c \
+  'dropdb -U myassistant --if-exists myassistant_restore && createdb -U myassistant myassistant_restore'
+gunzip -c backups/<file>.sql.gz | docker compose exec -T postgres \
+  psql -U myassistant -d myassistant_restore -v ON_ERROR_STOP=1 -q
+# check it, then swap names:
+docker compose exec -T postgres psql -U myassistant -d postgres \
+  -c 'ALTER DATABASE myassistant RENAME TO myassistant_old' \
+  -c 'ALTER DATABASE myassistant_restore RENAME TO myassistant'
+docker compose start backend
+```
+
+**Limit:** the backups share the disk with the data. They cover a bad
+deploy or a mistaken delete, not the loss of the server. An off-server
+copy is still to be added at the marked line in `backup.sh`.
 
 ## Monitoring
 

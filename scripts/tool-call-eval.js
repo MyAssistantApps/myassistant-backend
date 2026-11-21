@@ -4,10 +4,10 @@
  * Conversations, each with the tool the assistant must call (or none).
  * The exact Live session is rebuilt — the gated spoken rules and the
  * capped Live tool declarations for an Android phone on the current
- * build — and a text Gemini model with the same instruction and tools
+ * build — and the OpenAI text model with the same instruction and tools
  * says what it would call. Run before and after a prompt change:
  *
- *   OPENAI_API_KEY=… node scripts/tool-call-eval.js            # gated rules (what ships)
+ *   OPENAI_API_KEY=… npm run eval:tools                        # gated rules (what ships)
  *   OPENAI_API_KEY=… node scripts/tool-call-eval.js --ungated  # the old full prompt
  *   EVAL_MODEL=gpt-4.1-mini … --only=12,17                    # a subset
  *

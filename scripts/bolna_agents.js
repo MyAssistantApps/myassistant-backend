@@ -7,7 +7,7 @@
  * created when missing and replaced (PUT) when present. It prints the
  * ids the server needs:
  *
- *   BOLNA_API_KEY=bn-… PUBLIC_BASE_URL=https://api.hariassistant.tech node scripts/bolna_agents.js --dry
+ *   BOLNA_API_KEY=bn-… PUBLIC_BASE_URL=https://backend.envisionsit.in node scripts/bolna_agents.js --dry
  *   BOLNA_API_KEY=bn-… PUBLIC_BASE_URL=… node scripts/bolna_agents.js --apply
  *
  * --dry prints the payloads and what would happen; --apply writes.
@@ -19,7 +19,7 @@ const crypto = require("crypto");
 const cfg = require("../src/agents/callAgentConfig");
 
 const KEY = process.env.BOLNA_API_KEY || "";
-const BASE = (process.env.PUBLIC_BASE_URL || "https://api.hariassistant.tech").replace(/\/$/, "");
+const BASE = (process.env.PUBLIC_BASE_URL || "https://backend.envisionsit.in").replace(/\/$/, "");
 const APPLY = process.argv.includes("--apply");
 const DRY = process.argv.includes("--dry") || !APPLY;
 const GENDERS = ["woman", "man"];

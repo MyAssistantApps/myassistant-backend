@@ -18,7 +18,7 @@
  * RECOMMENDED PRODUCTION CONFIG:
  *   image: pgvector/pgvector:pg16   (drop-in replacement for postgres:16)
  *   CREATE EXTENSION vector;
- *   ALTER TABLE agent_memories ALTER COLUMN embedding TYPE vector(768)
+ *   ALTER TABLE agent_memories ALTER COLUMN embedding TYPE vector(1536)
  *     USING (embedding::text::vector);
  *   CREATE INDEX ON agent_memories USING hnsw (embedding vector_cosine_ops);
  * The retrieval API does not change; only the ranking moves into SQL.

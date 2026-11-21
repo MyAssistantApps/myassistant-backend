@@ -13,8 +13,8 @@
  *   … cli(['seen', '12,13'])                                              # looked at
  *   … cli(['done', '12', '--build', '144', '--note', 'Calls now…'])       # shipped → user is told
  *
- * In production it runs inside the backend pod (it needs the database),
- * e.g. `kubectl -n myassistant exec deploy/myassistant-backend -- node -e "…"`.
+ * In production it runs inside the backend container (it needs the database),
+ * e.g. in /opt/myassistant: `docker compose exec backend node -e "…"`.
  * Locally, scripts/feedback_inbox.js is the same thing.
  */
 const store = require("./store");

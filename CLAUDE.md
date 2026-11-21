@@ -50,10 +50,10 @@ branch protection, collaborators, secrets or workflows for a teammate.
 ## Pushing deploys
 
 Every merge or push to `production` here **deploys the backend to production**
-(`.github/workflows/deploy.yml` → `/opt/myassistant/deploy.sh` on
-`backend.envisionsit.in`) — one more reason it goes through the owner's
-review. The script backs up the database, rebuilds the Docker image, checks
-`/health` and rolls back on any failure. Branches do not deploy. Details:
+(the deploy job in `.github/workflows/ci.yml` → `/opt/myassistant/deploy.sh`
+on `backend.envisionsit.in`) — one more reason it goes through the owner's
+review. The script backs up the database, swaps in the image CI built and
+tested, checks `/health/ready` and rolls back on any failure. Branches do not deploy. Details:
 `deploy/docker-vps/README.md`.
 
 ## Secrets — both repos are PUBLIC
@@ -68,7 +68,7 @@ it must be rotated, not just deleted.
 - `npm run test:manifest` (every test script points at a real file)
 - `node scripts/manager-test.js` when touching `src/agents/manager.js` or tools
 - `npm run test:production` — the server with production's own settings
-  (`deploy/vps/production.flags`). It snapshots what the phone receives
+  (`deploy/docker-vps/production.flags`). It snapshots what the phone receives
   from `/ai/config`; if you changed that on purpose, run
   `UPDATE_SNAPSHOT=1 npm run test:production` and commit the diff. If you
   change the server's `.env`, change `production.flags` in the same PR.
@@ -101,8 +101,8 @@ product's). The product is **MyAssistant**.
 |---|---|
 | Backend URL | `https://backend.envisionsit.in` (the app's default) |
 | Server | `189.72.146.77`, Docker Compose in `/opt/myassistant/` (backend, postgres 16, caddy) |
-| Deploy | push to `hardening` → GitHub → `deploy.sh` (backup, build, health, rollback) |
-| Settings | the server's `/opt/myassistant/.env`, mirrored without secrets in `deploy/vps/production.flags` |
+| Deploy | push to `production` → CI (`ci.yml`) → `deploy.sh` (backup, swap image, health, rollback) |
+| Settings | the server's `/opt/myassistant/.env`, mirrored without secrets in `deploy/docker-vps/production.flags` |
 | Admin panel | `/admin-panel` — sign in with the server's `ADMIN_KEY` |
 | Old server | `myassistant.wishme.today` — retired, not deployed to, its data was not migrated |
 

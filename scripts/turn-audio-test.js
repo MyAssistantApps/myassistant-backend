@@ -6,8 +6,10 @@
  */
 const assert = require("assert");
 const fs = require("fs");
+// Consent-gated by design: test the "ask" policy, where undecided means no.
+process.env.HELP_IMPROVE_DEFAULT = "ask";
 process.env.LIVE_RECORD_DIR = process.env.LIVE_RECORD_DIR ||
-  require("path").join(require("os").tmpdir(), "hari-turn-audio-test");
+  require("path").join(require("os").tmpdir(), "myassistant-turn-audio-test");
 
 (async () => {
   const db = require("../src/db");
