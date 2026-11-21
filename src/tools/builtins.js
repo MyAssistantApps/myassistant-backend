@@ -3206,7 +3206,12 @@ function registerBuiltins() {
       // Rao" as heard is "Ashalatha Rao" in their contacts. Emergency
       // services are never "corrected" into a contact.
       let heardAs = null;
-      if (!/\b(ambulance|police|fire|emergency|helpline|10[0-9]|112)\b/i.test(String(args.name || ""))) {
+      // A numbered answer to "which one?" ("2", "the second one", "ending
+      // 8765") is the phone's to resolve against the list it just read
+      // out (contact_pick.dart): never "corrected" into a contact name.
+      const numberedPick = /^\s*(?:#|no\.?|number|option|the)?\s*(?:\d{1,2}|first|second|third|fourth|fifth|sixth|last|one|two|three|four|five|six)(?:st|nd|rd|th)?(?:\s+one)?\s*$|ending\s*\d{3,}|^\s*\d{4}\s*$/i
+        .test(String(args.name || ""));
+      if (!numberedPick && !/\b(ambulance|police|fire|emergency|helpline|10[0-9]|112)\b/i.test(String(args.name || ""))) {
         const fix = await require("../agents/contactFix").best(ctx?.userId, args.name).catch(() => null);
         if (fix) {
           heardAs = String(args.name);
