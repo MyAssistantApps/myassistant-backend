@@ -290,7 +290,7 @@ const NAV = [
   ["Content", [["#/conversations", "Conversations", "chat"], ["#/recordings", "Recordings", "mic"],
     ["#/documents", "Documents", "file"], ["#/video-notes", "Video notes", "video"]]],
   ["Operations", [["#/activity", "Activity", "list"], ["#/outcomes", "Task outcomes", "check"],
-    ["#/broadcast", "Notifications", "bell"], ["#/flags", "Feature flags", "flag"], ["#/debug", "System & debug", "cpu"]]],
+    ["#/broadcast", "Notifications", "bell"], ["#/flags", "App updates", "flag"], ["#/debug", "System & debug", "cpu"]]],
 ];
 const NAV_FLAT = NAV.flatMap(([, items]) => items);
 
@@ -2070,60 +2070,32 @@ async function viewBroadcast() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Feature flags                                                       */
+/* App updates                                                         */
 /* ------------------------------------------------------------------ */
-
-const FLAG_DESC = {
-  voice_mode: "Speak in → spoken reply out.",
-  morning_briefing: "Automatic morning brief push.",
-  face_mode: "Retired video avatar (old builds only); keep off.",
-  face_interview: "Face-to-face interview mode.",
-  video_briefing: "Video versions of the daily brief.",
-  photo_questions: "Photo & receipt questions via the camera.",
-  live_info_cards: "Live info cards during conversation.",
-  agent_calls: "Assistant-placed phone calls (auto-on when telephony works).",
-};
 
 async function viewFlags() {
   shell("#/flags", loading());
   const d = await api("/flags");
-  const state = { ...d.defaults, ...d.overrides };
-
-  const rows = Object.keys(d.defaults).map((k) => {
-    const input = h("input", { type: "checkbox", checked: state[k], onchange: (e) => { state[k] = e.target.checked; } });
-    return h("div", { class: "flag-row" },
-      h("div", {},
-        h("div", { class: "name" }, k),
-        h("div", { class: "desc" }, (FLAG_DESC[k] || "") + "  (default: " + (d.defaults[k] ? "on" : "off") + ")")),
-      h("label", { class: "switch" }, input, h("span", { class: "track" })));
-  });
-
-  const ann = h("textarea", { class: "input", rows: 2, placeholder: "Shown inside the app on launch. Leave empty for none." });
-  if (d.announcement) ann.value = d.announcement;
   const force = h("input", { class: "input", type: "number", value: d.forceUpdateBelow || 0, style: "max-width:140px;" });
 
   const save = h("button", {
     class: "btn primary", onclick: async () => {
       try {
         await api("/flags", { method: "PUT", body: {
-          features: state, announcement: ann.value.trim() || null,
           forceUpdateBelow: parseInt(force.value, 10) || 0,
         }});
-        toast("Saved — apps pick this up on next launch.");
+        toast("Saved. Installed apps apply this on their next launch.");
       } catch (e) { toast(e.message, true); }
     },
   }, "Save changes");
 
   const apk = d.apk;
   shell("#/flags", h("div", {},
-    pageHead("Feature flags", "Flip features for every installed app instantly — no redeploy, no store release.", save),
-    h("div", { class: "grid three-col" },
-      h("div", { class: "card" }, h("h3", {}, "Features"), ...rows),
+    pageHead("App updates", "Require installed apps to update, without a redeploy or store release.", save),
+    h("div", { class: "grid two-col" },
       h("div", {},
         h("div", { class: "card" },
-          h("h3", {}, "Announcement"),
-          h("div", { class: "field" }, ann),
-          h("h3", { style: "margin-top:16px;" }, "Force update below version code"),
+          h("h3", {}, "Force update below version code"),
           h("div", { class: "field" }, force),
           h("div", { class: "faint", style: "font-size:12px;" }, "0 = never force. Installs older than this version code must update before continuing.")),
         h("div", { class: "card section-gap" },

@@ -35,8 +35,7 @@ kubectl apply -f k8s/00-namespace-config.yaml
 # Create real secrets (see full command list in k8s/01-secret.example.yaml)
 kubectl -n myassistant create secret generic myassistant-secrets \
   --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
-  --from-literal=GEMINI_API_KEY="..." \
-  --from-literal=GROQ_API_KEY="..."
+  --from-literal=OPENAI_API_KEY="..."
 
 kubectl apply -f k8s/10-deployment.yaml
 kubectl -n myassistant get pods -w        # wait for Running 1/1
@@ -143,18 +142,13 @@ restore from the nightly backup as above.
 Check these secrets before the deploy that ships Live voice and Poster Studio
 (check names only; never print values):
 
-- **`AI_LIVE_MODEL` must NOT be set to an old value.** The new `live` block in
-  `/ai/config` reads it, so a leftover `gemini-3.1-flash-live-preview` would
-  override the `gemini-3.8-live` default. Remove it unless you mean to pin a
-  model. `AI_LIVE_VOICE` (default `Callirrhoe`, runner-up `Vindemiatrix`)
-  switches the Live voice with no app release; `AI_LIVE=off` turns Live off.
+- The Realtime voice model is `OPENAI_REALTIME_MODEL`; `AI_LIVE=off` turns the
+  realtime conversation off.
 - **Good images need `FAL_KEY` and/or `CF_ACCOUNT_ID` + `CF_API_TOKEN`**
   (token with Workers AI permission). Without them the chain falls through to
   Pollinations (keyless, lowest quality).
-- **`GEMINI_IMAGE_BILLING=on` only once billing is enabled** on the Gemini
-  project (there is no free image tier). Default `auto` tries Gemini once and
-  cools down 6 h on a quota error. `GEMINI_IMAGE_API_KEY` lets images use a
-  billed key while text stays on the free one.
+- OpenAI gpt-image-1 is first in the image chain whenever `OPENAI_API_KEY` is
+  set.
 - The image finish (exact crop, sharpen, strip metadata) uses ffmpeg, which the
   Docker image has; local test runs without ffmpeg skip those checks.
 

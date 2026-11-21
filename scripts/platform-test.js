@@ -44,7 +44,7 @@ process.env.JWT_SECRET = "platform-" + crypto.randomBytes(16).toString("hex");
 process.env.PUBLIC_BASE_URL = "https://api.example.test";
 process.env.PLATFORM_RATE_PER_MIN = "100000";
 for (const k of [
-  "OPENAI_API_KEY", "GEMINI_MODEL", "GEMINI_LIVE_MODEL", "GEMINI_TTS_MODEL",
+  "OPENAI_API_KEY",
   "AUTH_DISABLED", "ALLOW_APP_KEY", "APP_API_KEY", "METRICS_TOKEN", "PLIVO_AUTH_TOKEN", "PLIVO_AUTH_ID",
   "BOLNA_API_KEY", "TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "GOOGLE_CSE_KEY",
   "AI_APPROVAL_SECRET", "SHORTCUTS",

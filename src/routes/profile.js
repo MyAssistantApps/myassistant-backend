@@ -112,14 +112,6 @@ router.put("/details", async (req, res) => {
   res.json(p);
 });
 
-// CONVERSATIONAL onboarding: free text/speech in, structured fields out.
-router.post("/conversational", async (req, res) => {
-  const uid = uidOf2(req);
-  if (!uid) return res.status(401).json({ error: "sign in" });
-  const out = await userCtx.extractProfile(uid, req.body?.text);
-  res.json(out);
-});
-
 // Assistant identity (name/gender/voice/style).
 router.put("/assistant", async (req, res) => {
   const uid = uidOf2(req);

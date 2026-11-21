@@ -5,8 +5,9 @@
  * male voice can only have a male name as assistant name" — checked every
  * time either one is set, not just at sign-up.
  *
- * The voice side is knowable: Gemini publishes the gender of each prebuilt
- * voice, and the app's own picker already labels them.
+ * The voice side is knowable: ai/liveVoices.js CATALOG gives the gender of
+ * each OpenAI voice. The older Gemini voice names are kept below because
+ * saved assistant profiles may still hold them.
  *
  * The NAME side cannot be a hardcoded list. These are mostly Indian
  * names — Anjali, Meera, Arjun, Kavya, Hemanth — and any list short

@@ -243,9 +243,8 @@ const src = (f) => fs.readFileSync(__dirname + "/../src/" + f, "utf8");
       return fetch(dbase, { method: "POST", body: fd });
     };
     // No key: nothing uploaded here may reach a real model.
-    const keys = { OPENAI_API_KEY: process.env.OPENAI_API_KEY, GEMINI_FALLBACK_KEYS: process.env.GEMINI_FALLBACK_KEYS };
+    const keys = { OPENAI_API_KEY: process.env.OPENAI_API_KEY };
     delete process.env.OPENAI_API_KEY;
-    delete process.env.GEMINI_FALLBACK_KEYS;
     const saved = [];
     try {
       await atest("an old .xls is kept, not read — and the reply says so in words", async () => {

@@ -2336,8 +2336,8 @@ function registerBuiltins() {
 
       // A VOICE CHANGE NEEDS A NEW SESSION TO BE HEARD.
       //
-      // Gemini Live fixes the voice in the setup message, which is sent
-      // once when the socket opens. Changing the profile mid-call updates
+      // The Realtime voice is fixed when the client secret is minted
+      // (ai/routes.js), once per session. Changing the profile mid-call updates
       // the database and nothing else: the user asks for a male voice, is
       // told it changed, and carries on hearing the same female one. The
       // Settings screen has the same gap — it saves and never reconnects.
@@ -5110,11 +5110,9 @@ function registerBuiltins() {
       "that you will tell them when it lands in their documents, then carry " +
       "on. Never wait for it and never describe what you have not seen. " +
       "Write a vivid prompt the way you would for an image.\n" +
-      "Tell the user what they are getting, because there are two kinds and " +
-      "the result says which: `kind: \"veo\"` is fully synthesised video, " +
-      "`kind: \"keyframes\"` is a cinematic sequence of generated frames " +
-      "crossfaded with a slow camera push — a real moving clip, but not " +
-      "synthesised motion. Describe the second one as that honestly if " +
+      "Tell the user what they are getting: a cinematic sequence of " +
+      "generated frames crossfaded with a slow camera push — a real moving " +
+      "clip, but not synthesised motion. Describe it as that honestly if " +
       "asked; never call it something it is not.",
     risk: "low",
     deviceAction: true,

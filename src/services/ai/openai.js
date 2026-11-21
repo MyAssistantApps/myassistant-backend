@@ -628,8 +628,6 @@ async function realtimeClientSecret({ voice, instructions = "", tools = [], mode
   return { value, expiresAt: Number(j.expires_at || (j.client_secret && j.client_secret.expires_at) || 0), model: m };
 }
 
-// ---------------------------------------------------------------- GPT-Live
-
 /** One person to OpenAI's abuse checks, never their id itself. */
 function safetyId(user) {
   return require("crypto").createHash("sha256").update(String(user)).digest("hex").slice(0, 32);

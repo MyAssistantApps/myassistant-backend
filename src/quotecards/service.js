@@ -187,7 +187,7 @@ async function writeLine(date, used) {
     const model = router.envModel("QUOTE_MODEL", require("../services/ai/openai").models.fast());
     const { reply } = await router.generateReply(
       [{ role: "user", content: JSON.stringify({ date, used: used.slice(-120) }) }],
-      { system: SYSTEM, json: true, model, modelEnv: "QUOTE_MODEL", timeoutMs: 30_000, noRetry: true }
+      { system: SYSTEM, json: true, model, timeoutMs: 30_000, noRetry: true }
     );
     let line = "";
     try {

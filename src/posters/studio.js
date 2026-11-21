@@ -512,9 +512,8 @@ async function design(uid, { request, format = "portrait", brand = {}, tzOffsetM
         {
           system: DESIGN_SYSTEM, json: true,
           model: router.envModel("POSTER_DESIGN_MODEL", router.chatModel()),
-          modelEnv: "POSTER_DESIGN_MODEL",
           timeoutMs: envNum("POSTER_DESIGN_TIMEOUT_MS", 10_000, 1000),
-          noRetry: true, thinking: "LOW",
+          noRetry: true,
         }
       );
       raw = parseJson(reply);

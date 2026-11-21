@@ -37,30 +37,12 @@ const TOOL_VERBS = [
   "pantry", "recipe", "cook", "grocery", "groceries", "kirana",
 ];
 
-// Fresh public facts with no tool word: cloud with Google Search grounding.
-const FRESH_WORDS = [
-  "today", "tonight", "tomorrow", "yesterday", "latest", "now", "current",
-  "currently", "live", "score", "scores", "price", "prices", "rate", "rates",
-  "who won", "won", "result", "results", "news of", "headlines", "this week",
-  "this year", "recent", "recently", "breaking", "update", "election",
-  "stock", "share price", "gold rate", "petrol price",
-];
-
-// Google Search grounding through AI Logic (the app's "search" route). Off
-// unless AI_GROUNDING=on since 2026-09-29: the project's grounding quota
-// ran out (429 on every fresh question) while the server's own web_search
-// and get_weather tools answer the same questions on the cloud route. The
-// app reads an empty list as "use your own", so a word nobody says is
-// what switches the route off.
+// Builds released before 2026-11-21 still have a Google-grounded "search"
+// route, picked by routing.freshWords. They read an empty list as "use
+// your own", so a word nobody says keeps them off it; the server's
+// web_search and get_weather tools answer those questions on the cloud
+// route instead.
 const NO_GROUNDING = "__grounding_off__";
-const groundingOn = () => /^(on|1|true|yes)$/i.test(String(process.env.AI_GROUNDING || "off").trim());
-// How hard the conversation model thinks before answering (minimal, low,
-// medium, high). Gemini 3's own default is high, far too slow to talk to.
-const THINKING = new Set(["minimal", "low", "medium", "high"]);
-const thinkingLevel = () => {
-  const v = envModel("AI_CLOUD_THINKING", "low").toLowerCase();
-  return THINKING.has(v) ? v : "low";
-};
 // The delivery a spoken reply gets when its model gave no tone of its own.
 const ttsStyle = () => envModel("AI_TTS_STYLE", "warm, friendly and natural");
 const liveOn = () => !/^(off|0|false|no)$/i.test(String(process.env.AI_LIVE || "on").trim());
@@ -78,7 +60,7 @@ function liveHangoverMs() {
 /**
  * HOW THE CLASSIC (non-Live) VOICE HEARS. "device" = the phone's own
  * recogniser (fast captions, one locale, "Kannada" heard as "Canada");
- * "record" = the phone records the turn and Gemini transcribes it in
+ * "record" = the phone records the turn and the server transcribes it in
  * whatever language was spoken — and the recording is kept for review,
  * so every turn can be heard in the admin panel (the owner, 2026-10-01).
  * AI_CLOUD_STT=device switches back.
@@ -150,13 +132,12 @@ async function forUser(userId) {
       cloud: served.cloud,
       cloudFast: served.cloudFast,
       cloudFallback: served.cloudFallback,
-      thinking: thinkingLevel(),
       tts: served.tts,
       ttsVoice: voice,
       ttsStyle: ttsStyle(),
       ttsLanguage: speechLanguage(profile && profile.user && profile.user.preferred_language),
     },
-    routing: { toolWords, freshWords: groundingOn() ? FRESH_WORDS.slice() : [NO_GROUNDING], shortcutNames },
+    routing: { toolWords, freshWords: [NO_GROUNDING], shortcutNames },
     limits: { maxToolRounds: 6 },
     live: liveBlock(uid, profile),
     listen: { cloudStt: cloudSttMode() },
@@ -166,6 +147,6 @@ async function forUser(userId) {
 }
 
 module.exports = {
-  forUser, speechLanguage, thinkingLevel, ttsStyle, cloudSttMode, liveBlock, liveOn,
-  TOOL_VERBS, FRESH_WORDS, NO_GROUNDING, groundingOn,
+  forUser, speechLanguage, ttsStyle, cloudSttMode, liveBlock, liveOn,
+  TOOL_VERBS, NO_GROUNDING,
 };

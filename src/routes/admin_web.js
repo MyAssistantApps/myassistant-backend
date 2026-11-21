@@ -1702,7 +1702,7 @@ router.post("/api/feedback/:id(\\d+)", async (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Feature flags (live overrides, read by /config)                     */
+/* App update controls (live overrides, read by /config)               */
 /* ------------------------------------------------------------------ */
 
 const configRoute = require("./config");
@@ -1710,9 +1710,6 @@ const configRoute = require("./config");
 router.get("/api/flags", async (_req, res) => {
   const o = await configRoute.overrides();
   res.json({
-    defaults: remoteConfig.features,
-    overrides: o.features || {},
-    announcement: o.announcement !== undefined ? o.announcement : remoteConfig.announcement,
     forceUpdateBelow: o.forceUpdateBelow !== undefined ? o.forceUpdateBelow : remoteConfig.forceUpdateBelow,
     apk: appUpdate.readMeta(),
   });
@@ -1721,15 +1718,6 @@ router.get("/api/flags", async (_req, res) => {
 router.put("/api/flags", async (req, res) => {
   const body = req.body || {};
   const clean = {};
-  if (body.features && typeof body.features === "object") {
-    clean.features = {};
-    for (const k of Object.keys(remoteConfig.features)) {
-      if (typeof body.features[k] === "boolean") clean.features[k] = body.features[k];
-    }
-  }
-  if (body.announcement !== undefined) {
-    clean.announcement = body.announcement ? String(body.announcement) : null;
-  }
   if (body.forceUpdateBelow !== undefined) {
     clean.forceUpdateBelow = parseInt(body.forceUpdateBelow, 10) || 0;
   }

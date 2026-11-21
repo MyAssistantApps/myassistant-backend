@@ -8,8 +8,7 @@
  *     seed, no JSON), both response envelopes are read, schnell (JSON)
  *     stands behind it;
  *   - fal results are downloaded from fal's own hosts only;
- *   - Gemini sends responseModalities ['IMAGE'] + imageConfig.aspectRatio,
- *     honours GEMINI_IMAGE_BILLING, never uses the retired 2.5 model;
+ *   - the OpenAI picture model gets the prompt and the canvas for the shape;
  *   - the prompt enhancer is skipped cleanly on failure or timeout, and a
  *     poster background always carries the no-text rule;
  *   - the poster design keeps ONLY what the user said (invented venue,
@@ -27,8 +26,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = process.env.NODE_ENV || "test";
 process.env.JWT_SECRET = "poster-studio-" + Math.random().toString(36).slice(2) + Date.now();
 for (const k of [
-  "OPENAI_API_KEY", "GEMINI_FALLBACK_KEYS", "GEMINI_IMAGE_API_KEY", "GEMINI_IMAGE_BILLING",
-  "GEMINI_IMAGE_MODEL", "CF_ACCOUNT_ID", "CF_API_TOKEN", "CF_IMAGE_MODEL", "CF_FALLBACK_IMAGE_MODEL",
+  "OPENAI_API_KEY", "CF_ACCOUNT_ID", "CF_API_TOKEN", "CF_IMAGE_MODEL", "CF_FALLBACK_IMAGE_MODEL",
   "FAL_KEY", "FAL_IMAGES", "HF_TOKEN", "HF_IMAGE_MODEL", "TOGETHER_API_KEY", "TOGETHER_IMAGE_MODEL",
   "IMAGE_PROVIDER_ORDER", "IMAGE_KEYLESS", "IMAGE_PROMPT_ENHANCE", "POSTER_AI",
   "POSTER_AI_BACKGROUNDS_PER_DAY", "POSTER_AI_DESIGNS_PER_DAY", "POSTER_STUDIO_MIN_BUILD",
@@ -49,7 +47,7 @@ const realFetch = globalThis.fetch;
 const calls = [];
 const blocked = [];
 const H = {
-  geminiImage: null, geminiText: null, cf: null, fal: null, falCdn: null, poll: null,
+  openaiImage: null, openaiText: null, cf: null, fal: null, falCdn: null, poll: null,
 };
 const json = (status, obj) => new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
 globalThis.fetch = async (input, init = {}) => {
@@ -93,7 +91,7 @@ function fakePng(w, h, size = 30 * 1024) {
   b.writeUInt32BE(h, 20);
   return b;
 }
-const geminiText = (text) => json(200, { model: "gpt-4.1-mini", choices: [{ message: { content: text }, finish_reason: "stop" }] });
+const openaiText = (text) => json(200, { model: "gpt-4.1-mini", choices: [{ message: { content: text }, finish_reason: "stop" }] });
 const imageResponse = (buf, type = "image/jpeg") => new Response(buf, { status: 200, headers: { "content-type": type } });
 
 /* ------------------------------------------------------------------ */
@@ -128,14 +126,13 @@ function withEnv(vars, fn) {
   const imagePost = require("../src/services/imagePost");
   const imageEdit = require("../src/services/imageEdit");
   const fal = require("../src/services/fal");
-  const photoEdit = require("../src/services/photoEdit");
   const studio = require("../src/posters/studio");
   const studioTools = require("../src/posters/studioTools");
   const registry = require("../src/tools/registry");
   require("../src/tools/builtins").registerBuiltins();
   const docs = require("../src/docs/store");
   const HAVE_FFMPEG = await imageEdit.haveFfmpeg();
-  const fresh = () => { imagegen._test._reset(); photoEdit._reset(); studio._test._reset(); resetHandlers(); };
+  const fresh = () => { imagegen._test._reset(); studio._test._reset(); resetHandlers(); };
 
   const stamp = String(Date.now()).slice(-7);
   const U = (await db.createUser({ email: `studio-u-${stamp}@example.test`, name: "Studio U" })).id;
@@ -155,7 +152,7 @@ function withEnv(vars, fn) {
 
   await atest("ordered by quality among the AVAILABLE providers, per purpose", () => withEnv({
     CF_ACCOUNT_ID: "acct", CF_API_TOKEN: "tok", FAL_KEY: "fk",
-    OPENAI_API_KEY: "gk", GEMINI_IMAGE_BILLING: "on",
+    OPENAI_API_KEY: "gk",
   }, () => {
     fresh();
     assert.deepStrictEqual(imagegen.providerOrder("photo"), ["openai", "fal-zimage", "cf-klein", "fal-qwen", "cf-schnell"]);
@@ -338,7 +335,7 @@ function withEnv(vars, fn) {
   }));
 
   /* ================================================================ */
-  console.log("\nGemini image");
+  console.log("\nOpenAI image");
   /* ================================================================ */
 
   await atest("the picture model gets the prompt, the canvas for the shape, and the key in a header", () => withEnv({
@@ -408,7 +405,7 @@ function withEnv(vars, fn) {
   }, async () => {
     fresh();
     H.openaiText = (call) => new Promise((resolve, reject) => {
-      const t = setTimeout(() => resolve(geminiText('{"prompt":"late"}')), 5000);
+      const t = setTimeout(() => resolve(openaiText('{"prompt":"late"}')), 5000);
       call.init.signal?.addEventListener("abort", () => { clearTimeout(t); reject(Object.assign(new Error("aborted"), { name: "TimeoutError" })); });
     });
     const t0 = Date.now();
@@ -424,7 +421,7 @@ function withEnv(vars, fn) {
     let sent = null;
     H.openaiText = (call) => {
       sent = call;
-      return geminiText(JSON.stringify({ prompt: 'Lord Krishna under a kadamba tree at golden hour, 85mm, warm rim light, with the words "Happy Janmashtami" in gold' }));
+      return openaiText(JSON.stringify({ prompt: 'Lord Krishna under a kadamba tree at golden hour, 85mm, warm rim light, with the words "Happy Janmashtami" in gold' }));
     };
     const hints = imagegen.subjectHints("Krishna");
     const e = await imagePrompt.enhancePrompt("Krishna background", { purpose: "background", mustKeep: hints });

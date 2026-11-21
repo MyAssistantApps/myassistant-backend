@@ -507,11 +507,16 @@ test("every screen open_app_screen offers is one the app can actually build", as
 
 test("asking for a male voice actually changes the voice, not just the label", () => {
   // gender and voice are separate columns and the live path reads `voice`.
-  // Setting only gender left it speaking with Kore while claiming otherwise.
+  // Setting only gender left it speaking in a female voice while claiming otherwise.
   const src = require("fs").readFileSync(__dirname + "/../src/users/context.js", "utf8");
   assert.match(src, /VOICE_FOR_GENDER/, "gender must map to a voice");
-  assert.match(src, /female:\s*"Kore"/, "female voice must be one the picker offers");
-  assert.match(src, /male:\s*"Charon"/, "male voice must be one the picker offers");
+  const lv = require("../src/ai/liveVoices");
+  const female = (src.match(/female:\s*"([a-z]+)"/) || [])[1];
+  const male = (src.match(/\bmale:\s*"([a-z]+)"/) || [])[1];
+  for (const [g, id] of [["female", female], ["male", male]]) {
+    const v = lv.byId(id);
+    assert.ok(v && v.gender === g, `the ${g} default must be a ${g} voice proxy.voiceFor accepts (got ${id})`);
+  }
   // An explicit voice must still win over the gender default.
   assert.match(src, /if \(!voice && VOICE_FOR_GENDER\[g\]\)/,
     "a voice the user chose explicitly must not be overwritten by a gender change");

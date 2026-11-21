@@ -5,16 +5,12 @@
  * key exists, and the chain is ordered by QUALITY among the ones that are
  * actually available, per purpose:
  *
- *   photo / illustration: gemini → fal z-image → cloudflare klein → fal qwen
- *   words in the picture: gemini → fal qwen-image → cloudflare klein → fal z-image
+ *   photo / illustration: openai → fal z-image → cloudflare klein → fal qwen
+ *   words in the picture: openai → fal qwen-image → cloudflare klein → fal z-image
  *   then (all purposes):  cloudflare schnell → HF / Together (opt-in only)
  *                         → Pollinations, the keyless last resort
  *
- *   • gemini — gemini-3.1-flash-image. No free tier for image OUTPUT on any
- *     model (Google pricing, 2026-09-24): GEMINI_IMAGE_BILLING=on says the
- *     key's project has billing; 'auto' (default) probes and cools down 6 h
- *     on a quota answer; 'off' never calls it. responseModalities ['IMAGE']
- *     and imageConfig.aspectRatio are sent, so the shape is honoured.
+ *   • openai (OPENAI_API_KEY) — gpt-image-1, skipped while the key is busy.
  *   • fal (FAL_KEY) — qwen-image-2512 ($0.02, the best open model at
  *     words) and z-image turbo (~$0.005/MP, photoreal). Results are
  *     downloaded; fal's CDN copy is temporary.
@@ -129,10 +125,6 @@ function budget() {
     keyless() { return Math.min(60_000, this.left()); },
   };
 }
-
-/* ------------------------------------------------------------------ */
-/* GEMINI                                                              */
-/* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
 /* OpenAI gpt-image-1 (2026-10-02): the one picture model — it makes a   */
@@ -678,33 +670,14 @@ async function generateImage(prompt, opts = {}) {
   return { ...out, prompt: p, enhanced, purpose };
 }
 
-/** True once a Veo/quota probe said video needs the paid tier. */
-let videoBlockedUntil = 0;
-
-/**
- * Veo video generation — paid-tier only on this key today. One cheap probe
- * per cooldown window keeps the answer honest without burning time; the
- * moment billing is enabled the same code path starts returning real MP4s.
- * Returns { buffer, mime } or null when the plan doesn't allow it.
- */
-async function tryVeoVideo(prompt) {
-  // Video generation rode on Gemini's Veo; with Gemini gone (2026-10-02)
-  // there is no video model wired yet. Null means "not available", which
-  // the video job reports honestly. Sora through OpenAI is the candidate.
-  void prompt;
-  return null;
-}
-
 /** Tests only: forget cooldowns learnt from earlier stubbed answers. */
 function _reset() {
-  geminiBlockedUntil = 0;
-  geminiImageConfigOk = true;
   cfBlockedUntil = 0;
   fal._reset();
 }
 
 module.exports = {
-  generateImage, tryVeoVideo, jpegSize, shapeOf, shapeName, configuredProviders,
+  generateImage, jpegSize, shapeOf, shapeName, configuredProviders,
   withSubjectHints, subjectHints, providerOrder, wantsText, SHAPES,
   cfDecode, fitEdge,
   _test: { tryOpenAI, tryFal, tryCloudflare, tryPollinations, _reset },

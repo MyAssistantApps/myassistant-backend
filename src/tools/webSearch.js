@@ -6,24 +6,18 @@
  * rather than inventing results. Adding a key switches it on with no other
  * code change.
  *
- * Supported (first configured wins):
+ * Supported, in order (see providerChain):
+ *   OPENAI_API_KEY            OpenAI web search (reads the pages, writes the answer)
  *   BRAVE_SEARCH_API_KEY      https://api.search.brave.com
  *   TAVILY_API_KEY            https://tavily.com
  *   GOOGLE_CSE_KEY + GOOGLE_CSE_CX   Google Programmable Search
- *   (fallback) GEMINI_API_KEY — Gemini search grounding: a fast text model
- *   answers the query with the googleSearch grounding tool. Not a fake:
- *   the answer is grounded in real search results with real source URLs.
- *   Grounding has its own (small, free-tier) quota, so a dedicated search
- *   key above is still the reliable choice — this keeps search working
- *   at all when none is set (the live models reject the googleSearch tool
- *   in-session, so this is their only live-data path).
+ *   (always last) Wikipedia — keyless.
  */
 const TIMEOUT_MS = 8000;
 
 /**
  * Providers to try IN ORDER. Keyed providers first (best quality), then
- * Gemini grounding, then DuckDuckGo — which needs no key and no quota, so
- * search can never be dead. One provider failing (429, outage, no
+ * Wikipedia — which needs no key and no quota, so search can never be dead. One provider failing (429, outage, no
  * results) falls through to the next instead of failing the user's turn.
  */
 function providerChain() {

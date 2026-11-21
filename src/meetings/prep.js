@@ -13,16 +13,17 @@
  *   • open promises involving them (commitments);
  *   • recent emails from them, when Gmail is linked.
  *
- * One short Gemini text call writes {summary, people, context,
+ * One short OpenAI text call writes {summary, people, context,
  * talkingPoints, asks, risks} from those facts ONLY. The answer is checked
  * (no number the facts do not hold, no person who is not in them) and a
  * code-written prep replaces it on any doubt. When nothing is known, the
  * prep says so plainly instead of sounding informed.
  *
  * Kill switches: MEETING_PREP_AI=off (code-written prep only),
- * MEETING_PREP_MODEL, MEETING_PREP_TIMEOUT_MS (8000),
- * MEETING_PREP_CACHE_MIN (10; 0 = off — the same facts asked again within
- * it reuse the words instead of spending another free-tier request).
+ * MEETING_PREP_MODEL (an OpenAI model id; blank = OPENAI_FAST_MODEL),
+ * MEETING_PREP_TIMEOUT_MS (8000), MEETING_PREP_CACHE_MIN (10; 0 = off —
+ * the same facts asked again within it reuse the words instead of paying
+ * for another OpenAI request).
  */
 const db = require("../db");
 
@@ -547,9 +548,9 @@ async function prepare(uid, { meetingId = null, tzOffsetMin = 330, now = _deps.n
       const { reply } = await _deps.generate(
         [{ role: "user", content: JSON.stringify(facts) }],
         {
-          system: SYSTEM, json: true, noRetry: true, thinking: "MINIMAL",
-          model: router.envModel("MEETING_PREP_MODEL", "gemini-flash-lite-latest"),
-          modelEnv: "MEETING_PREP_MODEL", timeoutMs: timeoutMs(),
+          system: SYSTEM, json: true, noRetry: true,
+          model: router.envModel("MEETING_PREP_MODEL", require("../services/ai/openai").models.fast()),
+          timeoutMs: timeoutMs(),
         }
       );
       const checked = checkModel(reply, facts);

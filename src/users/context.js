@@ -12,11 +12,6 @@
  *                       (name — e.g. "Maya" — gender, voice, style)
  *   user_instructions   standing rules ("always ask before sending
  *                       messages", "call me Dhanu"), soft-deletable
- *
- * Conversational onboarding: extractProfile() turns "I'm Dhanush, I live
- * in Mangalore, I'm a software engineer" into structured fields via one
- * structured-output model call. Extraction NEVER overwrites a field the
- * user set explicitly with a lower-confidence guess — it only fills gaps.
  */
 const { query, one, run } = require("../db");
 
@@ -188,13 +183,12 @@ async function updateProfile(userId, fields = {}) {
  * `gender` and `voice` are separate columns, and the live path reads
  * `voice`. So "switch to a male voice" set gender=male, the assistant
  * said "I've changed my voice to sound male", and it went on speaking
- * with Kore — a female voice. Another sentence that was not true.
+ * in a female voice. Another sentence that was not true.
  *
- * The names are the ones this codebase already uses: the app's own
- * voice picker labels Kore/Aoede female and Puck/Charon/Fenrir male.
- * Nothing new is invented here.
+ * Both values must be voices in ai/liveVoices.js CATALOG with that
+ * gender: proxy.voiceFor turns any other name into the default (marin).
  */
-const VOICE_FOR_GENDER = { female: "Kore", male: "Charon" };
+const VOICE_FOR_GENDER = { female: "marin", male: "cedar" };
 
 /**
  * The assistant's own profile, independent of whether a `users` row
@@ -211,8 +205,8 @@ async function getAssistantProfile(userId) {
 
 async function setAssistantProfile(userId, { name, gender, voice, style } = {}) {
   if (!uidOk(userId)) throw new Error("authenticated userId required");
-  // An EXPLICIT voice always wins — someone who picked Fenrir in Settings
-  // and then says "be male" keeps Fenrir. Only a gender change with no
+  // An EXPLICIT voice always wins — someone who picked ash in Settings
+  // and then says "be male" keeps ash. Only a gender change with no
   // voice of its own moves the voice.
   const g = String(gender || "").toLowerCase().trim();
   if (!voice && VOICE_FOR_GENDER[g]) voice = VOICE_FOR_GENDER[g];
@@ -387,49 +381,6 @@ function updateLine(appBuild) {
   );
 }
 
-/* ---------------- conversational onboarding (§3) ---------------- */
-
-/**
- * Extracts structured profile fields from free speech/text using one
- * structured-output model call. Applies ONLY non-empty extracted fields
- * and returns what changed, so the UI can confirm honestly.
- */
-async function extractProfile(userId, text) {
-  if (!uidOk(userId)) throw new Error("authenticated userId required");
-  const t = String(text || "").trim();
-  if (!t) return { applied: {}, profile: await getProfile(userId) };
-
-  const { callGemini } = require("../services/ai/router");
-  const prompt =
-    "Extract the speaker's personal details from this introduction. " +
-    'Respond ONLY with JSON: {"name":"","gender":"","profession":"",' +
-    '"organisation":"","location":"","preferred_language":"","timezone":""}. ' +
-    "Use empty strings for anything not stated. gender only if explicitly " +
-    "stated (male/female/other). Do not guess.\n\nIntroduction: " + t;
-
-  let fields = {};
-  try {
-    const out = await callGemini(
-      [{ role: "user", content: prompt }],
-      "You extract structured data. Respond with ONLY the JSON object, no prose, no markdown."
-    );
-    const raw = String(out || "{}")
-      .replace(/^```json\s*/i, "").replace(/```\s*$/, "").trim();
-    fields = JSON.parse(raw);
-  } catch (e) {
-    // Extraction failing must not fail onboarding — the user can still
-    // fill the form. Report honestly that nothing was extracted.
-    return { applied: {}, error: "could not understand that, please try the form", profile: await getProfile(userId) };
-  }
-
-  const applied = {};
-  for (const [k, v] of Object.entries(fields)) {
-    if (typeof v === "string" && v.trim()) applied[k] = v.trim();
-  }
-  const profile = await updateProfile(userId, applied);
-  return { applied, profile };
-}
-
 /**
  * Saves the language the user asked for, in so many words.
  *
@@ -479,6 +430,5 @@ module.exports = {
   listInstructions,
   removeInstruction,
   contextBlock,
-  extractProfile,
   PROFILE_FIELDS,
 };

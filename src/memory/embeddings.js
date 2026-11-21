@@ -25,7 +25,7 @@
  */
 
 const PROVIDERS = {
-  /** Google Gemini embeddings — same key as the rest of the app. */
+  /** OpenAI embeddings — same key as the rest of the app. */
   openai: {
     available: () => Boolean(process.env.OPENAI_API_KEY),
     dims: 1536,

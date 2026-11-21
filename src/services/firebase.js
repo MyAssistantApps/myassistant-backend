@@ -35,10 +35,6 @@ function ensure() {
 
 const configured = () => fs.existsSync(KEY_PATH);
 
-/// The Admin Auth client, behind ensure(). A function (not the SDK import
-/// itself) so the /ai/firebase-token route and its tests share one seam.
-const auth = () => getAuth();
-
 /**
  * Forget a phone number at Firebase when its account is deleted.
  *
@@ -64,4 +60,4 @@ async function deletePhoneUser(phone) {
   }
 }
 
-module.exports = { ensure, configured, auth, deletePhoneUser };
+module.exports = { ensure, configured, deletePhoneUser };

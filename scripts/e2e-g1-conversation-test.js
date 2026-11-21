@@ -55,7 +55,7 @@ process.env.DATA_DIR = DATA_DIR;
 process.env.OPENAI_API_KEY = "g1-e2e-not-a-real-key";
 process.env.JWT_SECRET = "g1-e2e-" + crypto.randomBytes(12).toString("hex");
 for (const k of [
-  "GEMINI_LIVE_MODEL", "GEMINI_LIVE_MODEL_NEXT", "LIVE_BARGE_IN", "LIVE_SILENCE_MS",
+  "LIVE_BARGE_IN", "LIVE_SILENCE_MS",
   "LIVE_SILENCE_MS_DUPLEX", "LIVE_ACTIVITY_HANDLING", "LIVE_END_SENSITIVITY",
   "LIVE_GOOGLE_SEARCH", "MORNING_BRIEF", "MORNING_BRIEF_HOUR", "MORNING_BRIEF_WINDOW_H",
   "QUIET_HOURS_START", "QUIET_HOURS_END", "BRAVE_SEARCH_API_KEY", "TAVILY_API_KEY",
@@ -121,7 +121,6 @@ aiRouter.generateReply = async (messages = [], opts = {}) => {
   return { reply: "[]" };
 };
 aiRouter.generateReplyStream = async () => { throw new Error("g1-e2e: offline"); };
-aiRouter.callGemini = async () => { throw new Error("g1-e2e: offline"); };
 
 /* Push: captured, never sent. */
 const push = require("../src/services/push");

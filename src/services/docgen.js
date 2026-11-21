@@ -15,7 +15,7 @@
  *
  * THE MODEL DOES NOT WRITE THE FILE, IT ORDERS ONE. The calling agent
  * passes a brief ("8-slide deck on our Q3 numbers for the board"); this
- * module makes ONE dedicated Gemini call that returns a strict content
+ * module makes ONE dedicated OpenAI call that returns a strict content
  * spec, then renders it. Two reasons that split matters:
  *   • over the live voice socket, long tool arguments are slow and get
  *     truncated — a brief is one line, a ten-page report is not;
@@ -30,18 +30,8 @@ const fs = require("fs");
 const path = require("path");
 const { envModel } = require("./ai/router");
 
-// Unset, the alias Google keeps current: the old default, gemini-2.5-flash,
-// answers new users 404 "no longer available" (2026-09-25).
+// OPENAI_DOC_MODEL overrides the authoring model; unset, the smart model.
 const DOC_MODEL = () => envModel("OPENAI_DOC_MODEL", require("./ai/openai").models.smart());
-
-/** Authoring thinking budget. 0 = fastest, which is the product default
- *  ("time is precious"); raise via env if a deck ever reads thin — no
- *  rebuild needed. Only the 2.5-flash family accepts this field; any
- *  other model (the -latest default included) thinks at its own level. */
-const DOC_THINKING = () => {
-  const n = Number(process.env.GEMINI_DOC_THINKING);
-  return Number.isFinite(n) ? n : 0;
-};
 
 const KINDS = ["pdf", "slides", "doc", "sheet"];
 
@@ -149,7 +139,7 @@ function pickFonts(sample) {
 }
 
 /* ------------------------------------------------------------------ */
-/* AUTHORING — one Gemini call, strict JSON                            */
+/* AUTHORING — one OpenAI call, strict JSON                            */
 /* ------------------------------------------------------------------ */
 
 const SHAPE = {

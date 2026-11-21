@@ -10,17 +10,12 @@
 # test fills it with a dummy. Change this file in the same PR as the .env.
 NODE_ENV=production
 LOG_LEVEL=info
-GEMINI_MODEL=gemini-3.5-flash
-GEMINI_LIVE_MODEL=gemini-2.5-flash-native-audio-preview
-GEMINI_TTS_MODEL=gemini-2.5-flash-preview-tts
 AGENT_CALL_DAILY_LIMIT=20
 PORT=3000
 DATA_DIR=/app/data
 PUBLIC_BASE_URL=https://backend.envisionsit.in
 ALLOW_APP_KEY=false
 AUTH_DISABLED=false
-# Empty on the server (2026-11-01): no Gemini key.
-GEMINI_API_KEY=
 # On for demos only. MUST be false before a public release (anyone could
 # sign in as any phone number). The test prints a warning while it is on.
 ALLOW_DEV_PHONE_VERIFY=true

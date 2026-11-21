@@ -584,11 +584,11 @@ async function deepResearch(payload = {}) {
             url,
           });
         } else if (text) {
-          // THE GEMINI PROVIDER'S ANSWER HAS NO URL. Its grounded reply
-          // arrives as {title:"Web answer", snippet:<the answer>, url:""}
-          // with citation chunks after it — so requiring a URL threw away
-          // the single most substantial thing the search returned, and when
-          // grounding produced no chunks it threw away everything and the
+          // A WRITTEN ANSWER MAY HAVE NO URL. OpenAI search returns the
+          // answer as one result (url "" when it cited nothing) with its
+          // sources after it — so requiring a URL threw away the single
+          // most substantial thing the search returned, and when there
+          // were no sources it threw away everything and the
           // job reported "no search provider returned anything".
           //
           // Kept, but kept SEPARATE: it cannot be cited as a numbered
@@ -726,10 +726,8 @@ async function videoJob(payload = {}) {
         category: "other",
         docDate: new Date().toISOString().slice(0, 10),
         summary:
-          vid.kind === "veo"
-            ? `AI-generated video from: ${prompt}`
-            : `AI-generated clip (${vid.frames} generated frames, crossfaded ` +
-              `with a slow camera move) from: ${prompt}`,
+          `AI-generated clip (${vid.frames} generated frames, crossfaded ` +
+          `with a slow camera move) from: ${prompt}`,
         tags: ["generated", "video"],
         fullText: `AI-generated video. Prompt: ${prompt}`,
       })

@@ -221,28 +221,6 @@ async function resampleTo(buffer, longEdge) {
   return out || buffer;
 }
 
-/* ------------------------------------------------------------------ */
-/* PROVIDER 1 — Gemini image models (multi-image edit)                 */
-/*                                                                     */
-/* TWO WIRE FORMATS, ON PURPOSE. Google's current documentation for    */
-/* the image models describes a new endpoint —                          */
-/*   POST /v1beta/interactions  { model, input:[...], response_format } */
-/* — while the rest of this codebase (and every working Gemini call in  */
-/* it) uses the classic                                                 */
-/*   POST /v1beta/models/{id}:generateContent { contents:[{parts}] }.   */
-/* Which of the two serves image OUTPUT today could not be established  */
-/* from the documentation, and getting it wrong means the feature never  */
-/* works at all. So both are implemented, the first success is          */
-/* remembered for the life of the process, and the log says which one   */
-/* answered. This costs one wasted round-trip once, ever.               */
-/*                                                                     */
-/* The MODEL IDS matter just as much: gemini-3-pro-image-preview and    */
-/* gemini-3.1-flash-image-preview were retired in June 2026, and        */
-/* gemini-2.5-flash-image shuts down on 2 October 2026, so none of the  */
-/* three is a safe default. The list below is the current non-preview   */
-/* line, overridable by env so a rename never needs a redeploy.         */
-/* ------------------------------------------------------------------ */
-
 /** gpt-image-1's canvas for a named shape. */
 const SIZES = {
   portrait: { width: 1024, height: 1536 },
@@ -253,90 +231,6 @@ const SIZES = {
 /** People default to a portrait canvas, never a square (Style Studio). */
 function sizeFor(aspect) {
   return SIZES[String(aspect || "")] || SIZES.portrait;
-}
-
-function harvestImage(json) {
-  const seen = new Set();
-  const stack = [json];
-  while (stack.length) {
-    const n = stack.pop();
-    if (!n || typeof n !== "object" || seen.has(n)) continue;
-    seen.add(n);
-    if (Array.isArray(n)) { for (const v of n) stack.push(v); continue; }
-
-    const data = n.data ?? n.bytesBase64Encoded ?? n.b64_json ?? n.imageBytes;
-    const mime = n.mimeType || n.mime_type || n.contentType || n.content_type;
-    // A base64 image is long; short `data` fields are ids and flags.
-    if (typeof data === "string" && data.length > 2000 && (!mime || /^image\//.test(mime))) {
-      try {
-        const buffer = Buffer.from(data, "base64");
-        if (buffer.length > 2048) return { buffer, mime: mime || "image/png" };
-      } catch (_) {}
-    }
-    for (const k of Object.keys(n)) stack.push(n[k]);
-  }
-  return null;
-}
-
-/** Any text the model returned instead of an image — usually a refusal. */
-function harvestText(json) {
-  const out = [];
-  const seen = new Set();
-  const stack = [json];
-  while (stack.length) {
-    const n = stack.pop();
-    if (!n || typeof n !== "object" || seen.has(n)) continue;
-    seen.add(n);
-    if (Array.isArray(n)) { for (const v of n) stack.push(v); continue; }
-    if (typeof n.text === "string" && n.text.trim()) out.push(n.text.trim());
-    for (const k of Object.keys(n)) stack.push(n[k]);
-  }
-  return out.join(" ").slice(0, 220);
-}
-
-function interactionsBody(model, instruction, images, aspect, hiQuality) {
-  return {
-    model,
-    input: [
-      { type: "text", text: instruction },
-      ...images.map((im) => ({
-        type: "image",
-        mime_type: im.mime || "image/jpeg",
-        data: im.buffer.toString("base64"),
-      })),
-    ],
-    response_format: {
-      type: "image",
-      aspect_ratio: geminiAspect(aspect),
-      image_size: hiQuality ? "2K" : "1K",
-    },
-  };
-}
-
-function generateContentBody(instruction, images, aspect, hiQuality, withConfig) {
-  const body = {
-    contents: [{
-      parts: [
-        { text: instruction },
-        ...images.map((im) => ({
-          inlineData: {
-            mimeType: im.mime || "image/jpeg",
-            data: im.buffer.toString("base64"),
-          },
-        })),
-      ],
-    }],
-  };
-  if (withConfig) {
-    body.generationConfig = {
-      responseModalities: ["IMAGE"],
-      imageConfig: {
-        aspectRatio: geminiAspect(aspect),
-        ...(hiQuality ? { imageSize: "2K" } : {}),
-      },
-    };
-  }
-  return body;
 }
 
 /**
@@ -479,9 +373,9 @@ async function editImage({
 function configured() {
   const out = [];
   for (const p of CHAIN) {
-    // Gemini counts as ready only when the account can pay for its image
-    // model and it is not cooling down after a quota error — otherwise
-    // the app offered "Make it" and the server said no (2026-10-01).
+    // A provider is ready only when it has a key and is not cooling down
+    // after a quota error — otherwise the app offered "Make it" and the
+    // server said no (2026-10-01).
     const ready = p.ready ? p.ready() : false;
     out.push({ name: p.name, ready, vtoOnly: !!p.vtoOnly });
   }
@@ -493,10 +387,7 @@ module.exports = {
   normalizeInput, fitExact, resampleTo, transform, imageSize, haveFfmpeg,
   imageKind, decodePlan, MAX_DECODE_PIXELS,
   NoProviderError,
-  // Exported for the regression tests: the response shape these two walk
-  // is the one fact about this integration the documentation would not
-  // pin down, so it is the one that must be tested rather than trusted.
-  harvestImage, harvestText, SIZES, sizeFor,
+  SIZES, sizeFor,
 };
 
 // Optional keyed providers register themselves. Each module is a no-op
