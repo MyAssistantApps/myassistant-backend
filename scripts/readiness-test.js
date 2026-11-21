@@ -117,6 +117,30 @@ async function atest(name, fn) {
     }
   });
 
+  console.log("\nhelp and feedback");
+  await atest("the app files feedback and Pro interest into the Feedback inbox", async () => {
+    const express = require("express");
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => { req.user = { sub: "999002" }; next(); });
+    app.use("/feedback", require("../src/feedback/routes"));
+    const srv = app.listen(0);
+    try {
+      const url = `http://127.0.0.1:${srv.address().port}/feedback`;
+      const post = (body) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const summary = `Pro interest: professional monthly ${Date.now()}`;
+      const ok = await post({ kind: "feature", summary, source: "premium" });
+      assert.strictEqual(ok.status, 200);
+      const row = await db.one(`SELECT source, kind, user_asked FROM developer_feedback WHERE summary = $1`, [summary]);
+      assert.deepStrictEqual({ ...row, user_asked: Number(row.user_asked) }, { source: "premium", kind: "feature", user_asked: 1 });
+      const empty = await post({ kind: "bug", summary: "   " });
+      assert.strictEqual(empty.status, 400);
+    } finally {
+      srv.close();
+      await db.run(`DELETE FROM developer_feedback WHERE user_id = 999002`);
+    }
+  });
+
   console.log(`\n${passed} passed${process.exitCode ? ", some FAILED" : ""}`);
   process.exit(process.exitCode || 0);
 })().catch((e) => {
