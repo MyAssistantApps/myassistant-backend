@@ -238,12 +238,16 @@ function sizeFor(aspect) {
  * photo comes out, the person stays the person. A 429 is quota: noted so
  * editImage reports "switched off" honestly, and the inbox is told.
  */
-async function tryOpenAI({ instruction, images, aspect, notes, exact }) {
+async function tryOpenAI({ instruction, images, aspect, notes, exact, quality, inputFidelity }) {
   const openai = require("./ai/openai");
   if (!openai.ready()) { notes.push("openai: no key"); return null; }
   const size = exact?.width && exact?.height ? exact : sizeFor(aspect);
   try {
-    const out = await openai.imageEdit(instruction, images, { width: size.width, height: size.height });
+    const out = await openai.imageEdit(instruction, images, {
+      width: size.width, height: size.height,
+      ...(quality ? { quality } : {}),
+      ...(inputFidelity ? { inputFidelity } : {}),
+    });
     return { ...out, provider: `openai:${openai.models.image()}` };
   } catch (e) {
     if (e.status === 429) {
@@ -288,11 +292,13 @@ class NoProviderError extends Error {
  * @param {object}   o.exact        {width, height} to force afterwards
  * @param {boolean}  o.hiQuality    ask for the larger/costlier output
  * @param {number}   o.minLongEdge  resample up to this if the result is small
+ * @param {string}   [o.quality]       'low' | 'medium' | 'high' (default: OPENAI_IMAGE_QUALITY)
+ * @param {string}   [o.inputFidelity] 'high' keeps the face closest to the photo
  * @returns {Promise<{buffer, mime, provider, ms, width, height, notes}>}
  */
 async function editImage({
   instruction, images, aspect = "portrait", exact = null,
-  hiQuality = true, minLongEdge = 0,
+  hiQuality = true, minLongEdge = 0, quality = "", inputFidelity = "",
 }) {
   if (!instruction || !images?.length) throw new Error("instruction and at least one image are required");
   const started = Date.now();
@@ -307,7 +313,7 @@ async function editImage({
   for (const p of CHAIN) {
     if (p.when && !p.when({ images: prepared })) continue;
     try {
-      result = await p.run({ instruction, images: prepared, aspect, notes, hiQuality, exact });
+      result = await p.run({ instruction, images: prepared, aspect, notes, hiQuality, exact, quality, inputFidelity });
     } catch (e) {
       notes.push(`${p.name}: threw ${e.message}`);
       result = null;

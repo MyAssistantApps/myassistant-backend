@@ -523,13 +523,16 @@ async function imageGenerate(prompt, { width, height, quality = env("OPENAI_IMAG
 }
 
 /** A picture changed as instructed, keeping what the instruction keeps. images: [{buffer, mime}] */
-async function imageEdit(prompt, images, { width, height, quality = env("OPENAI_IMAGE_QUALITY", "high"), timeoutMs = 120_000 } = {}) {
+async function imageEdit(prompt, images, { width, height, quality = env("OPENAI_IMAGE_QUALITY", "high"), inputFidelity = "", timeoutMs = 120_000 } = {}) {
   const form = new FormData();
   form.append("model", models.imageEdit());
   form.append("prompt", String(prompt).slice(0, 4000));
   form.append("n", "1");
   form.append("size", imageSize(width, height));
   form.append("quality", quality);
+  // "high" keeps faces and fine detail of the FIRST image much closer to
+  // the original (gpt-image-1 only; costs extra input tokens).
+  if (inputFidelity === "high" || inputFidelity === "low") form.append("input_fidelity", inputFidelity);
   (images || []).slice(0, 4).forEach((im, i) => {
     const mime = /png/i.test(im.mime || "") ? "image/png" : /webp/i.test(im.mime || "") ? "image/webp" : "image/jpeg";
     form.append("image[]", new Blob([im.buffer], { type: mime }), `image-${i}.${mime.split("/")[1]}`);

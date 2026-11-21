@@ -437,6 +437,12 @@ app.use("/clients", appAuth, require("./routes/clients"));
 // CLINIC — the doctor's workspace (today, follow-ups, dues). Doctors only:
 // the router itself enforces persona === 'doctor' after appAuth.
 app.use("/clinic", appAuth, require("./clinic/routes"));
+// WORKSPACE — the dashboard for every profession without a Pro workspace
+// (engineers, teachers, CAs, students…): packs, routines, the day plan.
+app.use("/workspace", appAuth, require("./workspace/routes"));
+// CONNECT — talk live to a contact's own assistant (their name, voice and
+// photo): messages, urgent alerts, free/busy and appointments.
+app.use("/connect", appAuth, perUserLimit, require("./connect/routes"));
 
 // TASK OUTCOMES — what the assistant was asked to do and what REALLY
 // happened (call connected / failed and why…). Written by the device and by

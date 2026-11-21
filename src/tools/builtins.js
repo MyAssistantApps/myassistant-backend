@@ -7170,6 +7170,55 @@ function registerBuiltins() {
     }
   });
   registry.register({
+    name: "connect_to_assistant",
+    description:
+      "TALK TO ANOTHER PERSON'S ASSISTANT, LIVE — 'connect me to Alan's " +
+      "assistant', 'let me talk to Priya's agent', 'call Ravi's assistant'. " +
+      "Opens a voice call on this phone with that person's OWN assistant " +
+      "(their assistant's name, voice and photo), which can take a message, " +
+      "pass on something urgent, say when they are free and book an " +
+      "appointment. Only for contacts who use this app. NOT for sending a " +
+      "message (send_agent_message) or phoning the person (place_phone_call).",
+    risk: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contact_name: { type: "string", description: "Whose assistant to connect to (e.g. Alan)" },
+      },
+      required: ["contact_name"],
+    },
+    async execute(args, ctx) {
+      if (!ctx.userId) return { ok: false, error: "not signed in" };
+      const fix = await require("../agents/contactFix").best(ctx.userId, args.contact_name).catch(() => null);
+      const name = fix ? fix.name : args.contact_name;
+      const who = await resolveRecipient(ctx.userId, name);
+      if (who.ambiguous) {
+        return { ok: false, speak: `I found more than one match — ${who.ambiguous}. Whose assistant should I connect to?` };
+      }
+      if (!who.appUser) {
+        return {
+          ok: false,
+          error: who.contactPhone ? "this contact does not use MyAssistant yet" : "no saved contact by that name",
+          speak: who.contactPhone
+            ? `${name} does not use MyAssistant yet, so there is no assistant to connect to. I can send them a message instead.`
+            : `I could not find ${name} in your contacts.`,
+        };
+      }
+      const connect = require("../connect/service");
+      try {
+        const { card } = await connect.host(ctx.userId, who.appUser.id);
+        return {
+          ok: true,
+          deviceAction: { type: "connect_assistant", hostId: card.id, ownerName: card.ownerName, assistantName: card.assistantName },
+          speak: `Connecting you to ${card.ownerName}'s assistant, ${card.assistantName}.`,
+        };
+      } catch (e) {
+        if (e instanceof connect.ConnectError) return { ok: false, error: e.message, speak: e.message };
+        throw e;
+      }
+    },
+  });
+  registry.register({
     name: "send_agent_message",
     description:
       "THE DEFAULT way to send a message to a person — 'send a message to " +

@@ -4,6 +4,7 @@
  * GET    /profile                 user + remembered facts
  * GET    /profile/full            profile incl. assistant identity (Settings)
  * PUT    /profile/details         structured onboarding fields
+ * POST   /profile/profession/resolve  free-text profession -> workspace
  * PUT    /profile/assistant       assistant name / gender / voice / style
  * GET|POST|DELETE /profile/instructions   standing rules
  * GET|DELETE      /profile/memories       remembered facts
@@ -56,6 +57,17 @@ router.put("/details", async (req, res) => {
     if (now !== null) await require("../listings/store").unpublishIfNotPro(uid, now).catch(() => {});
   }
   res.json(p);
+});
+
+// "What do you do?" in the user's own words → the workspace it maps to.
+// Read-only: the app shows the answer and saves it with PUT /details.
+router.post("/profession/resolve", async (req, res) => {
+  const uid = uidOf2(req);
+  if (!uid) return res.status(401).json({ error: "sign in" });
+  const text = String(req.body?.text ?? "");
+  if (!text.trim()) return res.status(400).json({ error: "text required" });
+  const out = await require("../users/professionResolve").resolveProfession(text);
+  res.json(out);
 });
 
 // Assistant identity (name/gender/voice/style).

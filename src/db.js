@@ -631,6 +631,8 @@ function publicUser(u) {
     // after sign-in already knows which workspaces to show.
     persona: u.persona || "",
     specialty: u.specialty || "",
+    // Their own words ("Chartered Accountant"), shown on the Home banner.
+    profession: u.profession || "",
   };
 }
 

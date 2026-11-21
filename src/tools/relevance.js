@@ -38,7 +38,7 @@ const CORE = new Set([
   // scorer would catch from a two-word question.
   "find_places_nearby", "get_current_location",
   "list_reminders", "schedule_task", "place_phone_call",
-  "send_agent_message", "send_whatsapp_message",
+  "send_agent_message", "send_whatsapp_message", "connect_to_assistant",
   "search_documents", "create_document",
   // "Arnesh vs State of Bihar pdf" — a public PDF, asked out of nowhere
   // (2026-10-07); without it the turn only had the user's own files.

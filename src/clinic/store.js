@@ -303,18 +303,67 @@ async function createAppointment(userId, a, { requireFreeSlot = false, tzOffsetM
   const name = clean(a.patientName, 120);
   if (!name) throw new Error("patient name required");
   const p = await getProfile(userId);
+  // EVERY BOOKING HAS A PATIENT RECORD (owner, 2026-11-21: "all the booked
+  // appointments, and even the patient records should be there"). A booking
+  // made by another person's assistant, the public page or by voice names a
+  // patient but no record; the record is found by phone (or exact name) or
+  // made, so the appointment opens that patient's file and documents.
+  let made = null;
+  if (!a.clientId) {
+    const r = await ensurePatient(userId, name, a.patientPhone, { withCreated: true }).catch(() => null);
+    if (r && r.id) { a = { ...a, clientId: r.id }; if (r.created) made = r.id; }
+  }
   // Bookings for one professional are serialised: the free-slot check and
   // the insert used to be separate round trips, so two concurrent bookings
   // could both see 10:15 free and both be told they were booked. The lock
   // is per professional and held only until the insert commits.
-  return tx(async (c) => {
-    await c.query("SELECT pg_advisory_xact_lock(hashtext('clinic_slot'), $1)", [Number(userId)]);
-    if (requireFreeSlot) {
-      const free = await slotsFor(userId, localMidnight(starts, tzOffsetMin), { tzOffsetMin });
-      if (!free.includes(starts)) throw new SlotTakenError();
-    }
-    return insertAppointment(c, userId, a, p, starts, name);
-  });
+  try {
+    return await tx(async (c) => {
+      await c.query("SELECT pg_advisory_xact_lock(hashtext('clinic_slot'), $1)", [Number(userId)]);
+      if (requireFreeSlot) {
+        const free = await slotsFor(userId, localMidnight(starts, tzOffsetMin), { tzOffsetMin });
+        if (!free.includes(starts)) throw new SlotTakenError();
+      }
+      return insertAppointment(c, userId, a, p, starts, name);
+    });
+  } catch (e) {
+    // A record made just for this booking must not outlive a failed booking.
+    if (made) await require("../clients/store").deleteClient(userId, made).catch(() => {});
+    throw e;
+  }
+}
+
+/** Last 10 digits: "+91 98450 12345" and "098450-12345" are one number. */
+const tenDigits = (s) => String(s || "").replace(/\D/g, "").slice(-10);
+
+/**
+ * The patient's record id for a booking: an existing record with the same
+ * phone (else the same name and no phone), or a new "patient" record.
+ */
+async function ensurePatient(userId, name, phone, { withCreated = false } = {}) {
+  const clients = require("../clients/store");
+  const out = (id, created) => (withCreated ? { id, created } : id);
+  // Only case files the Clients screen can open: never a people-memory row
+  // ("Ravi is my friend", kind 'other') or an archived record.
+  const CASE = "kind IN ('patient','client','student','customer') AND archived = 0";
+  const digits = tenDigits(phone);
+  if (digits.length === 10) {
+    const byPhone = await one(
+      `SELECT id FROM clients WHERE user_id = $1 AND ${CASE}
+         AND right(regexp_replace(phone, '\\D', '', 'g'), 10) = $2
+       ORDER BY updated_at DESC LIMIT 1`, [userId, digits]);
+    if (byPhone) return out(Number(byPhone.id), false);
+  }
+  const byName = await one(
+    `SELECT id FROM clients WHERE user_id = $1 AND ${CASE} AND lower(name) = lower($2)
+       AND (phone = '' OR $3 = '')
+     ORDER BY updated_at DESC LIMIT 1`, [userId, name, digits]);
+  if (byName) return out(Number(byName.id), false);
+  // A doctor's booking makes a patient; anyone else's a client.
+  const u = await one("SELECT persona FROM users WHERE id = $1", [userId]).catch(() => null);
+  const kind = !u || u.persona === "doctor" ? "patient" : "client";
+  const made = await clients.createClient(userId, { name, kind, phone: phone || "" });
+  return made ? out(Number(made.id), true) : null;
 }
 
 async function insertAppointment(c, userId, a, p, starts, name) {
@@ -326,7 +375,7 @@ async function insertAppointment(c, userId, a, p, starts, name) {
      VALUES ($1,$2,$3,$4,$5,$6,$7,'booked',$8,$9,$10,$10) RETURNING *`,
     [userId, a.clientId ? Number(a.clientId) : null, name, clean(a.patientPhone, 40), starts,
      Math.max(5, Math.min(Number(a.durationMin) || p.slotMin, 240)), clean(a.reason, 200),
-     ["app", "voice", "web"].includes(a.source) ? a.source : "app",
+     ["app", "voice", "web", "assistant"].includes(a.source) ? a.source : "app",
      a.remindPatient === false ? 0 : 1, now]
   );
   return row;
@@ -390,7 +439,7 @@ module.exports = {
   cleanHours, parseHours, describeHours, toMin,
   localMidnight, freeSlots, slotsFor, nextFreeSlots,
   getProfile, saveProfile,
-  apptShape, listAppointments, createAppointment, getAppointment, updateAppointment,
+  apptShape, listAppointments, createAppointment, getAppointment, updateAppointment, ensurePatient,
   appointmentsNeedingReminder, markReminded,
   SlotTakenError, ACTIVE,
 };

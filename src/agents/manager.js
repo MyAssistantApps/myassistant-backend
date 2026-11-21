@@ -61,7 +61,7 @@ const SPECIALISTS = {
       "person from memory or contacts before acting; never invent a number or address.",
     cues: /\b(call|ring|dial|phone (him|her|them)|message|msg|text (him|her|them)|sms|whatsapp|e-?mail|mail|inbox|reply|send .+ to|tell \w+|let \w+ know|missed calls?|who called)\b/i,
     tools: ["place_phone_call", "phone_calls", "send_agent_message", "send_whatsapp_message",
-      "email_read", "email_reply", "email_send", "email_recipients", "send_document",
+      "connect_to_assistant", "email_read", "email_reply", "email_send", "email_recipients", "send_document",
       "send_video_note", "call_recall", "lookup_person", "show_address"],
   },
   planner: {

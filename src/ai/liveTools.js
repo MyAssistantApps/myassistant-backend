@@ -26,6 +26,8 @@ const LIVE_ORDER = [
   "web_search", "get_weather", "find_places_nearby", "get_current_location",
   "create_reminder", "list_reminders", "schedule_task", "set_alarm", "set_timer",
   "place_phone_call", "phone_calls", "send_agent_message", "send_whatsapp_message",
+  // "Connect me to Alan's assistant" (2026-11-21): opens the call screen.
+  "connect_to_assistant",
   "list_calendar_events", "create_calendar_event",
   // The wow tools (2026-09-30). "What's my day" stays daily_brief below:
   // Live speaks the brief itself in its own voice, faster than the

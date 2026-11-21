@@ -147,6 +147,7 @@ const USER_TABLES = [
   // Advocates' cases/hearings and business invoices/leads (src/pro/store.js).
   ...require("../pro/store").USER_TABLES,
   ...require("../listings/store").USER_TABLES, // public page, photo, posts, booking requests
+  ...require("../workspace/store").USER_TABLES, // routines switched on, day plans
   // 2026-11-14: which partner links they tapped — the erase guard found
   // this was left behind.
   ["affiliate_clicks", "user_id"],

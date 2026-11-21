@@ -93,6 +93,8 @@ async function runRecipe(userId, o = {}) {
     // is already forced to its exact size above, so this only lifts the
     // looks a user might want on a large screen or on paper.
     minLongEdge: exact ? 0 : 1536,
+    quality: o.quality || "",
+    inputFidelity: o.inputFidelity || "",
   });
 
   // 4 — save the picture before any bookkeeping can fail.

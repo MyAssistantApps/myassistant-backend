@@ -259,6 +259,25 @@ router.get("/appointments", async (req, res) => {
   }
 });
 
+/**
+ * GET /clinic/appointments/upcoming?days=30 — every appointment still to
+ * happen, from the start of today, whoever booked it (the professional, by
+ * voice, the public page, or another person's assistant). Each carries its
+ * patient record id.
+ */
+router.get("/appointments/upcoming", async (req, res) => {
+  const uid = uidOf(req);
+  const tz = tzOf(req);
+  try {
+    const days = Math.max(1, Math.min(Number(req.query.days) || 30, 120));
+    const from = dayStartOf(undefined, tz);
+    const rows = await clinicStore.listAppointments(uid, { from, to: from + days * DAY, includeClosed: false, limit: 300 });
+    res.json({ from, days, appointments: rows.map(clinicStore.apptShape) });
+  } catch (e) {
+    res.status(500).json({ error: "could not load appointments" });
+  }
+});
+
 router.get("/slots", async (req, res) => {
   const uid = uidOf(req);
   const tz = tzOf(req);

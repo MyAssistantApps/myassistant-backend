@@ -8,6 +8,7 @@
  *   POST   /studio/run              multipart {recipe, params, photo?, garment?,
  *                                              photoId?, garmentId?} → look
  *   DELETE /studio/looks/:id
+ *   GET|POST /studio/headshot      onboarding headshot (capped per account)
  *
  * /studio/run is SYNCHRONOUS and can take up to a minute — a try-on is a
  * thing the user is sitting and watching, and a job queue would only add
@@ -210,6 +211,75 @@ router.delete("/photos/:id", async (req, res) => {
 });
 
 /* ---- the actual work ---- */
+
+/**
+ * POST /studio/headshot  multipart {photo, profession}
+ *
+ * The onboarding "Add your photo" step: one phone photo → a professional
+ * headshot for the Home banner. Same recipe as Style Studio's headshot,
+ * at MEDIUM quality with HIGH input fidelity (owner, 2026-11-21: "the
+ * face or the quality should not compromise" — fidelity is what keeps the
+ * face; medium is ~1/4 the cost of high and the banner is small). The app
+ * shows the original beside it and the user picks; nothing is replaced
+ * automatically.
+ *
+ * Capped per account (HEADSHOT_ONBOARDING_MAX, default 2: one try and one
+ * retry), on top of the studio's daily cap. The photo is not kept here;
+ * the app saves the one the user picks through POST /studio/photos.
+ */
+const HEADSHOT_SOURCE = "onboarding";
+function headshotMax() {
+  const n = Number(process.env.HEADSHOT_ONBOARDING_MAX);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : 2;
+}
+async function headshotsUsed(userId) {
+  const r = await require("../db").one(
+    `SELECT COUNT(*)::int AS n FROM studio_looks
+      WHERE user_id = $1 AND recipe = 'headshot' AND params LIKE $2`,
+    [userId, `%"source":"${HEADSHOT_SOURCE}"%`]);
+  return r ? r.n : 0;
+}
+
+router.get("/headshot", async (req, res) => {
+  const id = uid(req, res);
+  if (id === null) return;
+  try {
+    const used = await headshotsUsed(id);
+    res.json({ used, remaining: Math.max(0, headshotMax() - used) });
+  } catch (e) {
+    fail(res, e, "GET /headshot");
+  }
+});
+
+router.post("/headshot", receive([{ name: "photo", maxCount: 1 }]), async (req, res) => {
+  const id = uid(req, res);
+  if (id === null) return;
+  try {
+    const photo = firstFile(req, "photo");
+    if (!photo) return res.status(400).json({ error: "A photo is required." });
+    if (!(await requireConsent(id, res))) return;
+    const used = await headshotsUsed(id);
+    if (used >= headshotMax()) {
+      return res.status(429).json({
+        error: "You have used all your professional headshots. You can still use your own photo.",
+        code: "headshot_limit",
+        remaining: 0,
+      });
+    }
+    const profession = String(req.body.profession || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    const out = await run.runRecipe(id, {
+      recipeId: "headshot",
+      params: { profession, source: HEADSHOT_SOURCE },
+      photo,
+      surface: HEADSHOT_SOURCE,
+      quality: "medium",
+      inputFidelity: "high",
+    });
+    res.json({ ...out, remaining: Math.max(0, headshotMax() - used - 1) });
+  } catch (e) {
+    fail(res, e, "POST /headshot");
+  }
+});
 
 router.post(
   "/run",
