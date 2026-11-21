@@ -45,7 +45,7 @@ const configRoute = require("./routes/config");
 const chatRoute = require("./routes/chat");
 const authRoute = require("./routes/auth");
 const db = require("./db");
-const { appAuth, appFnAuth } = require("./middleware/auth");
+const { appAuth } = require("./middleware/auth");
 
 // Safety guard: never boot in production with auth switched off.
 // This is what actually stops AUTH_DISABLED=true from leaking into prod.
@@ -418,23 +418,11 @@ app.use("/quote-cards", appAuth, posterLimit, quoteCards.router);
 app.use("/notify", appAuth, perUserLimit, require("./routes/notify"));
 // SHORTCUTS — "office mode": one word, several things (routes/shortcuts.js).
 app.use("/shortcuts", appAuth, shortcutLimit, require("./routes/shortcuts"));
-// THE SHOPPING LIST and THE KITCHEN (2026-09-29) — one list for anything
-// to buy; pantry, recipes and the week plan (src/shopping, src/kitchen).
-// Each has its own per-user bucket, so a list screen never starves a turn.
+// THE SHOPPING LIST (2026-09-29) — one list for anything to buy
+// (src/shopping). Its own per-user bucket, so a list screen never starves
+// a turn.
 const shopping = require("./shopping");
-const kitchen = require("./kitchen");
 app.use("/shopping", appAuth, shopping.limiter, shopping.router);
-app.use("/kitchen", appAuth, kitchen.limiter, kitchen.router);
-
-// ASSISTANT FUNCTIONS (2026-09-29) — Android AppFunctions: Gemini and other
-// system agents add to the list, set reminders, plan Today's 3 and log a
-// habit without the app open (src/appfunctions). The phone's background
-// service holds a narrow "appfn" key: minted and revoked here by a normal
-// session only, accepted on /appfunctions alone — appAuth refuses it on
-// every other route. Its own per-user bucket, 60 a minute.
-const appfunctions = require("./appfunctions");
-app.use("/appfunctions/token", appAuth, appfunctions.limiter, appfunctions.tokenRouter);
-app.use("/appfunctions", appFnAuth, appfunctions.limiter, appfunctions.router);
 
 // CONNECTED APPS — THE MY ASSISTANT API (2026-10-14, src/platform). The
 // apps a user builds reach THEIR assistant with an app key (mya_…): /v1 is
@@ -684,9 +672,7 @@ require("./db")
     // Turn recordings past their retention are swept at boot and once a
     // day, so nothing depends on someone using the app.
     // The same daily pass drops video-note clips kept past their 30 days
-    // (videonotes/service.js sweep); the recipient's copy stays. And the
-    // photo cards' working photos and drafts untouched for 30 days
-    // (posters/service.js sweep): the finished card is in his documents.
+    // (videonotes/service.js sweep); the recipient's copy stays.
     {
       const rec = require("./live/recorder");
       const sweep = () => Promise.all([
@@ -694,8 +680,6 @@ require("./db")
           console.warn("recordings: prune failed —", e.message)),
         require("./videonotes/service").sweep().catch((e) =>
           console.warn("video notes: sweep failed —", e.message)),
-        require("./posters/service").sweep().catch((e) =>
-          console.warn("posters: sweep failed —", e.message)),
         // "Help improve" off: no stray recording survives a day, and their
         // turns stay within the private window (users/helpImprove.js).
         require("./users/helpImprove").sweep().catch((e) =>

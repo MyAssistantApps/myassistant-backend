@@ -74,8 +74,7 @@ const INTEGRATIONS = {
   },
   image_edit: {
     label: "an image-editing model",
-    // Any ONE of these is enough, which `anyEnv` expresses and `env` cannot.
-    anyEnv: ["OPENAI_API_KEY", "FASHN_API_KEY"],
+    env: ["OPENAI_API_KEY"],
     why: "editing a photo needs an image model that accepts a photo as input",
   },
   youtube: {

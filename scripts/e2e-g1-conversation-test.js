@@ -58,8 +58,8 @@ for (const k of [
   "LIVE_BARGE_IN", "LIVE_SILENCE_MS",
   "LIVE_SILENCE_MS_DUPLEX", "LIVE_ACTIVITY_HANDLING", "LIVE_END_SENSITIVITY",
   "LIVE_GOOGLE_SEARCH", "MORNING_BRIEF", "MORNING_BRIEF_HOUR", "MORNING_BRIEF_WINDOW_H",
-  "QUIET_HOURS_START", "QUIET_HOURS_END", "BRAVE_SEARCH_API_KEY", "TAVILY_API_KEY",
-  "GOOGLE_CSE_KEY", "GOOGLE_CSE_CX", "OPENAI_API_KEY", "AGENT_RUNTIME", "AUTH_DISABLED",
+  "QUIET_HOURS_START", "QUIET_HOURS_END", "BRAVE_SEARCH_API_KEY",
+  "OPENAI_API_KEY", "AGENT_RUNTIME", "AUTH_DISABLED",
   "ALLOW_APP_KEY",
 ]) delete process.env[k];
 
@@ -324,7 +324,6 @@ function isoLocal(ms, tz = 330) {
       for (const n of ["forget_memory", "set_alarm"]) {
         assert.ok(asks.tools.map((d) => d.name).includes(n), `asked for, ${n} is offered`);
       }
-      assert.ok(!names.includes("make_greeting_poster"), "build 119 cards are not offered to 118");
     });
 
     await atest("an older build (110) is not offered newer tools", async () => {

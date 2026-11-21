@@ -49,7 +49,7 @@ const PRIMARY_KEY = "e2e-g2-fake-primary-key";
 const FALLBACK_KEY = "e2e-g2-fake-fallback-key";
 process.env.OPENAI_API_KEY = PRIMARY_KEY;
 for (const k of [
-  "CF_ACCOUNT_ID", "CF_API_TOKEN", "HF_TOKEN", "TOGETHER_API_KEY",
+  "CF_ACCOUNT_ID", "CF_API_TOKEN",
   "EMBEDDING_PROVIDER", "AUTH_DISABLED", "ALLOW_APP_KEY", "BOLNA_API_KEY",
 ]) delete process.env[k];
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-g2-"));

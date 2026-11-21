@@ -235,8 +235,8 @@ router.get("/me", async (req, res) => {
  * SIGN OUT EVERYWHERE (2026-11-15, security hardening). There was no way
  * to end a session: tokens renew for as long as the app is opened, so a
  * token copied off a phone worked indefinitely. This ends every session
- * token, console token, assistant-functions key and connected-app key the
- * account has issued (sessions_valid_after; appfn_epoch), and hands back
+ * token, console token and connected-app key the account has issued
+ * (sessions_valid_after), and hands back
  * one fresh token so the device that asked stays signed in when it asks
  * with keepThisDevice:true.
  */
@@ -249,7 +249,7 @@ router.post("/logout-all", async (req, res) => {
     const nowSec = Math.floor(Date.now() / 1000);
     // +1: a token minted in this same second must not survive.
     await db.run(
-      `UPDATE users SET sessions_valid_after = $2, appfn_epoch = appfn_epoch + 1 WHERE id = $1`,
+      `UPDATE users SET sessions_valid_after = $2 WHERE id = $1`,
       [v.user.id, nowSec + 1]
     );
     try { require("../audit/log").record(v.user.id, "auth.logout_all", "Signed out of every device"); } catch (_) {}

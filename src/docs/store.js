@@ -217,7 +217,7 @@ async function deleteDocument(userId, id) {
   // Its search chunks are the document's whole extracted text, and its
   // links tie it to a person or case: all three go together, or a deleted
   // medical report's text stayed on the server and in the data export
-  // (audit, 2026-09-27). Every delete path (clients, studio, posters,
+  // (audit, 2026-09-27). Every delete path (clients, studio,
   // video notes) comes through here. So does its document.index job,
   // whose payload is the same text (kept after it ran, and exported).
   // The row goes FIRST: an index job still running holds it (intelligence

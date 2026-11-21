@@ -321,8 +321,8 @@ async function prepare(uid, body) {
   s.shortcutKeys = shortcutKeys;
 
   if (!owner) {
-    // The card screen's report ("it is on the card now") is evidence for
-    // the reply it prompts — no tool runs for it.
+    // The phone's own status line ("the call to X has ended") is evidence
+    // for the reply it prompts — no tool runs for it.
     for (const tool of claimCheck.appNoteVouches(text)) {
       sessionState.noteVouched(s.state, { turnId, tool });
     }

@@ -200,9 +200,6 @@ const RECIPES = [
     icon: "outfit",
     group: "Try it on",
     needs: { model: true, garment: "optional" },
-    // A garment PHOTO can go to a purpose-built virtual-try-on model,
-    // which holds a real print and weave far better than a general editor.
-    vto: true,
     aspect: "portrait",
     presets: OUTFIT_PRESETS,
     params: [
@@ -358,7 +355,6 @@ const RECIPES = [
     group: "Try it on",
     aspect: "portrait",
     needs: { model: true, garment: "optional" },
-    vto: false,
     params: [
       { key: "piece", label: "The piece", type: "text", hint: "temple-gold necklace, jhumkas, diamond studs" },
       PERSONAL,

@@ -1,5 +1,5 @@
 /**
- * IMAGE GENERATION + AI POSTER STUDIO — `node scripts/poster-studio-test.js`.
+ * IMAGE GENERATION + PHOTO EDITS — `node scripts/poster-studio-test.js`.
  *
  * Pins the 2026-09-30 rebuild:
  *   - the provider chain is ordered by quality among the AVAILABLE
@@ -11,13 +11,8 @@
  *   - the OpenAI picture model gets the prompt and the canvas for the shape;
  *   - the prompt enhancer is skipped cleanly on failure or timeout, and a
  *     poster background always carries the no-text rule;
- *   - the poster design keeps ONLY what the user said (invented venue,
- *     time, price, phone removed and listed in `missing`), resolves
- *     "tomorrow" in the user's timezone;
- *   - /posters/ai/* need a signed-in user and keep their daily caps and
- *     one-at-a-time guard; the background is stored as a document;
- *   - create_event_poster's open_poster_studio directive, generate_image's
- *     hand-off of a poster with words, edit_my_photo's friendly failures.
+ *   - edit_my_photo's friendly failures, its identity rule and the new
+ *     document it saves.
  *
  * Nothing leaves this machine: every provider is a stub below.
  */
@@ -27,12 +22,10 @@ process.env.NODE_ENV = process.env.NODE_ENV || "test";
 process.env.JWT_SECRET = "poster-studio-" + Math.random().toString(36).slice(2) + Date.now();
 for (const k of [
   "OPENAI_API_KEY", "CF_ACCOUNT_ID", "CF_API_TOKEN", "CF_IMAGE_MODEL", "CF_FALLBACK_IMAGE_MODEL",
-  "FAL_KEY", "FAL_IMAGES", "HF_TOKEN", "HF_IMAGE_MODEL", "TOGETHER_API_KEY", "TOGETHER_IMAGE_MODEL",
-  "IMAGE_PROVIDER_ORDER", "IMAGE_KEYLESS", "IMAGE_PROMPT_ENHANCE", "POSTER_AI",
-  "POSTER_AI_BACKGROUNDS_PER_DAY", "POSTER_AI_DESIGNS_PER_DAY", "POSTER_STUDIO_MIN_BUILD",
+  "FAL_KEY", "FAL_IMAGES",
+  "IMAGE_PROVIDER_ORDER", "IMAGE_KEYLESS", "IMAGE_PROMPT_ENHANCE",
   "AUTH_DISABLED", "ALLOW_APP_KEY",
 ]) delete process.env[k];
-process.env.POSTER_TOOL_WAIT_MS = "3000";
 
 const os = require("os");
 const fs = require("fs");
@@ -126,13 +119,11 @@ function withEnv(vars, fn) {
   const imagePost = require("../src/services/imagePost");
   const imageEdit = require("../src/services/imageEdit");
   const fal = require("../src/services/fal");
-  const studio = require("../src/posters/studio");
-  const studioTools = require("../src/posters/studioTools");
   const registry = require("../src/tools/registry");
   require("../src/tools/builtins").registerBuiltins();
   const docs = require("../src/docs/store");
   const HAVE_FFMPEG = await imageEdit.haveFfmpeg();
-  const fresh = () => { imagegen._test._reset(); studio._test._reset(); resetHandlers(); };
+  const fresh = () => { imagegen._test._reset(); resetHandlers(); };
 
   const stamp = String(Date.now()).slice(-7);
   const U = (await db.createUser({ email: `studio-u-${stamp}@example.test`, name: "Studio U" })).id;
@@ -164,16 +155,6 @@ function withEnv(vars, fn) {
     process.env.IMAGE_PROVIDER_ORDER = "cf-schnell,nonsense,cf-klein";
     assert.deepStrictEqual(imagegen.providerOrder("photo"), ["cf-schnell", "cf-klein"]);
     delete process.env.IMAGE_PROVIDER_ORDER;
-  }));
-
-  await atest("HF and Together are opt-in: a token alone does nothing", () => withEnv({
-    HF_TOKEN: "hf", TOGETHER_API_KEY: "tg",
-  }, () => {
-    fresh();
-    assert.deepStrictEqual(imagegen.providerOrder("photo"), []);
-    process.env.HF_IMAGE_MODEL = "some/model";
-    assert.deepStrictEqual(imagegen.providerOrder("photo"), ["huggingface"]);
-    delete process.env.HF_IMAGE_MODEL;
   }));
 
   await atest("4:5 and 9:16 are real shapes; words in the picture are recognised", () => {
@@ -468,82 +449,6 @@ function withEnv(vars, fn) {
   } else {
     skip("a real small JPEG comes out at the exact target size", "no ffmpeg on this machine — run in the Docker image");
   }
-
-  /* ================================================================ */
-  console.log("\nthe poster design — only what the user said");
-  /* ================================================================ */
-
-  const NOW = Date.parse("2026-09-30T20:00:00Z"); // 1:30 a.m. on 1 October in India
-  const REQ = "Make a poster for our Annual Day celebration tomorrow at 6pm at Town Hall";
-
-  await atest("'tomorrow' is tomorrow where the USER is", () => {
-    const ist = studio.resolveWhen(REQ, { now: NOW, tzOffsetMin: 330 });
-    assert.strictEqual(ist.iso, "2026-10-02");
-    assert.strictEqual(ist.dateText, "Friday, 2 October 2026");
-    assert.strictEqual(ist.timeText, "6:00 PM");
-    const utc = studio.resolveWhen(REQ, { now: NOW, tzOffsetMin: 0 });
-    assert.strictEqual(utc.iso, "2026-10-01");
-    assert.strictEqual(studio.resolveWhen("on Oct 12 from 5 to 8 pm", { now: NOW, tzOffsetMin: 330 }).timeText, "5:00 – 8:00 PM");
-  });
-
-  await atest("invented venue, time, price, phone and guests are removed and listed as missing", () => {
-    const when = studio.resolveWhen(REQ, { now: NOW, tzOffsetMin: 330 });
-    const today = studio.localToday(NOW, 330);
-    const d = studio.validateDesign({
-      title: "Annual Day Celebration", subtitle: "Hosted by the Rotary Club", dateISO: "2026-10-05",
-      timeText: "7 PM", location: "Town Hall, MG Road", cta: "Free entry! Call 9876543210",
-      details: ["Dinner at 8 PM", "Chief guest: Mr Sharma", "Annual Day celebration"],
-      style: "festive", palette: { primary: "#7a1022", ink: "#800000" },
-      backgroundPrompt: 'warm stage lights with "Annual Day" written in gold', missing: ["contact", "nonsense"],
-    }, { request: REQ, when, today });
-    assert.strictEqual(d.title, "Annual Day Celebration");
-    assert.strictEqual(d.dateText, "Friday, 2 October 2026", "the model's date loses to the resolved one");
-    assert.strictEqual(d.timeText, "6:00 PM");
-    assert.strictEqual(d.location, "", "one invented word in a venue sends people to the wrong place");
-    assert.strictEqual(d.subtitle, "");
-    assert.strictEqual(d.cta, "");
-    assert.deepStrictEqual(d.details, [], "the one echo of the title is not a detail");
-    assert.deepStrictEqual(d.missing, ["location", "contact"]);
-    assert.strictEqual(d.style, "festive");
-    assert.strictEqual(d.palette.ink, "#FFFFFF", "ink is made readable on the primary");
-    assert.doesNotMatch(d.backgroundPrompt, /Annual Day|written/);
-    const strict = new Set(["title", "subtitle", "dateText", "timeText", "location", "cta", "details",
-      "style", "palette", "backgroundPrompt", "missing", "format", "date"]);
-    assert.deepStrictEqual(Object.keys(d).filter((k) => !strict.has(k)), [], "no extra fields");
-  });
-
-  await atest("'our event tomorrow' has no name, time or place — all asked, none made up", () => {
-    const req = "Make a poster for our event tomorrow";
-    const d = studio.validateDesign(
-      { title: "Tech Meetup 2026", location: "Bangalore International Centre", timeText: "10 AM", cta: "All are welcome" },
-      { request: req, when: studio.resolveWhen(req, { now: NOW, tzOffsetMin: 330 }), today: studio.localToday(NOW, 330) });
-    assert.strictEqual(d.title, "");
-    assert.strictEqual(d.location, "");
-    assert.strictEqual(d.timeText, "");
-    assert.strictEqual(d.dateText, "Friday, 2 October 2026");
-    assert.strictEqual(d.cta, "All are welcome", "an invitation with no facts is fine");
-    assert.deepStrictEqual(d.missing, ["title", "timeText", "location"]);
-  });
-
-  await atest("a relative day in Malayalam: the model's date is taken only inside two weeks", () => {
-    const req = "നാളെ വൈകുന്നേരം 6 മണിക്ക് ഓണാഘോഷം";
-    const today = studio.localToday(NOW, 330);
-    const ok = studio.validateDesign({ title: "ഓണാഘോഷം", dateISO: "2026-10-02", timeText: "6 PM" },
-      { request: req, when: studio.resolveWhen(req, { now: NOW, tzOffsetMin: 330 }), today });
-    assert.strictEqual(ok.title, "ഓണാഘോഷം");
-    assert.strictEqual(ok.date, "2026-10-02");
-    assert.strictEqual(ok.timeText, "6 PM");
-    const far = studio.validateDesign({ dateISO: "2027-01-15" },
-      { request: req, when: studio.resolveWhen(req, { now: NOW, tzOffsetMin: 330 }), today });
-    assert.strictEqual(far.date, null);
-  });
-
-  await atest("brand colours lead the palette; bad colours are ignored", () => {
-    const p = studio.paletteFor("corporate", { primary: "not-a-colour" }, ["#0a0", "#123456"]);
-    assert.strictEqual(p.primary, "#00AA00");
-    assert.strictEqual(p.secondary, "#123456");
-    assert.ok(studio._test.contrast(p.ink, p.primary) >= 4.5);
-  });
 
   /* ================================================================ */
   console.log("\nthe voice tools");

@@ -7,8 +7,6 @@
  *   DELETE /studio/photos/:id
  *   POST   /studio/run              multipart {recipe, params, photo?, garment?,
  *                                              photoId?, garmentId?} → look
- *   GET    /studio/looks            → looks
- *   POST   /studio/looks/:id/favorite {on}
  *   DELETE /studio/looks/:id
  *
  * /studio/run is SYNCHRONOUS and can take up to a minute — a try-on is a
@@ -112,18 +110,6 @@ router.get("/", async (req, res) => {
   } catch (e) {
     fail(res, e, "GET /");
   }
-});
-
-/** The presets and colour swatches, whole — the catalogue only carries ids. */
-router.get("/presets", (_req, res) => {
-  res.json({
-    outfit: recipes.OUTFIT_PRESETS,
-    hair: recipes.HAIR_PRESETS,
-    hairColours: recipes.HAIR_COLOURS,
-    beard: recipes.BEARD_PRESETS,
-    backdrop: recipes.BACKDROP_PRESETS,
-    idSpecs: recipes.ID_SPECS.map((s) => ({ id: s.id, label: s.label, mm: s.mm, px: s.px, bg: s.bg })),
-  });
 });
 
 /* ---- consent, recorded once ---- */
@@ -272,30 +258,6 @@ router.post(
 );
 
 /* ---- looks ---- */
-
-router.get("/looks", async (req, res) => {
-  const id = uid(req, res);
-  if (id === null) return;
-  try {
-    const recipe = String(req.query.recipe || "").trim() || null;
-    res.json({ looks: await store.listLooks(id, { recipe, limit: 200 }) });
-  } catch (e) {
-    fail(res, e, "GET /looks");
-  }
-});
-
-router.post("/looks/:id/favorite", async (req, res) => {
-  const id = uid(req, res);
-  if (id === null) return;
-  try {
-    const row = await store.getLook(id, Number(req.params.id));
-    if (!row) return res.status(404).json({ error: "not found" });
-    await store.favorite(id, Number(req.params.id), req.body?.on !== false);
-    res.json({ ok: true });
-  } catch (e) {
-    fail(res, e, "POST /looks/:id/favorite");
-  }
-});
 
 router.delete("/looks/:id", async (req, res) => {
   const id = uid(req, res);

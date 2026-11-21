@@ -13,8 +13,8 @@ owner, not in a public issue — both repos are public.
 
 | Area | Control | Where |
 |---|---|---|
-| Sessions | HS256 pinned; account must exist and not be paused; `sessions_valid_after` revokes every older token; scoped tokens (`appfn`, `console`) refused outside their routes | `src/middleware/auth.js` |
-| Sign out everywhere | `POST /auth/logout-all` ends every session, console token, assistant-functions key and connected-app key | `src/routes/auth.js` |
+| Sessions | HS256 pinned; account must exist and not be paused; `sessions_valid_after` revokes every older token; scoped tokens (`console`) refused outside their routes | `src/middleware/auth.js` |
+| Sign out everywhere | `POST /auth/logout-all` ends every session, console token and connected-app key | `src/routes/auth.js` |
 | Connected-app keys | `mya_` keys hashed at rest, scope-gated, **die with sign-out-everywhere** | `src/platform/auth.js` |
 | Passwords | bcrypt; one message for "no user"/"wrong password", equal timing; **per-account lock after 10 failures / 15 min** (app and console) | `src/services/loginGuard.js` |
 | Console codes | 6 digits, HMAC-hashed, 5 tries, 5 min; **≤ 6 codes per account per day** | `src/platform/console.js` |

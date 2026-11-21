@@ -104,10 +104,8 @@ async function init() {
     -- Unix seconds; a session token issued before it is refused
     -- (middleware/auth.js verifySession). 0 = nothing revoked.
     ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_valid_after BIGINT NOT NULL DEFAULT 0;
-    -- The generation of the user's assistant-functions keys (scope "appfn",
-    -- src/appfunctions): a key carries the value it was issued under, and
-    -- DELETE /appfunctions/token adds one, so every earlier key stops
-    -- working at once. Dies with the users row on erase.
+    -- Retired and unused: the generation counter of the removed
+    -- assistant-functions keys. Kept so existing databases need no change.
     ALTER TABLE users ADD COLUMN IF NOT EXISTS appfn_epoch INTEGER NOT NULL DEFAULT 0;
     -- Minutes east of UTC, from the X-TZ-Offset header the app sends on
     -- every request (middleware/auth.js). users.timezone is a free-text

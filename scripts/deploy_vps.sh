@@ -88,7 +88,7 @@ docker run --rm -e DATABASE_URL=postgres://x:y@127.0.0.1:1/z \
   -e JWT_SECRET=deploy-check-0123456789012345678901234567 \
   "myassistant-backend:\$TAG" node -e "
     require('./src/tools/builtins').registerBuiltins();
-    require('./src/ai/routes'); require('./src/shopping'); require('./src/appfunctions');
+    require('./src/ai/routes'); require('./src/shopping');
     require('./src/routes/auth');
     console.log('image loads on', process.version);" 2>&1 | grep -v '"level"'
 

@@ -360,9 +360,9 @@ function registerBuiltins() {
   require("../shortcuts/tools").registerShortcutTools(registry);
 
   // The shopping list (2026-09-29): anything they want to buy, one list,
-  // handed to the right shopping app at the end. And the kitchen: pantry,
-  // recipes and the week plan — ingredients go on that same list. The
-  // tools that need the new app screens ask for build 124.
+  // handed to the right shopping app at the end. And the kitchen pantry,
+  // kept by voice. The tools that need the new app screens ask for build
+  // 124.
   require("../shopping").registerShoppingTools(registry);
   require("../kitchen").registerKitchenTools(registry);
   // Connected apps (2026-10-14): what happened in the apps the user built.
@@ -4322,21 +4322,10 @@ function registerBuiltins() {
       };
       let results = [];
       const ws = require("./webSearch");
-      // Brave first: it honours filetype:pdf and returns the files
-      // themselves. The general chain (OpenAI search first) answers with a
-      // summary and a few web pages, which is how the first try ended on
-      // the Google page.
-      if (process.env.BRAVE_SEARCH_API_KEY) {
-        try {
-          results = (await ws.searchWith("brave", `${q} filetype:pdf`)) || [];
-        } catch (_) {}
-      }
-      if (!results.length) {
-        try {
-          const r = await ws.run(`${q} filetype:pdf`, ctx || {});
-          if (r && r.ok && Array.isArray(r.data)) results = r.data;
-        } catch (_) {}
-      }
+      try {
+        const r = await ws.run(`${q} filetype:pdf`, ctx || {});
+        if (r && r.ok && Array.isArray(r.data)) results = r.data;
+      } catch (_) {}
       const words = q.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !["the", "and", "state", "versus"].includes(w));
       const OFFICIAL = /(\.gov\.in|\.nic\.in|sci\.gov\.in|indiacode|egazette|judis|ecourts|indiankanoon\.org|\.ac\.in|\.edu)$/i;
       const scored = [];
@@ -9300,9 +9289,8 @@ function registerBuiltins() {
     },
   });
 
-  // AI Poster Studio + photo edits (2026-09-30): create_event_poster and
-  // edit_my_photo — src/posters/studioTools.js.
-  require("../posters/studioTools").registerStudioTools(registry);
+  // Photo edits (2026-09-30): edit_my_photo — src/tools/editMyPhoto.js.
+  require("./editMyPhoto").registerEditMyPhoto(registry);
 
   // "Play my morning" and meeting prep (2026-09-30): play_daily_brief and
   // prepare_meeting — src/meetings/tools.js.

@@ -13,8 +13,8 @@
  *     OpenAI gpt-image editing.
  *   none available → a friendly reason, never a crash and never a fake.
  *
- * NEVER A DIFFERENT PERSON. The photo cards' rule (posters/tools.js: "no
- * AI changes anyone's face") holds here too: every instruction carries
+ * NEVER A DIFFERENT PERSON. No AI edit changes anyone's face: every
+ * instruction carries
  * IDENTITY_RULE, and a request whose whole point is to change a face or a
  * body — a face swap, "make me fairer", "look younger", "slimmer" — is
  * declined before any model sees the photo.

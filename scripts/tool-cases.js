@@ -22,7 +22,7 @@ const CASES = [
   ["Can you tell me my present location address?", ["get_current_location"]],
   ["Uber app", ["open_named_app"]],
   ["What time is the flight from Mumbai to Bengaluru tomorrow?", ["web_search"]],
-  ["Create a nice birthday card for Ravi Shankar Shetty", ["make_greeting_poster", "generate_image"]],
+  ["Create a nice birthday card for Ravi Shankar Shetty", ["generate_image"]],
   // show_news is the news reader built for this (2026-10-06).
   ["What is the latest news about India?", ["web_search", "open_app_screen", "show_news", "get_news"]],
   // A reminder IS a call at that time, so either tool keeps the promise.
@@ -45,7 +45,7 @@ const CASES = [
   ["Open the news", ["open_app_screen"]],
   ["Prepare me for my meeting with Suresh tomorrow", ["prepare_meeting"]],
   // 2026-10-02: posters are generated outright; the studio only on request.
-  ["Make a poster for our Diwali party on Friday at 7 pm", ["generate_image", "create_event_poster"]],
+  ["Make a poster for our Diwali party on Friday at 7 pm", ["generate_image"]],
   ["Write a short speech for my sister's wedding", ["present_text"]],
   ["Make me a PPT on solar energy", ["create_document"]],
   ["Who is Devi Shetty?", ["web_search"]],

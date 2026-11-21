@@ -111,7 +111,7 @@ async function ensureEveryTable() {
     "actions/store", "agents/tasks", "live/recorder", "memory/recent",
     "outcomes/store", "practice/store", "records/store", "routes/contacts",
     "routes/finance", "routes/usage", "services/email", "services/pendingPush",
-    "studio/store", "tools/searchCache", "posters/store", "shortcuts/store",
+    "studio/store", "tools/searchCache", "shortcuts/store",
     "shopping/store", "kitchen/store", "platform/store", "platform/console",
     "memory/episodes", "services/pnv", "clinic/store", "pro/store", "listings/store", "services/callCode",
     "routes/go",
@@ -218,6 +218,19 @@ const LEGACY_TABLES = {
   app_connections: `user_id INTEGER NOT NULL, provider TEXT NOT NULL, account TEXT NOT NULL DEFAULT '',
     secrets_enc TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'connected', connected_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL, PRIMARY KEY (user_id, provider)`,
+  // Photo cards (writers removed 2026-10-03, store removed 2026-11-21).
+  poster_consent: `user_id INTEGER PRIMARY KEY, version TEXT NOT NULL, accepted_at BIGINT NOT NULL`,
+  poster_photos: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'gallery', width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0, colour TEXT NOT NULL DEFAULT 'keep',
+    status TEXT NOT NULL DEFAULT 'ready', reason TEXT, message TEXT,
+    variants TEXT NOT NULL DEFAULT 'original', orig_ext TEXT NOT NULL DEFAULT 'jpg',
+    created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, last_used_at BIGINT NOT NULL,
+    flattened BOOLEAN NOT NULL DEFAULT false`,
+  posters: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL,
+    occasion TEXT NOT NULL DEFAULT 'birthday', spec JSONB NOT NULL,
+    history JSONB NOT NULL DEFAULT '[]'::jsonb, version INTEGER NOT NULL DEFAULT 1,
+    photo_id BIGINT, final_doc_id INTEGER, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL`,
 };
 
 /** Creates the legacy tables this database lacks; returns those it made. */

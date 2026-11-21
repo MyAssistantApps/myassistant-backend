@@ -270,9 +270,9 @@ async function runAgentTurn(userText, ctx = {}, onEvent = () => {}) {
   });
   quality.heard = String(userText || "").slice(0, 120);
   if (state) sessionState.beginTurn(state, { turnId, text: userText, quality: quality.quality });
-  // The phone's own card lines ("[SYSTEM] Signature saved…; it is on the
-  // card now") run no tool, yet what they report is true: filed for the
-  // claim check, so "Done, it's on the card" is not rewritten (2026-09-26).
+  // The phone's own status lines ("[SYSTEM] The call to X has ended") run
+  // no tool, yet what they report is true: filed for the claim check, so
+  // a true reply about them is not rewritten (2026-09-26).
   if (state) {
     for (const tool of claimCheck.appNoteVouches(userText)) sessionState.noteVouched(state, { turnId, tool });
   }

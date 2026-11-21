@@ -262,15 +262,6 @@ const CHAIN = [
   { name: "openai", when: () => true, run: tryOpenAI, ready: () => require("./ai/openai").ready() },
 ];
 
-/** Registered at load time by the optional-provider modules below, so a
- *  deployment with no extra keys carries no extra code paths. */
-function register(provider) {
-  // Ordered: a purpose-built try-on model beats a general editor at
-  // try-on, so anything declaring a priority under 0 goes in front.
-  if ((provider.priority || 0) < 0) CHAIN.unshift(provider);
-  else CHAIN.push(provider);
-}
-
 class NoProviderError extends Error {
   constructor(notes) {
     super(
@@ -280,8 +271,7 @@ class NoProviderError extends Error {
       // that would have changed nothing.
       "Image editing is not configured on this server. " +
       "Style Studio needs an image model that accepts a photo as input — " +
-      "set OPENAI_API_KEY (gpt-image-1 edits), or FASHN_API_KEY, or the " +
-      "Vertex virtual try-on credentials (VERTEX_PROJECT_ID + VERTEX_SA_JSON)."
+      "set OPENAI_API_KEY (gpt-image-1 edits)."
     );
     this.code = "no_provider";
     this.notes = notes;
@@ -296,14 +286,13 @@ class NoProviderError extends Error {
  * @param {Array}    o.images       [{buffer, mime}] — person first, then refs
  * @param {string}   o.aspect       'portrait' | 'landscape' | 'square' | 'auto'
  * @param {object}   o.exact        {width, height} to force afterwards
- * @param {boolean}  o.vto          garment try-on: prefer a dedicated model
  * @param {boolean}  o.hiQuality    ask for the larger/costlier output
  * @param {number}   o.minLongEdge  resample up to this if the result is small
  * @returns {Promise<{buffer, mime, provider, ms, width, height, notes}>}
  */
 async function editImage({
   instruction, images, aspect = "portrait", exact = null,
-  vto = false, hiQuality = true, minLongEdge = 0,
+  hiQuality = true, minLongEdge = 0,
 }) {
   if (!instruction || !images?.length) throw new Error("instruction and at least one image are required");
   const started = Date.now();
@@ -316,9 +305,9 @@ async function editImage({
 
   let result = null;
   for (const p of CHAIN) {
-    if (p.when && !p.when({ vto, images: prepared })) continue;
+    if (p.when && !p.when({ images: prepared })) continue;
     try {
-      result = await p.run({ instruction, images: prepared, aspect, notes, vto, hiQuality, exact });
+      result = await p.run({ instruction, images: prepared, aspect, notes, hiQuality, exact });
     } catch (e) {
       notes.push(`${p.name}: threw ${e.message}`);
       result = null;
@@ -377,19 +366,15 @@ function configured() {
     // after a quota error — otherwise the app offered "Make it" and the
     // server said no (2026-10-01).
     const ready = p.ready ? p.ready() : false;
-    out.push({ name: p.name, ready, vtoOnly: !!p.vtoOnly });
+    out.push({ name: p.name, ready });
   }
   return out;
 }
 
 module.exports = {
-  editImage, configured, register,
+  editImage, configured,
   normalizeInput, fitExact, resampleTo, transform, imageSize, haveFfmpeg,
   imageKind, decodePlan, MAX_DECODE_PIXELS,
   NoProviderError,
   SIZES, sizeFor,
 };
-
-// Optional keyed providers register themselves. Each module is a no-op
-// without its key, so this is safe on a deployment that has none.
-require("./imageEditProviders").install(register);

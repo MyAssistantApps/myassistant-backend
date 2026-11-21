@@ -139,7 +139,7 @@ restore from the nightly backup as above.
 
 ## Live voice + images (app build 135, 2026-09-30)
 
-Check these secrets before the deploy that ships Live voice and Poster Studio
+Check these secrets before the deploy that ships Live voice and images
 (check names only; never print values):
 
 - The Realtime voice model is `OPENAI_REALTIME_MODEL`; `AI_LIVE=off` turns the

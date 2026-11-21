@@ -4,7 +4,7 @@
  * Boots the REAL server (real auth, routes, registry, Postgres) with every
  * outbound call answered locally and the model scripted, and pins:
  *   (a) connecting an app from the main app: the key is shown once, only
- *       its hash is kept, an appfn key cannot manage apps;
+ *       its hash is kept, an app key cannot manage apps;
  *   (b) the key gate: missing / malformed / revoked keys, a paused app, a
  *       paused account; scopes read on every request;
  *   (c) records and activity: validation, upsert, another app's data is
@@ -46,7 +46,7 @@ process.env.PLATFORM_RATE_PER_MIN = "100000";
 for (const k of [
   "OPENAI_API_KEY",
   "AUTH_DISABLED", "ALLOW_APP_KEY", "APP_API_KEY", "METRICS_TOKEN", "PLIVO_AUTH_TOKEN", "PLIVO_AUTH_ID",
-  "BOLNA_API_KEY", "TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "GOOGLE_CSE_KEY",
+  "BOLNA_API_KEY", "BRAVE_SEARCH_API_KEY",
   "AI_APPROVAL_SECRET", "SHORTCUTS",
 ]) delete process.env[k];
 const BACKEND = path.resolve(__dirname, "..");
@@ -201,11 +201,7 @@ const CHESS_TOOLS = [{
       ok(await api("GET", `/platform/apps/${A.app.id}`, { token: B.session }), 404);
     });
 
-    await atest("an assistant-functions key or an app key cannot manage apps", async () => {
-      const appfn = await api("POST", "/appfunctions/token", { token: A.session });
-      ok(appfn);
-      const r = await api("GET", "/platform/apps", { token: appfn.json.token });
-      assert.ok([401, 403].includes(r.status), r.text);
+    await atest("an app key cannot manage apps", async () => {
       const k = await api("GET", "/platform/apps", { key: A.key });
       assert.strictEqual(k.status, 401, k.text);
     });

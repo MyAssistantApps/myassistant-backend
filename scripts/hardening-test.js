@@ -224,12 +224,12 @@ function spendDb({ global = 0, user = 0, sessions = 0, fail = false } = {}) {
 
   await atest("POST /auth/logout-all ends every earlier token; keepThisDevice gets a working one", async () => {
     const { verifySession } = require("../src/middleware/auth");
-    const user = { id: 21, email: "a@b.c", status: "active", sessions_valid_after: 0, appfn_epoch: 0 };
+    const user = { id: 21, email: "a@b.c", status: "active", sessions_valid_after: 0 };
     let updates = 0;
     const restore = stubDb({
       findById: async (id) => (Number(id) === user.id ? { ...user } : null),
       run: async (sql, params) => {
-        if (/sessions_valid_after/.test(sql)) { updates++; user.sessions_valid_after = params[1]; user.appfn_epoch++; }
+        if (/sessions_valid_after/.test(sql)) { updates++; user.sessions_valid_after = params[1]; }
         return { rowCount: 1 };
       },
     });

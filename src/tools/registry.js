@@ -370,7 +370,7 @@ function isParallelSafe(name) {
 /**
  * Does this call only edit an undoable draft on the user's own screen?
  * A tool says so with `draftEdit: true`, or a function of the call's
- * arguments (make_greeting_poster continuing a card, not starting one).
+ * arguments (continuing a draft, not starting one).
  */
 function isDraftEdit(tool, args) {
   const d = tool && tool.draftEdit;

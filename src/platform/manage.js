@@ -1,7 +1,6 @@
 /**
  * CONNECTED APPS, AS THE MAIN APP MANAGES THEM — behind appAuth, a signed-in
- * session only (an assistant-functions key or a connected app's key can
- * never mint keys).
+ * session only (a connected app's key can never mint keys).
  *
  *   GET    /platform/scopes                     what an app may be allowed
  *   GET    /platform/apps                       the user's apps, with usage and latest activity

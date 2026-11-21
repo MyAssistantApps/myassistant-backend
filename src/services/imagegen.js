@@ -7,8 +7,8 @@
  *
  *   photo / illustration: openai → fal z-image → cloudflare klein → fal qwen
  *   words in the picture: openai → fal qwen-image → cloudflare klein → fal z-image
- *   then (all purposes):  cloudflare schnell → HF / Together (opt-in only)
- *                         → Pollinations, the keyless last resort
+ *   then (all purposes):  cloudflare schnell → Pollinations, the keyless
+ *                         last resort
  *
  *   • openai (OPENAI_API_KEY) — gpt-image-1, skipped while the key is busy.
  *   • fal (FAL_KEY) — qwen-image-2512 ($0.02, the best open model at
@@ -17,10 +17,6 @@
  *   • cloudflare (CF_ACCOUNT_ID + CF_API_TOKEN) — FLUX.2 klein 4B on the
  *     free 10k neurons a day (~95 images). Multipart form, width/height
  *     honoured. flux-1-schnell (JSON) stays behind it as a fallback.
- *   • HF / Together — the old FLUX.1-schnell defaults were dead (HF's
- *     hf-inference went mostly CPU in 2025; Together dropped the Free
- *     model), so they run only when HF_IMAGE_MODEL / TOGETHER_IMAGE_MODEL
- *     name a model on purpose.
  *   • pollinations — keyless, ≤1024 px, what served every image until now.
  *
  * NO MULTI-MINUTE WORST CASE. Each keyed provider gets at most
@@ -39,8 +35,8 @@
 
 const imagePrompt = require("./imagePrompt");
 
-/** Pixel sizes per shape — the size the image is FOR. poster and story
- *  are the photo cards' 4:5 and 9:16 (posters/spec.js FORMATS). */
+/** Pixel sizes per shape — the size the image is FOR. poster is 4:5 and
+ *  story 9:16. */
 const SHAPES = {
   square: { width: 1440, height: 1440, ratio: "1:1" },
   portrait: { width: 1152, height: 1536, ratio: "3:4" }, // cards, phone wallpaper
@@ -314,80 +310,6 @@ async function tryCloudflareFallback(prompt, opts) {
 }
 
 /* ------------------------------------------------------------------ */
-/* HUGGING FACE / TOGETHER — STRICTLY OPT-IN                           */
-/* ------------------------------------------------------------------ */
-
-/** Hugging Face Inference — only with HF_TOKEN AND HF_IMAGE_MODEL. */
-async function tryHuggingFace(prompt, { shape, timeoutMs = 40_000 } = {}) {
-  const token = process.env.HF_TOKEN;
-  const model = process.env.HF_IMAGE_MODEL;
-  if (!token || !model) return null;
-  const { width, height } = fitEdge(shape || SHAPES.square, 1536);
-  try {
-    const r = await fetch(`https://router.huggingface.co/hf-inference/models/${model}`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ inputs: prompt.slice(0, 1400), parameters: { width, height } }),
-      signal: AbortSignal.timeout(Math.max(1000, timeoutMs)),
-    });
-    if (!r.ok) {
-      console.warn(`imagegen huggingface: ${r.status}`);
-      return null;
-    }
-    const mime = String(r.headers.get("content-type") || "image/jpeg").split(";")[0];
-    if (!mime.startsWith("image/")) return null;
-    const buffer = Buffer.from(await r.arrayBuffer());
-    if (buffer.length < 20 * 1024) return null;
-    const real = sizeOf(buffer);
-    return {
-      buffer, mime, provider: "huggingface",
-      width: real ? real.width : width,
-      height: real ? real.height : height,
-    };
-  } catch (e) {
-    console.warn("imagegen huggingface:", e.message);
-    return null;
-  }
-}
-
-/** Together AI — only with TOGETHER_API_KEY AND TOGETHER_IMAGE_MODEL. */
-async function tryTogether(prompt, { shape, timeoutMs = 40_000 } = {}) {
-  const key = process.env.TOGETHER_API_KEY;
-  const model = process.env.TOGETHER_IMAGE_MODEL;
-  if (!key || !model) return null;
-  const { width, height } = fitEdge(shape || SHAPES.square, 1536);
-  try {
-    const r = await fetch("https://api.together.xyz/v1/images/generations", {
-      method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model, prompt: prompt.slice(0, 1400), width, height, steps: 4, n: 1,
-        response_format: "b64_json",
-      }),
-      signal: AbortSignal.timeout(Math.max(1000, timeoutMs)),
-    });
-    if (!r.ok) {
-      console.warn(`imagegen together: ${r.status}`);
-      return null;
-    }
-    const j = await r.json();
-    const b64 = j?.data?.[0]?.b64_json;
-    if (!b64) return null;
-    const buffer = Buffer.from(b64, "base64");
-    if (buffer.length < 20 * 1024) return null;
-    const real = sizeOf(buffer);
-    return {
-      buffer, mime: "image/jpeg", provider: "together",
-      width: real ? real.width : width,
-      height: real ? real.height : height,
-    };
-  } catch (e) {
-    console.warn("imagegen together:", e.message);
-    return null;
-  }
-}
-
-/* ------------------------------------------------------------------ */
 /* POLLINATIONS — keyless, the last resort                             */
 /* ------------------------------------------------------------------ */
 
@@ -468,14 +390,12 @@ const PROVIDERS = {
     available: () => cfAvailable() && !!cfFallbackModel(),
     run: tryCloudflareFallback,
   },
-  huggingface: { available: () => !!(process.env.HF_TOKEN && process.env.HF_IMAGE_MODEL), run: tryHuggingFace },
-  together: { available: () => !!(process.env.TOGETHER_API_KEY && process.env.TOGETHER_IMAGE_MODEL), run: tryTogether },
 };
 
 /** Best first, per purpose. Background is a photo-like scene with no words. */
 const QUALITY_ORDER = {
-  photo: ["openai", "fal-zimage", "cf-klein", "fal-qwen", "cf-schnell", "huggingface", "together"],
-  text: ["openai", "fal-qwen", "cf-klein", "fal-zimage", "cf-schnell", "huggingface", "together"],
+  photo: ["openai", "fal-zimage", "cf-klein", "fal-qwen", "cf-schnell"],
+  text: ["openai", "fal-qwen", "cf-klein", "fal-zimage", "cf-schnell"],
 };
 QUALITY_ORDER.background = QUALITY_ORDER.photo;
 

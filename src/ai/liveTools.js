@@ -11,7 +11,7 @@
  * Gating is unchanged — availability, build and permissions decide
  * (registry.declarations) before the cap is applied.
  */
-// 36 (was 32, 2026-09-30): room for meeting prep, posters and pictures.
+// 36 (was 32, 2026-09-30): room for meeting prep and pictures.
 // Measured with a 30k-char prompt and 32 tools: setup 1.8 s, first audio
 // 1.5 s after a tool call — the size of this list barely moves either.
 // 40 (2026-09-30): room for remember_address and show_address.
