@@ -120,7 +120,6 @@ app.use(
       ["^/admin-panel/api/video-notes/\\d+.*", "/admin-panel/api/video-notes/#id"],
       ["^/shortcuts/runs/\\d+.*", "/shortcuts/runs/#id"],
       ["^/shortcuts/\\d+.*", "/shortcuts/#id"],
-      ["^/mailin/messages/\\d+.*", "/mailin/messages/#id"],
       ["^/p/[^/]+", "/p/#slug"],
       ["^/(agent-call/bolna)/.*", "/$1/#hook"],
     ],
@@ -139,9 +138,7 @@ const globalJson = express.json({
     // against undefined and rejected every legitimate webhook. Only the
     // payment webhook path needs it, so nothing else pays the memory.
     verify: (req, _res, buf) => {
-      if (req.originalUrl && (req.originalUrl.startsWith("/payments/webhook") ||
-          req.originalUrl.startsWith("/ondc/"))) {
-        // ONDC signs the raw bytes of every callback too (src/ondc/crypto.js).
+      if (req.originalUrl && req.originalUrl.startsWith("/payments/webhook")) {
         req.rawBody = buf;
       }
     },
@@ -159,15 +156,7 @@ app.use(require("./ops/spend").bind());
 // 60 was close enough that a fast talker hit 429s and the app silently
 // dropped to the robotic on-device voice. 240 keeps abuse out without
 // throttling real use.
-app.use(rateLimit({
-  windowMs: 60_000, max: 240, standardHeaders: true,
-  // ONDC's network answers one search with a reply per store, from a few
-  // gateway addresses: those callbacks have their own, roomier bucket.
-  skip: (req) => req.path.startsWith("/ondc/"),
-}));
-// ONDC callbacks were exempt from EVERY limit, and each forged one costs
-// up to two registry lookups before its signature fails (2026-11-15).
-app.use("/ondc", rateLimit({ windowMs: 60_000, max: 1200, standardHeaders: true }));
+app.use(rateLimit({ windowMs: 60_000, max: 240, standardHeaders: true }));
 
 // version: the git sha baked into the image (Dockerfile GIT_SHA), so the
 // pipeline can prove production runs the commit it just tested.
@@ -188,13 +177,6 @@ app.get("/health/ready", async (_req, res) => {
     res.status(503).json({ ok: false, db: false, ts: Date.now() });
   }
 });
-// ONDC (2026-11-04): the network's callbacks (public, signed) and the
-// domain verification page ONDC fetches from our root.
-{
-  const ondc = require("./routes/ondc");
-  app.get("/ondc-site-verification.html", ondc.siteVerification);
-  app.use("/ondc", ondc.router);
-}
 
 // Public within the app: remote config (no secrets inside it)
 app.use("/config", configRoute);
@@ -312,21 +294,6 @@ app.use("/privacy", appAuth, require("./routes/privacy"));
 // Google account link: Gmail + Calendar (read-only).
 app.use("/google", appAuth, require("./google/routes"));
 
-// CONNECTED APPS — Notion. The OAuth callback is public (Notion sends the
-// browser there; the single-use state names the user) and rate-limited;
-// the rest is behind the app's auth. Inert until NOTION_CLIENT_ID/SECRET.
-{
-  const notion = require("./connectors/notion/routes");
-  app.use("/connect/notion",
-    rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true }), notion.publicRouter);
-  app.use("/connections", appAuth, notion.appRouter);
-  // Other connected apps (2026-10-04): standard OAuth 2, after Notion's routes.
-  const apps = require("./connectors/apps");
-  app.use("/connect/app",
-    rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true }), apps.publicRouter);
-  app.use("/connections", appAuth, apps.appRouter);
-}
-
 
 // PAYMENTS — collection requests. Razorpay's webhook is PUBLIC (it cannot
 // carry our app key) and is verified by HMAC over the raw body instead, so
@@ -354,8 +321,6 @@ app.use("/finance", appAuth, require("./routes/finance").router);
 app.use("/brief", appAuth, require("./routes/brief"));
 // FLIGHTS PAGE (2026-11-04): the flight list the app draws.
 app.use("/travel", appAuth, require("./routes/travel"));
-// IN-APP SHOPPING over ONDC (2026-11-04).
-app.use("/shop", appAuth, require("./routes/shop"));
 // EVERYDAY SERVICES (2026-11-04): partner links with our affiliate tracking.
 app.use("/go", appAuth, require("./routes/go"));
 // PROFESSIONAL ASSISTANTS' "TODAY" (2026-11-03) — the Doctor's / Advocate's /
@@ -367,8 +332,6 @@ app.use("/news", appAuth, require("./routes/news"));
 // what it is waiting on, and the phone's receipts for dispatched steps.
 app.use("/tasks", appAuth, require("./routes/tasks"));
 app.use("/email", appAuth, require("./routes/email"));
-// Bills by email: the private address and what arrived (off unless MAILIN_ENABLED=1).
-app.use("/mailin", appAuth, require("./mailin/routes").router);
 
 // ADMIN — read-only ops stats behind a static key (set ADMIN_KEY).
 // The X-Admin-Key routes: 10 tries per 10 minutes per IP (security
@@ -728,12 +691,6 @@ require("./db")
       console.error("  job worker failed to start:", e.message);
     }
 
-    // Bills by email: the SMTP receiver and its worker, only when switched
-    // on. A failure is logged and never blocks HTTP; GET /mailin then says
-    // available:false and the app hides the feature.
-    require("./mailin/service").startReceiver().catch((e) =>
-      console.error("  mailin: receiver failed to start:", e.message));
-
     const server = app.listen(port, () => {
       console.log(`MYASSISTANT backend on :${port} (postgres ready)`);
       // Every voice's sample and opening, made ahead so no tap waits.
@@ -807,10 +764,6 @@ require("./db")
         // turns stay within the private window (users/helpImprove.js).
         require("./users/helpImprove").sweep().catch((e) =>
           console.warn("help improve: sweep failed —", e.message)),
-        require("./connectors/notion/store").sweepStates().catch((e) =>
-          console.warn("notion: state sweep failed —", e.message)),
-        require("./mailin/service").sweep().catch((e) =>
-          console.warn("mailin: sweep failed —", e.message)),
       ]);
       setTimeout(sweep, 30_000).unref?.();
       setInterval(sweep, 24 * 3600_000).unref?.();
@@ -828,13 +781,6 @@ require("./db")
         // started, while the rest winds down.
         try { require("./infra/jobs").stop(); } catch (_) {}
         try { require("./proactive/scheduler").stop(); } catch (_) {}
-        // Bounded, because the exit timer below is not.
-        try {
-          await Promise.race([
-            require("./mailin/service").stopReceiver().catch(() => {}),
-            new Promise((r) => setTimeout(r, 4000).unref?.()),
-          ]);
-        } catch (_) {}
         server.close(async () => {
           // Return the pool's connections cleanly rather than cutting them.
           await Promise.race([

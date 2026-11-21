@@ -181,7 +181,4 @@ adb reverse tcp:3998 tcp:3998
 - Missing on production: `SERPAPI_KEY` (web search / places),
   `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET`
   (payment links).
-- The Notion integration is still named "Hari Assistant" in Notion itself;
-  rename it there, then update the text in `src/connectors/notion/tools.js`
-  and the app's `connected_apps_screen.dart`.
 - `e2e-g5`'s forget_memory test is occasionally flaky; rerun before chasing it.

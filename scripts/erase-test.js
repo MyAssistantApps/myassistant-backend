@@ -114,7 +114,7 @@ async function ensureEveryTable() {
     "studio/store", "tools/searchCache", "posters/store", "shortcuts/store",
     "shopping/store", "kitchen/store", "platform/store", "platform/console",
     "memory/episodes", "services/pnv", "clinic/store", "pro/store", "listings/store", "services/callCode",
-    "ondc/store", "routes/go", "tools/flights",
+    "routes/go", "tools/flights",
   ]) {
     await require("../src/" + m).migrate();
   }
@@ -183,6 +183,41 @@ const LEGACY_TABLES = {
     message TEXT NOT NULL DEFAULT '', urgency TEXT NOT NULL DEFAULT 'normal',
     transcript TEXT NOT NULL DEFAULT '', duration_s INTEGER NOT NULL DEFAULT 0,
     seen BOOLEAN NOT NULL DEFAULT FALSE, created_at BIGINT NOT NULL`,
+  // ONDC ordering, bills by email, Notion and the other connected-app
+  // OAuth providers (removed 2026-11-21).
+  ondc_requests: `message_id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL, user_id INTEGER,
+    action TEXT NOT NULL, bpp_id TEXT, bpp_uri TEXT, payload JSONB NOT NULL, ack TEXT,
+    created_at BIGINT NOT NULL`,
+  ondc_orders: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL, transaction_id TEXT NOT NULL,
+    domain TEXT NOT NULL, bpp_id TEXT NOT NULL, bpp_uri TEXT NOT NULL, provider_id TEXT NOT NULL,
+    provider_name TEXT, items JSONB NOT NULL, quote JSONB, billing JSONB, fulfillment JSONB,
+    order_id TEXT, state TEXT NOT NULL DEFAULT 'cart', payment JSONB, created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL`,
+  mail_addresses: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL, code TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'active', trusted_from JSONB NOT NULL DEFAULT '[]',
+    created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, retired_at BIGINT`,
+  mail_inbound: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL, address_id BIGINT NOT NULL,
+    dedupe_key TEXT NOT NULL, message_id TEXT NOT NULL DEFAULT '', from_addr TEXT NOT NULL DEFAULT '',
+    from_domain TEXT NOT NULL DEFAULT '', auth TEXT NOT NULL DEFAULT 'unverified',
+    subject TEXT NOT NULL DEFAULT '', size INTEGER NOT NULL DEFAULT 0, raw_path TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0,
+    run_after BIGINT NOT NULL DEFAULT 0, lease_until BIGINT NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '', extract JSONB NOT NULL DEFAULT '{}',
+    file_hashes JSONB NOT NULL DEFAULT '[]', document_ids JSONB NOT NULL DEFAULT '[]',
+    reminder_ids JSONB NOT NULL DEFAULT '[]', reminders_done INTEGER NOT NULL DEFAULT 0,
+    skipped_parts JSONB NOT NULL DEFAULT '[]', pushed INTEGER NOT NULL DEFAULT 0,
+    push_kind TEXT NOT NULL DEFAULT '', received_at BIGINT NOT NULL, updated_at BIGINT NOT NULL`,
+  notion_connections: `user_id INTEGER PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '',
+    workspace_name TEXT NOT NULL DEFAULT '', workspace_icon TEXT NOT NULL DEFAULT '',
+    bot_id TEXT NOT NULL DEFAULT '', secrets_enc TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'connected',
+    last_error TEXT NOT NULL DEFAULT '', defaults JSONB NOT NULL DEFAULT '{}',
+    connected_at BIGINT NOT NULL, refreshed_at BIGINT NOT NULL DEFAULT 0,
+    last_used_at BIGINT NOT NULL DEFAULT 0, updated_at BIGINT NOT NULL`,
+  connector_oauth_states: `state_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
+    provider TEXT NOT NULL, created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL`,
+  app_connections: `user_id INTEGER NOT NULL, provider TEXT NOT NULL, account TEXT NOT NULL DEFAULT '',
+    secrets_enc TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'connected', connected_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL, PRIMARY KEY (user_id, provider)`,
 };
 
 /** Creates the legacy tables this database lacks; returns those it made. */
@@ -913,36 +948,6 @@ const tell = (from, toPhone, message) => db.one(
     await privacy.deleteUserEverywhere(F, { reason: "erase-test cleanup" });
   });
   await new Promise((r) => aiServer.close(r));
-
-  await atest("Bills by email: addresses, received mail, raw files and email documents all go", async () => {
-    process.env.MAILIN_ENABLED = "1";
-    process.env.MAILIN_DOMAIN = "mailin.test";
-    const address = require("../src/mailin/address");
-    const ingest = require("../src/mailin/ingest");
-    const M = (await db.createUser({ email: `erase-m-${stamp}@example.test`, name: "Erase m" })).id;
-    try {
-      await address.turnOn(M);
-      await address.rotate(M); // one retired, one active
-      await address.trust(M, "me@example.test");
-      const live = address.toClient(await address.getForUser(M)).address;
-      const raw = Buffer.from(`From: me@example.test\r\nMessage-ID: <erase-${stamp}@example.test>\r\n\r\nqueued, never processed\r\n`);
-      const q = await ingest.ingestInbound(raw, live, { transport: "test" });
-      assert.ok(q.ok);
-      const rawPath = (await db.one(`SELECT raw_path FROM mail_inbound WHERE id=$1`, [q.id])).raw_path;
-      assert.ok(exists(rawPath));
-      await require("../src/docs/store").createDocument(M, { buffer: Buffer.from("%PDF-1.4 bill"), filename: "bill.pdf",
-        mime: "application/pdf", source: { kind: "email", ref: `${q.id}:0`, label: "bescom.test", verified: true } });
-      await privacy.deleteUserEverywhere(M, { reason: "test" });
-      for (const t of ["mail_addresses", "mail_inbound", "documents"]) {
-        assert.strictEqual((await db.one(`SELECT count(*)::int AS n FROM ${t} WHERE user_id = $1`, [M])).n, 0, t);
-      }
-      assert.ok(!exists(path.join(FILES, String(M))), "files/<uid> and its mailin/ folder are gone");
-      assert.strictEqual((await ingest.ingestInbound(raw, live, {})).code, "unknown");
-    } finally {
-      delete process.env.MAILIN_ENABLED;
-      delete process.env.MAILIN_DOMAIN;
-    }
-  });
 
   // Tidy up after ourselves.
   server.close();

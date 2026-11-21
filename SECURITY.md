@@ -19,11 +19,11 @@ owner, not in a public issue — both repos are public.
 | Passwords | bcrypt; one message for "no user"/"wrong password", equal timing; **per-account lock after 10 failures / 15 min** (app and console) | `src/services/loginGuard.js` |
 | Console codes | 6 digits, HMAC-hashed, 5 tries, 5 min; **≤ 6 codes per account per day** | `src/platform/console.js` |
 | Admin | `ADMIN_KEY` (16+ chars) compared in constant time, rate-limited; `/analytics` now admin-only | `src/routes/admin*.js`, `src/middleware/adminKey.js` |
-| Rate limits | per IP (global 240/min, `/auth` 20/15 min, ONDC 1200/min); per user on every paid route | `src/server.js` |
+| Rate limits | per IP (global 240/min, `/auth` 20/15 min); per user on every paid route | `src/server.js` |
 | **Spend circuit-breaker** | Every server-side OpenAI call checks today's metered spend: **global $40/day, per user $3/day, 150 realtime sessions/user/day** (env-tunable); refuses with 402; admin alert at 50/80/100 % | `src/ops/budget.js` |
 | Error hygiene | Provider bodies, key fragments, SQL, stack frames, internal hosts and paths are withheld from clients and logged server-side | `src/infra/safeErrors.js` |
-| Webhooks | Razorpay HMAC over raw body; Bolna secrets in constant time; ONDC signatures; "paid" payment status is final | `src/payments`, `src/routes/agentCall.js`, `src/ondc` |
-| SSRF | `safeFetch` pins resolved IPs (private, loopback, link-local, metadata, CGNAT blocked; redirects re-checked); now also on ONDC outbound | `src/services/safeFetch.js` |
+| Webhooks | Razorpay HMAC over raw body; Bolna secrets in constant time; "paid" payment status is final | `src/payments`, `src/routes/agentCall.js` |
+| SSRF | `safeFetch` pins resolved IPs (private, loopback, link-local, metadata, CGNAT blocked; redirects re-checked) | `src/services/safeFetch.js` |
 | Uploads | multer size limits; **zip-bomb guard** before Office parsing; ffmpeg limited to audio extensions + `-protocol_whitelist file`; stored documents served `nosniff`, non-passive types as attachments with a sandbox CSP | `src/docs/extract.js`, `src/meetings/routes.js`, `src/routes/docs.js` |
 | Metrics | `/metrics` token-gated (closed in production without a token); 404s no longer create label series (memory-DoS) | `src/server.js` |
 | Logs | webhook secrets masked in access logs | `src/infra/observability.js` |

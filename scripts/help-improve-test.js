@@ -392,7 +392,6 @@ const exists = (p) => fs.existsSync(p);
       assert.ok(!/not kept as recordings/i.test(html));
       assert.match(html, /Help improve the assistant/);
       assert.match(html, /This setting is off unless you turn it on\./);
-      assert.match(html, /If you connect Notion/);
     } finally {
       s.close();
     }

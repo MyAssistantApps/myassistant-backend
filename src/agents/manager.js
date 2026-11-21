@@ -142,13 +142,12 @@ const SPECIALISTS = {
     label: "Records and documents",
     role: "You are handling RECORDS AND DOCUMENTS: saved files, record books, cases, clients " +
       "and patients. Read totals and dates from the records, never from memory of the chat.",
-    cues: /\b(documents?|files?|receipts?|reports?|notices?|certificates?|expir\w*|renew\w*|records?|accounts?|entry|entries|ledger|total|cases?|hearings?|clients?|patients?|recall visit|dues|notion|papers|pension|passport|aadhaar|pan card|licen[cs]e|insurance|policy)\b/i,
+    cues: /\b(documents?|files?|receipts?|reports?|notices?|certificates?|expir\w*|renew\w*|records?|accounts?|entry|entries|ledger|total|cases?|hearings?|clients?|patients?|recall visit|dues|papers|pension|passport|aadhaar|pan card|licen[cs]e|insurance|policy)\b/i,
     tools: ["search_documents", "find_document", "get_last_document", "list_person_documents",
       "associate_document", "list_expiring_documents", "save_web_document",
       "file_document_under_client", "record_entry", "list_entries", "amend_last_entry",
       "remember_case", "remember_event", "check_patient_dues", "record_patient_payment",
-      "schedule_patient_recall", "complete_patient_recall", "send_patient_document",
-      "bills_email", "notion_search", "notion_read_page", "notion_add", "notion_create_page"],
+      "schedule_patient_recall", "complete_patient_recall", "send_patient_document"],
   },
 };
 const NAMES = Object.keys(SPECIALISTS);

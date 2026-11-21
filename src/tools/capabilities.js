@@ -83,33 +83,6 @@ const INTEGRATIONS = {
     env: ["YOUTUBE_API_KEY"],
     why: "searching YouTube needs the Data API configured",
   },
-  // Notion (2026-09-27): the deployment has a public connection…
-  notion_app: {
-    label: "Notion connection",
-    env: ["NOTION_CLIENT_ID", "NOTION_CLIENT_SECRET"],
-    why: "Notion is not set up on this server",
-  },
-  // …and this user linked their workspace. readySync answers from the
-  // cache store.prime() fills before declarations: a miss is "no", so the
-  // tools are hidden rather than offered to everyone. Execution re-reads.
-  notion: {
-    label: "their Notion",
-    perUser: true,
-    readySync(userId) {
-      return require("../connectors/notion/store").isConnectedSync(userId);
-    },
-    async readyAsync(userId) {
-      if (!userId) return false;
-      try {
-        const c = await require("../connectors/notion/store").load(userId);
-        return Boolean(c && c.secrets && c.row.status === "connected");
-      } catch (_) {
-        return false;
-      }
-    },
-    why: "their Notion is not connected",
-    fix: "offer to open Connected apps",
-  },
 };
 
 /** True when every env var an integration needs carries a non-empty value. */

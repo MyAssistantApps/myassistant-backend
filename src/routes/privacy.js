@@ -42,6 +42,8 @@
  *   • an ElevenLabs voice clone    voice_profiles.voice_id
  *   • a Tavus persona              avatar_personas.persona_id
  *   • a D-ID agent                 did_agents.agent_id
+ *   • a Notion grant               notion_connections (OAuth was never
+ *                                  configured in production)
  * To remove those by hand in each provider's dashboard, note the ids
  * BEFORE deleting the account or pressing Remove leftovers: after that
  * nothing here remembers them.
@@ -81,8 +83,6 @@ const USER_TABLES = [
   ["document_chunks", "user_id"], // per-document search index
   ["document_links", "user_id"],
   ["google_tokens", "user_id"], // revoked at Google first
-  ["notion_connections", "user_id"], // revoked at Notion first
-  ["connector_oauth_states", "user_id"], // a "Connect Notion" still in flight
   ["swiggy_tokens", "user_id"],
   ["agent_memories", "user_id"], // everything the assistant remembers
   ["memory_candidates", "user_id"], // habits noticed, not yet kept (memory/learning.js)
@@ -147,9 +147,8 @@ const USER_TABLES = [
   // Advocates' cases/hearings and business invoices/leads (src/pro/store.js).
   ...require("../pro/store").USER_TABLES,
   ...require("../listings/store").USER_TABLES, // public page, photo, posts, booking requests
-  // 2026-11-14: what they searched for and asked of ONDC sellers, and which
-  // partner links they tapped — the erase guard found these were left behind.
-  ["ondc_requests", "user_id"],
+  // 2026-11-14: which partner links they tapped — the erase guard found
+  // this was left behind.
   ["affiliate_clicks", "user_id"],
   ...require("../services/callCode").USER_TABLES, // verification-call codes (hashed)
   ["pending_pushes", "user_id"], // notifications still waiting for a device
@@ -192,11 +191,6 @@ const USER_TABLES = [
   // Connected apps (2026-10-14, src/platform): their apps, hashed keys,
   // the apps' records and activity, API threads and per-day usage.
   ...require("../platform/store").USER_TABLES,
-  // Bills by email (2026-09-27): their private address (old ones and the
-  // sending addresses they marked "This was me"), and the emails received.
-  // Raw files live in files/<uid>/mailin/, which goes with files/<uid>.
-  ["mail_addresses", "user_id"],
-  ["mail_inbound", "user_id"],
   // Mobile recharge: the network of each number they recharged.
   ["recharge_numbers", "user_id"],
 
@@ -225,7 +219,6 @@ const USER_TABLES = [
   ["did_briefings", "user_id"], // briefing scripts and D-ID video links
   // 2026-10-31, found by the erase suite's schema guard: tables added
   // after the list was last checked.
-  ["app_connections", "user_id"], // their own apps' credentials (encrypted)
   ["diag_reports", "user_id"], // self-checks from their phone, with its log
   ["diag_requests", "user_id"],
   // The Design agent's tables (2026-10-31; the feature is on the
@@ -234,6 +227,15 @@ const USER_TABLES = [
   ["ui_specs", "user_id"],
   ["ui_spec_history", "user_id"],
   ["ui_themes", "user_id"],
+  // Removed 2026-11-21 and never DROPped: ONDC ordering, bills by email,
+  // Notion and the other connected-app OAuth providers. The databases
+  // whose boot ran their migrations still have these tables.
+  ["ondc_requests", "user_id"], // what they searched for and asked of ONDC sellers
+  ["mail_addresses", "user_id"], // their private bills address (raw mail lived in files/<uid>)
+  ["mail_inbound", "user_id"], // the emails it received
+  ["notion_connections", "user_id"], // Notion tokens (encrypted); not revoked, see top
+  ["connector_oauth_states", "user_id"], // a "Connect" still in flight
+  ["app_connections", "user_id"], // their own apps' credentials (encrypted)
 ];
 
 /**
@@ -274,7 +276,8 @@ const NOT_PERSONAL = {
   payments: "financial record kept for accounting; the owner decides when it may go",
   // 2026-11-14: same reasoning as payments — an order placed with an ONDC
   // seller (items, quote, payment) is a transaction record the network may
-  // ask us to reconcile. Kept until the owner decides otherwise.
+  // ask us to reconcile. Kept until the owner decides otherwise. (ONDC
+  // ordering was removed on 2026-11-21; the table was never DROPped.)
   ondc_orders: "order record kept for reconciliation; the owner decides when it may go",
 };
 
@@ -403,34 +406,6 @@ async function revokeGoogle(uid) {
   }
 }
 
-/** Revokes their Notion grant (both tokens). Runs while the row still exists. */
-async function revokeNotion(uid) {
-  try {
-    const had = await require("../connectors/notion/routes").revokeStored(uid);
-    return had ? "revoked" : "not linked";
-  } catch (e) {
-    console.warn("notion revoke during account delete:", e.message);
-    return "failed";
-  }
-}
-
-/** Leftover Notion links of users who no longer exist: revoke before purging. */
-async function revokeOrphanNotion(cols) {
-  if (!cols.has("notion_connections.user_id")) return 0;
-  const rows = await query(
-    `SELECT n.user_id FROM notion_connections n
-      WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = n.user_id)`).catch(() => []);
-  let n = 0;
-  for (const r of rows) {
-    try {
-      if (await require("../connectors/notion/routes").revokeStored(r.user_id)) n++;
-    } catch (e) {
-      console.warn(`notion revoke for leftover ${r.user_id} failed`);
-    }
-  }
-  return n;
-}
-
 /** Closes their MCP connections so no client or tool outlives the rows. */
 async function closeMcp(uid, cols) {
   if (!cols.has("mcp_servers.user_id")) return 0;
@@ -507,7 +482,6 @@ async function deleteUserEverywhere(userId, { reason = "" } = {}) {
 
   // 1) BEFORE the transaction: what needs the rows to still exist.
   report.revoked.google = await revokeGoogle(uid);
-  report.revoked.notion = await revokeNotion(uid);
   report.revoked.mcpConnections = await closeMcp(uid, cols);
   // A call still open would carry on (review, 2026-09-25): the live
   // socket checks the account once, when it opens, so a user deleted
@@ -908,9 +882,6 @@ async function purgeOrphans() {
   const tables = {};
   const put = (name, n) => { if (Number(n) > 0) tables[name] = (tables[name] || 0) + Number(n); };
   let recordingFiles = [];
-  // Before the rows go: the tokens are needed to revoke.
-  await revokeOrphanNotion(cols).catch(() => 0);
-
   await tx(async (client) => {
     for (const [table, col] of await existingUserTables(cols)) {
       if (table === "live_recordings") {
@@ -991,16 +962,6 @@ async function purgeOrphans() {
   return out;
 }
 
-async function notionStatus(uid) {
-  try {
-    const row = await one(
-      `SELECT status, workspace_name FROM notion_connections WHERE user_id = $1`, [Number(uid)]);
-    return { connected: Boolean(row && row.status === "connected"), workspace: row ? row.workspace_name : null };
-  } catch (_) {
-    return { connected: false, workspace: null };
-  }
-}
-
 // ---------- GET /privacy/export ----------
 router.get("/export", async (req, res) => {
   const uid = req.user.sub;
@@ -1012,7 +973,6 @@ router.get("/export", async (req, res) => {
     // service link status instead of raw tokens
     connections: {
       google: !!(await gtokens.isConnected?.(uid)),
-      notion: await notionStatus(uid),
     },
   };
   const cols = await columnSet();

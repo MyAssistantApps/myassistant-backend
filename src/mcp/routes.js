@@ -69,8 +69,7 @@ const CATALOG = [
     auth: { type: "none" },
   },
   // No Notion entry (2026-09-27): Notion's hosted MCP server takes OAuth
-  // only, so a pasted token could never connect. Notion is a native
-  // connector now — src/connectors/notion, Connected apps in the app.
+  // only, so a pasted token could never connect.
   {
     id: "github",
     name: "GitHub",

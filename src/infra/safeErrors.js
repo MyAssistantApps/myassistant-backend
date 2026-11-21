@@ -25,7 +25,7 @@ const LEAKS = [
   /\bsk-[A-Za-z0-9_*.-]{3,}/, // an API key or its masked tail
   /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/i,
   /incorrect api key|invalid[_ ]api[_ ]key|api key provided/i,
-  /\b(?:openai|gemini|bolna|plivo|razorpay|serpapi|ondc)\s+\/?[\w/.-]*\s*\d{3}\s*:/i, // "openai /path 401: …"
+  /\b(?:openai|gemini|bolna|plivo|razorpay|serpapi)\s+\/?[\w/.-]*\s*\d{3}\s*:/i, // "openai /path 401: …"
   /\{\s*"error"\s*:/, // a provider's raw JSON body
   /\b(?:org|proj)-[A-Za-z0-9]{8,}/, // OpenAI organisation / project ids
   /relation "[^"]*" does not exist|column "[^"]*"|syntax error at or near|violates (?:unique|foreign key|not-null|check) constraint|duplicate key value|invalid input syntax for/i,

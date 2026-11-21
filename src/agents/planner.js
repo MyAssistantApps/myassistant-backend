@@ -205,7 +205,6 @@ async function plan(userId, goal, ctx = {}) {
   const text = String(goal || "").trim();
   if (!text) return { ok: false, code: "empty_goal", reason: "no goal was given" };
 
-  await require("../connectors/notion/store").prime(userId).catch(() => {});
   let declarations = registry.declarations({
     userId,
     deviceCaps: ctx.deviceCaps || null,

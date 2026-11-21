@@ -1836,7 +1836,6 @@ router.get("/api/debug", async (req, res) => {
     razorpay_payments: env("RAZORPAY_KEY_ID"),
     google_places: env("GOOGLE_PLACES_API_KEY"),
     youtube: env("YOUTUBE_API_KEY"),
-    notion: env("NOTION_CLIENT_ID") && env("NOTION_CLIENT_SECRET"),
     google_signin: env("GOOGLE_WEB_CLIENT_ID"),
     dev_phone_typed: String(process.env.ALLOW_DEV_PHONE_VERIFY) === "true",
   };

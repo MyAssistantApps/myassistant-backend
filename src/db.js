@@ -406,10 +406,9 @@ async function init() {
     -- database (new environment, disaster restore) failed to boot.
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS
       understanding TEXT NOT NULL DEFAULT '';
-    -- Bills by email (mailin/): a document that came from an outside
-    -- sender. source 'email', source_ref '<mail_inbound.id>:<part>' (a
-    -- retry reuses its document), source_label the From DOMAIN, and
-    -- source_verified 1 when the sender's signature checked out.
+    -- Where a document came from when the user did not upload it: source
+    -- (e.g. 'email'), source_ref (unique per user when set), source_label
+    -- and source_verified. docs/store.js reads them.
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_ref TEXT NOT NULL DEFAULT '';
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_label TEXT NOT NULL DEFAULT '';
@@ -472,10 +471,6 @@ async function init() {
   // hari_reviewable() function every admin view filters with.
   await require("./users/helpImprove").migrate((sql) => pool.query(sql));
 
-  // Connected apps: Notion (tokens encrypted like the MCP secrets).
-  await require("./connectors/notion/store").migrate((sql) => pool.query(sql));
-  await require("./connectors/apps").migrate((sql) => pool.query(sql));
-
   // Document intelligence: chunk + embedding store for semantic retrieval.
   await require("./docs/intelligence").migrate((sql) => pool.query(sql));
 
@@ -508,8 +503,6 @@ async function init() {
   // the owner makes from it by hand (2026-09-26).
   await require("./videonotes/store").migrate((sql) => pool.query(sql));
 
-  // Bills by email: the private address and the emails it received.
-  await require("./mailin/store").migrate((sql) => pool.query(sql));
   // Mobile recharge: the network (and Vi circle) of each number they recharge.
   await require("./recharge/numbers").migrate((sql) => pool.query(sql));
   // Self-checks from the phones (routes/diagnostics.js).

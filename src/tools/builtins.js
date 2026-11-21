@@ -354,13 +354,10 @@ function registerBuiltins() {
 
   // Photo cards and the Poster Studio are gone (owner, 2026-10-02): a card
   // or poster is generate_image, OpenAI's image model, directly.
-  // Connected apps (2026-09-27): Notion, for users who linked it on build 120+.
-  require("../connectors/notion/tools").registerNotionTools(registry);
 
   // Shortcuts (2026-09-27): "office mode" — one word, several things. App
   // build 120+.
   require("../shortcuts/tools").registerShortcutTools(registry);
-  require("../mailin/tools").registerMailinTools(registry);
 
   // The shopping list (2026-09-29): anything they want to buy, one list,
   // handed to the right shopping app at the end. And the kitchen: pantry,
@@ -5753,7 +5750,7 @@ function registerBuiltins() {
             "news = the News screen, only when they ask to OPEN it — for " +
             "'what's the news' use show_news. avatar_identity = Send " +
             "messages as you (their recorded video for video notes). " +
-            "connected_apps = link or unlink Notion, mail and other apps. " +
+            "connected_apps = link or unlink their Google account and mail. " +
             "shortcuts = their saved shortcuts (build 120). " +
             "shopping_list = their shopping list " +
             "(build 124). calendar = this app's calendar: their events, " +
@@ -5798,7 +5795,7 @@ function registerBuiltins() {
         return { ok: false, error: "that screen needs the latest app update — say so" };
       }
       // Connected apps arrives in build 120.
-      if (screen === "connected_apps" && build < require("../connectors/notion/tools").NOTION_MIN_BUILD) {
+      if (screen === "connected_apps" && build < 120) {
         return { ok: false, error: "that screen needs the latest app update — say so" };
       }
       // The shopping list screen arrives in build 124; an unknown build counts as old.
@@ -5841,7 +5838,6 @@ function registerBuiltins() {
         avatar_identity: "Send messages as you",
         connected_apps: "Connected apps",
         shortcuts: "your shortcuts",
-        bills_email: "Bills by email",
         shopping_list: "your shopping list",
         calendar: "your calendar",
         voice_settings: "voice settings",

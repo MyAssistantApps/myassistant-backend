@@ -283,13 +283,10 @@ async function prepare(uid, body) {
   const build = s.device.build;
   const tz = Number.isFinite(s.device.tz) ? s.device.tz : 330;
 
-  // This user's MCP tools after a restart, and whether Notion is offered —
-  // both before the declarations are built, as every surface did.
+  // This user's MCP tools after a restart — before the declarations are
+  // built, as every surface did.
   if (!turnOnly) {
-    await Promise.all([
-      tm.timed("mcp", require("../mcp/routes").ensureConnectedWithin(uid).catch(() => {})),
-      tm.timed("notion", require("../connectors/notion/store").prime(uid).catch(() => {})),
-    ]);
+    await tm.timed("mcp", require("../mcp/routes").ensureConnectedWithin(uid).catch(() => {}));
   }
   tm.reset();
   const profile = await require("../users/context").getProfile(uid).catch(() => null);
@@ -583,9 +580,8 @@ async function prepare(uid, body) {
     const here = require("../agents/runtime").sessionLines(s.state);
     if (here.length) personalContext += "\n" + here.join("\n");
     if (last) personalContext += "\n\n" + last;
-    // The honest limits of THIS phone, and Notion when they could connect it.
+    // The honest limits of THIS phone.
     const limits = registry.limitsBlock(s.device.caps);
-    const notion = require("../connectors/notion/tools").notionHintFor(uid, build);
     system =
       // Rule paragraphs gated to the tools THIS session was given.
       (mode === "live"
@@ -596,19 +592,16 @@ async function prepare(uid, body) {
       (decls.some((d) => d.name === "hand_to_manager")
         ? "\n\n" + require("../agents/manager").managerRule(assistantName) : "") +
       (limits ? "\n\n" + limits : "") +
-      (notion ? "\n\n" + notion : "") +
       voiceTail({ unreadMessages: unread, personalContext, tzOffsetMin: tz, languageAsk }) +
       thisTurn;
   } else {
     const runtime = require("../agents/runtime");
     const [extra, last] = await personal;
     tm.reset();
-    const notion = /\bnotion\b/i.test(text)
-      ? require("../connectors/notion/tools").notionHintFor(uid, build) : "";
     system = runtime.systemPrompt(
       "\n\n" + [expressive ? EXPRESSIVE_SPEECH : "",
         require("../agents/appGuide").appGuide(assistantName),
-        extra, notion, last, languageAsk,
+        extra, last, languageAsk,
         unreadBlock(unread).trim()].filter(Boolean).join("\n"),
       { appBuild: build }
     ) + thisTurn;

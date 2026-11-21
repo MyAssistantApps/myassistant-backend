@@ -131,8 +131,6 @@ const FAMILIES = [
       "edit_my_photo", "prepare_meeting",
       // Screens inside this app. "Opening your settings" is the same claim.
       "open_app_screen", "set_app_theme",
-      // Bills by email opens its own screen ("Your address is on screen").
-      "bills_email",
       // Opens the phone clock app and says "Opening your alarms" — the
       // same words, so it belongs here or it denies what it just did.
       "show_alarms",
@@ -178,15 +176,6 @@ const FAMILIES = [
     matches: (s) => isVideoNoteClaim(s),
     overclaims: (s) => saysVideoNoteWent(s),
     honest: (_s, ranOk) => (ranOk && ranOk.has("send_video_note") ? VIDEO_NOTE_QUEUED : NO_VIDEO_NOTE),
-  },
-  {
-    // "Added it to your Notion" (2026-09-27). Ahead of `message`, and so of
-    // `create`/`record`, whose "saved it to your…" would otherwise take
-    // "saved it to your Notion" (the first family that matches wins).
-    id: "notion",
-    tools: ["notion_add", "notion_create_page"],
-    claim: /\b(added|saved|put|created)\b[^.]{0,40}\bnotion\b/i,
-    honest: () => "I haven't changed anything in your Notion — that didn't go through.",
   },
   {
     id: "message",

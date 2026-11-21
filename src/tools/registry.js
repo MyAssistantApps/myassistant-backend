@@ -327,8 +327,6 @@ const SEED_WORLD = new Set([
   "plan_my_day", "complete_priority", "add_habit", "check_habit", "start_focus",
   // 2026-09-26: a clip in the user's own face and voice, to another person.
   "send_video_note",
-  // 2026-09-27: writes into the user's Notion, which others may share.
-  "notion_add", "notion_create_page",
 ]);
 
 function isWorldAction(name) {
@@ -433,8 +431,6 @@ const SEED_REPEAT = new Set([
   "uninstall_app",
   // One stutter would queue two clips of the owner's manual work.
   "send_video_note",
-  // A stutter must not add the same items to a Notion page twice.
-  "notion_add", "notion_create_page",
 ]);
 
 /**
@@ -458,8 +454,6 @@ const SEED_DURABLE = new Set([
   "send_patient_document", "order_food", "book_ride", "book_movie_tickets",
   "collect_payment", "email_reply", "pay_by_upi",
   "send_video_note",
-  // Once it is in Notion it has left the device (2026-09-27).
-  "notion_add", "notion_create_page",
 ]);
 
 const SEED_UNATTENDED = new Set([
@@ -474,9 +468,6 @@ const SEED_UNATTENDED = new Set([
     // Words said in the user's own face and voice need the user there
     // to hear them read back (2026-09-26); readBack skips unattended runs.
     "send_video_note",
-    // Writes into Notion need the user there to hear what goes where;
-    // reading may run in a scheduled task (2026-09-27).
-    "notion_add", "notion_create_page",
   ]);
 
 /**
@@ -504,9 +495,7 @@ const SEED_UNATTENDED = new Set([
  */
 const UNTRUSTED_SOURCES = new Set(["email_read", "read_webpage", "deep_research",
   // It hands back an article's text, exactly as read_webpage does.
-  "read_news_story",
-  // A Notion page is third-party text: shared workspaces have other authors.
-  "notion_search", "notion_read_page"]);
+  "read_news_story"]);
 const TAINT_SENSITIVE = new Set([
   "email_send", "send_agent_message", "send_whatsapp_message", "send_document",
   "send_patient_document", "place_phone_call", "delete_calendar_event",
@@ -519,9 +508,6 @@ const TAINT_SENSITIVE = new Set([
   "uninstall_app",
   // Nor put words in the user's own mouth, on video.
   "send_video_note",
-  // A Notion page can be shared with other people: a write after reading
-  // an email or a web page gets the same warning as a send.
-  "notion_add", "notion_create_page",
   // Shortcuts (2026-09-27) outlive the taint window: a step planted by an
   // email today would run next week with no question asked, so saving,
   // changing, deleting and running one after reading becomes a question.

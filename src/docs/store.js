@@ -101,7 +101,7 @@ function guessCategory(note) {
 
 /** Save the file bytes + a metadata row. Returns the new row.
  *  `source` = {kind:'email', ref, label, verified} marks a document that
- *  came from outside (Bills by email); without it the INSERT is as before. */
+ *  came from outside by email; without it the INSERT is as before. */
 async function createDocument(userId, { buffer, filename, mime, note = "", source = null }) {
   if ((await countDocuments(userId)) >= MAX_PER_USER) throw new DocumentLimitError();
   const row = source && source.kind === "email"
