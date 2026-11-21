@@ -13,7 +13,7 @@ process.env.LIVE_RECORD_DIR = process.env.LIVE_RECORD_DIR ||
 
 (async () => {
   const db = require("../src/db");
-  await db.migrate?.();
+  await db.init();
   const turnAudio = require("../src/live/turnAudio");
   const recorder = require("../src/live/recorder");
   const helpImprove = require("../src/users/helpImprove");

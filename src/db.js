@@ -249,7 +249,7 @@ async function init() {
     --
     -- Every task records HOW it was executed, because the three paths carry
     -- very different promises and the user must never be misled (§28):
-    --   path='call'     Hari phoned the business herself (Plivo). call_id
+    --   path='call'     the assistant phoned the business (legacy rows). call_id
     --                   points at the live agent-call record; outcome holds
     --                   what the business actually said.
     --   path='handoff'  Hari prepared the order and deep-linked the provider
@@ -295,7 +295,7 @@ async function init() {
 
     -- /assistant call-and-inform: when the opening message was rendered
     -- with the user's enrolled/cloned voice (ElevenLabs), this holds the
-    -- public mp3 URL that Plivo <Play>s instead of carrier TTS.
+    -- public mp3 URL played instead of carrier TTS (legacy).
     CREATE TABLE IF NOT EXISTS kv (
       k TEXT PRIMARY KEY,
       v TEXT NOT NULL

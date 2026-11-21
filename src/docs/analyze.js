@@ -1,13 +1,9 @@
 /**
- * DOCUMENT ANALYZER — one Gemini multimodal call per saved document.
+ * DOCUMENT ANALYZER — one multimodal AI call per saved document.
  * Runs ONCE at upload time; every later recall is a pure DB lookup,
  * so remembering costs one AI call ever, not one per question.
  */
-// Sanitized: a stray inline comment in .env must not become the model name.
-const { envModel } = require("../services/ai/router");
 const { extractText } = require("./extract");
-// Unset, the alias Google keeps current: gemini-2.5-flash, the old
-// default, answers new users 404 (2026-09-25).
 
 // What the multimodal call can read as BYTES. Everything else (Word,
 // Excel, PowerPoint, CSV, plain text) is turned into text first — see

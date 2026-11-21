@@ -29,8 +29,8 @@ nothing to testers, so you cannot break the app for anyone else there.
 3. Run the checks (below). Do not push code that fails them.
 4. Before **every** push, bring in the latest again:
    `git pull --rebase origin production`, resolve conflicts, re-run the checks.
-5. Push: `git push origin <you>`. Never push to `production` or
-   `production` — GitHub refuses it ("protected branch").
+5. Push: `git push origin <you>`. Never push to `production` —
+   GitHub refuses it ("protected branch").
 6. When it works, open a pull request into `production`:
    `gh pr create --base production --head <you> --fill` — say what changed
    and how you tested it. The owner reviews and merges it.
