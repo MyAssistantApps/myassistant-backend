@@ -241,16 +241,6 @@ const exists = (p) => fs.existsSync(p);
     void recY;
   });
 
-  await atest("failures: hidden rows are counted but not shown, and never an example", async () => {
-    const r = await (await admin("/failures?hours=24&limit=500")).json();
-    const results = r.rows.map((x) => x.result);
-    assert.ok(results.includes("failed after"));
-    assert.ok(!results.some((x) => /undecidedword|failed before/.test(x)));
-    const g = r.groups.find((x) => x.tool === "web_search" && x.decision === "ran");
-    assert.ok(g && g.n >= 3, "hidden rows are no longer counted");
-    assert.ok(!/undecidedword|before/.test(g.example));
-  });
-
   await atest("the ledger of someone who never said yes is hidden", async () => {
     const r = await (await admin(`/users/${U}/ledger`)).json();
     assert.deepStrictEqual([r.hidden, r.reason], [true, "help_improve_off"]);

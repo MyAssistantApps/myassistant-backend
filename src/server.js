@@ -275,7 +275,7 @@ app.use("/chat", appAuth, perUserLimit, require("./routes/chatGroups"), chatRout
 // server and memory: context, tools, approvals and the record (src/ai/).
 app.use("/ai", appAuth, aiLimit, require("./ai/routes"));
 
-// Onboarding survey + profile view (feeds users table + agent memory).
+// Profile, onboarding details, assistant identity, rules, memories.
 app.use("/profile", appAuth, require("./routes/profile"));
 // Self-checks from the phones, for the admin panel (routes/diagnostics.js).
 app.use("/diagnostics", appAuth, perUserLimit, require("./routes/diagnostics").router);
@@ -283,9 +283,6 @@ app.use("/phone", appAuth, require("./routes/phone"));
 // In-app dialer: call analysis uploads, history and the consent toggle.
 app.use("/calls", appAuth, ...paidUploadLimit, require("./routes/calls").router);
 app.use("/contacts", appAuth, require("./routes/contacts"));
-
-// Phase 1 / ADR-004 — the user-visible audit trail of assistant actions.
-app.use("/actions", appAuth, require("./routes/actions"));
 
 // Privacy dashboard (F2): full data export + permanent account deletion.
 app.use("/privacy", appAuth, require("./routes/privacy"));
@@ -320,13 +317,9 @@ app.use("/finance", appAuth, require("./routes/finance").router);
 app.use("/brief", appAuth, require("./routes/brief"));
 // EVERYDAY SERVICES (2026-11-04): partner links with our affiliate tracking.
 app.use("/go", appAuth, require("./routes/go"));
-// PROFESSIONAL ASSISTANTS' "TODAY" (2026-11-03) — the Doctor's / Advocate's /
-// Business page: AI summary, numbers and what needs the user now.
-app.use("/pro", appAuth, require("./routes/pro"));
 // NEWS CARDS (2026-09-25) — Hub → News reads its deck from here.
 app.use("/news", appAuth, require("./routes/news"));
-// Multi-step plans the assistant has committed to: what is running,
-// what it is waiting on, and the phone's receipts for dispatched steps.
+// The home-screen widget's fire-and-forget job (POST /tasks/quick).
 app.use("/tasks", appAuth, require("./routes/tasks"));
 app.use("/email", appAuth, require("./routes/email"));
 
@@ -426,12 +419,11 @@ app.use("/shopping", appAuth, shopping.limiter, shopping.router);
 
 // CONNECTED APPS — THE MY ASSISTANT API (2026-10-14, src/platform). The
 // apps a user builds reach THEIR assistant with an app key (mya_…): /v1 is
-// the key-authenticated API (its own per-key limiter), /platform is where
-// the main app connects apps and makes or revokes keys (a signed-in
-// session only), /developers the documentation.
+// the key-authenticated API (its own per-key limiter), /developers the
+// documentation. Apps are connected and keys made or revoked in the web
+// developer console (/console/api).
 const platform = require("./platform");
 app.use("/v1", platform.v1);
-app.use("/platform", appAuth, perUserLimit, platform.manage);
 app.get("/developers", platform.docs);
 // The web developer console (src/platform/console.js): sign in with a code
 // pushed to the phone, manage connected apps from a laptop.
@@ -454,12 +446,6 @@ app.use("/outcomes", appAuth, require("./routes/outcomes"));
 
 // ---------------- STOCKS API ----------------
 app.use("/stocks", appAuth, require("./routes/stocks"));
-
-// ---------------- ADMIN ANALYTICS ----------------
-// Platform-wide totals: the admin key only (was any signed-in user; the
-// app never calls it — the admin panel has its own copy).
-app.use("/analytics", adminKeyLimit, require("./middleware/adminKey").requireAdminKey,
-  require("./routes/analytics"));
 
 // ---------------- ADMIN WEB DASHBOARD ----------------
 // Note: no appAuth here because this is for the web browser

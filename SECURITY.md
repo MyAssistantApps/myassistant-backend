@@ -18,7 +18,7 @@ owner, not in a public issue — both repos are public.
 | Connected-app keys | `mya_` keys hashed at rest, scope-gated, **die with sign-out-everywhere** | `src/platform/auth.js` |
 | Passwords | bcrypt; one message for "no user"/"wrong password", equal timing; **per-account lock after 10 failures / 15 min** (app and console) | `src/services/loginGuard.js` |
 | Console codes | 6 digits, HMAC-hashed, 5 tries, 5 min; **≤ 6 codes per account per day** | `src/platform/console.js` |
-| Admin | `ADMIN_KEY` (16+ chars) compared in constant time, rate-limited; `/analytics` now admin-only | `src/routes/admin*.js`, `src/middleware/adminKey.js` |
+| Admin | `ADMIN_KEY` (16+ chars) compared in constant time, rate-limited | `src/routes/admin*.js`, `src/middleware/adminKey.js` |
 | Rate limits | per IP (global 240/min, `/auth` 20/15 min); per user on every paid route | `src/server.js` |
 | **Spend circuit-breaker** | Every server-side OpenAI call checks today's metered spend: **global $40/day, per user $3/day, 150 realtime sessions/user/day** (env-tunable); refuses with 402; admin alert at 50/80/100 % | `src/ops/budget.js` |
 | Error hygiene | Provider bodies, key fragments, SQL, stack frames, internal hosts and paths are withheld from clients and logged server-side | `src/infra/safeErrors.js` |

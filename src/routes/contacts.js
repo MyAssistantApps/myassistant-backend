@@ -2,7 +2,6 @@
  * The user's address book, mirrored so server-side tools can resolve a name.
  *
  *   POST /contacts/sync  { contacts: [{name, phone}, …] }  → { stored }
- *   GET  /contacts/count                                   → { count }
  *
  * WHY THIS EXISTS: "tell mom I'll be late" is resolved by a tool running on
  * the server, inside the live model's turn. It cannot pause to ask the
@@ -84,16 +83,6 @@ router.post("/sync", async (req, res) => {
 
   res.json({ stored: byPhone.size });
 });
-
-router.get("/count", async (req, res) => {
-  await migrate();
-  const row = await db.one(
-    `SELECT count(*)::int AS count FROM contacts WHERE user_id = $1`,
-    [Number(req.user?.sub)]
-  );
-  res.json({ count: row?.count ?? 0 });
-});
-
 
 // GET /contacts/resolve?name=… — server-side name→number resolution, used
 // by the app when the DEVICE contact lookup finds nothing (contact saved

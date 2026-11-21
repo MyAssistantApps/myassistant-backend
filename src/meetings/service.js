@@ -129,38 +129,6 @@ async function analyze(transcript, { userName = "the user", participants = "" } 
  * ------------------------------------------------------------------ */
 
 /**
- * Analyses and stores a meeting, and files the user's own action items in
- * the commitment tracker so they get nudged.
- */
-async function record(userId, { transcript, title, participants, clientId, durationS, userName, tzOffsetMin }) {
-  const analysis = await analyze(transcript, { userName, participants });
-  const now = Date.now();
-
-  const row = await one(
-    `INSERT INTO meetings
-       (user_id, title, participants, client_id, transcript, summary,
-        decisions, actions, follow_up, duration_s, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-    [
-      userId,
-      String(title || "").slice(0, 200) || defaultTitle(now, tzOffsetMin),
-      String(participants || "").slice(0, 400),
-      clientId || null,
-      String(transcript || "").slice(0, 200000),
-      analysis.summary,
-      JSON.stringify(analysis.decisions),
-      JSON.stringify(analysis.actions),
-      analysis.follow_up,
-      Number(durationS) || 0,
-      now,
-    ]
-  );
-
-  const tracked = await fileCommitments(userId, analysis, { title, participants, tzOffsetMin, now });
-  return { id: Number(row.id), ...analysis, tracked };
-}
-
-/**
  * RECORDED MEETINGS. The app uploads the whole recording; the row exists
  * at once as 'processing' so the list can show it, and complete() fills
  * it in when transcription and analysis finish in the background.
@@ -288,6 +256,6 @@ function hydrate(r) {
 }
 
 module.exports = {
-  migrate, analyze, record, list, get,
+  migrate, analyze, list, get,
   createPending, complete, fail, recoverInterrupted,
 };

@@ -215,11 +215,6 @@ if (devVerifyAllowed()) {
   );
 }
 
-router.get("/dev-available", async (req, res) => {
-  const user = devVerifyAllowed() ? await db.findById(Number(req.user?.sub)).catch(() => null) : null;
-  res.json({ available: devVerifyAllowedFor(user) });
-});
-
 router.post("/dev-verify", async (req, res) => {
   if (!devVerifyAllowed()) {
     return res.status(403).json({ error: "not available" });

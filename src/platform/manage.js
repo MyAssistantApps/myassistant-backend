@@ -1,17 +1,18 @@
 /**
- * CONNECTED APPS, AS THE MAIN APP MANAGES THEM — behind appAuth, a signed-in
- * session only (a connected app's key can never mint keys).
+ * CONNECTED APPS, AS THE DEVELOPER CONSOLE MANAGES THEM — behind the
+ * console token (console.js consoleAuth); a connected app's key can never
+ * mint keys.
  *
- *   GET    /platform/scopes                     what an app may be allowed
- *   GET    /platform/apps                       the user's apps, with usage and latest activity
- *   POST   /platform/apps                       connect one → { app, key }   (key shown once)
- *   GET    /platform/apps/:id                   one app, its keys, collections, usage
- *   PATCH  /platform/apps/:id                   rename, scopes, instructions, pause/resume
- *   DELETE /platform/apps/:id                   the app and everything it kept
- *   POST   /platform/apps/:id/keys              another key → { key }       (shown once)
- *   DELETE /platform/apps/:id/keys/:keyId       revoke one
- *   GET    /platform/apps/:id/activity          its feed (?before=<id>)
- *   GET    /platform/apps/:id/records/:collection   its records, to look through
+ *   GET    /console/api/scopes                     what an app may be allowed
+ *   GET    /console/api/apps                       the user's apps, with usage and latest activity
+ *   POST   /console/api/apps                       connect one → { app, key }   (key shown once)
+ *   GET    /console/api/apps/:id                   one app, its keys, collections, usage
+ *   PATCH  /console/api/apps/:id                   rename, scopes, instructions, pause/resume
+ *   DELETE /console/api/apps/:id                   the app and everything it kept
+ *   POST   /console/api/apps/:id/keys              another key → { key }       (shown once)
+ *   DELETE /console/api/apps/:id/keys/:keyId       revoke one
+ *   GET    /console/api/apps/:id/activity          its feed (?before=<id>)
+ *   GET    /console/api/apps/:id/records/:collection   its records, to look through
  */
 const router = require("express").Router();
 const store = require("./store");
@@ -28,7 +29,7 @@ async function tellPhone(uid, title, body) {
 }
 
 function uidOf(req, res) {
-  // A signed-in session (the app) or the developer console's own token.
+  // The developer console's own token (or a signed-in session).
   if (req.auth && req.auth.scope && req.auth.scope !== "session" && req.auth.scope !== "console") {
     res.status(403).json({ error: "sign in to My Assistant to manage connected apps" });
     return null;

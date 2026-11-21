@@ -157,10 +157,6 @@ async function transcript({ app, user, body }) {
   }
   const seconds = Math.max(0, Math.min(Number(b.seconds) || 0, 6 * 3600));
   if (seconds) {
-    // The account's voice ledger, where this deployment has one (ai/plans.js).
-    let plans = null;
-    try { plans = require("../ai/plans"); } catch (_) {}
-    if (plans && plans.recordVoice) await plans.recordVoice(user.id, "realtime", seconds);
     await store.bump(app, "voice_seconds", seconds);
   }
   return { ok: true, kept, seconds };

@@ -553,12 +553,6 @@ async function setGender(userId, gender) {
   return findById(userId);
 }
 
-async function setBirthday(userId, birthday) {
-  const b = typeof birthday === "string" && birthday.trim() ? birthday.trim().slice(0, 20) : null;
-  await run("UPDATE users SET birthday = $1 WHERE id = $2", [b, Number(userId)]);
-  return findById(userId);
-}
-
 /** Find-or-create for social sign-in. Links by provider sub first, then email.
  *  Returns { user, created } — `created` marks a brand-new account so the
  *  app can run the sign-up interview exactly once. */
@@ -643,5 +637,5 @@ function publicUser(u) {
 module.exports = {
   pool, query, one, run, tx, init, close,
   findByEmail, findById, upsertSocialUser, createUser, publicUser,
-  cleanGender, setGender, setBirthday,
+  cleanGender, setGender,
 };

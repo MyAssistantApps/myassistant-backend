@@ -6,6 +6,7 @@
  *                              tests BOTH logins before storing; 400 with a
  *                              human reason on failure so the app can show it
  *   DELETE /email/account   -> disconnect + forget credentials
+ *   GET    /email/sent      -> { sent }   everything the assistant sent
  */
 
 const express = require("express");
@@ -49,67 +50,6 @@ router.delete("/account", async (req, res) => {
   } catch (e) {
     console.error("email disconnect:", e.message || e);
     res.status(500).json({ error: "could not disconnect" });
-  }
-});
-
-/**
- * GET /email/inbox?limit=12 — the IMPORTANT mail, for the Email screen.
- *
- * Promotions, social, updates, forums, spam and trash are excluded by the
- * query itself (his spec: "the most important emails, filtering all the
- * spam as well as promotional and unwanted"). Works for either backend —
- * the Google link or an IMAP account.
- */
-router.get("/inbox", async (req, res) => {
-  try {
-    const messages = await email.listImportant(uidOf(req), {
-      limit: Math.min(Number(req.query.limit) || 12, 25),
-      force: req.query.refresh === "1",
-    });
-    res.json({ connected: true, messages });
-  } catch (e) {
-    if (e?.code === "no_account") {
-      return res.json({ connected: false, messages: [] });
-    }
-    console.error("email inbox:", e.message || e);
-    res.status(502).json({ error: "mailbox unreachable" });
-  }
-});
-
-/** GET /email/message/:id — one message in full, for the detail view. */
-router.get("/message/:id", async (req, res) => {
-  try {
-    const m = await email.readBody(uidOf(req), req.params.id);
-    if (!m) return res.status(404).json({ error: "not found" });
-    res.json(m);
-  } catch (e) {
-    if (e?.code === "no_account") return res.status(409).json({ error: "not linked" });
-    res.status(502).json({ error: "mailbox unreachable" });
-  }
-});
-
-/** POST /email/send { to, subject, body } — used by the app's reply box. */
-router.post("/send", async (req, res) => {
-  try {
-    const uid = uidOf(req);
-    const out = await email.send(uid, {
-      to: req.body?.to,
-      subject: req.body?.subject,
-      body: req.body?.body,
-    });
-    await email.recordSent(uid, {
-      to: String(req.body?.to || ""),
-      label: String(req.body?.label || ""),
-      subject: req.body?.subject,
-      body: req.body?.body,
-      gmailId: out.messageId || "",
-    });
-    res.json({ ok: true, draft: Boolean(out.draft) });
-  } catch (e) {
-    if (e?.code === "no_account") return res.status(409).json({ error: "not linked" });
-    if (e?.code === "bad_address") return res.status(400).json({ error: "invalid address" });
-    console.error("email send:", e.message || e);
-    res.status(502).json({ error: "could not send" });
   }
 });
 

@@ -470,7 +470,7 @@ async function mount(router, userId = 1) {
       [`+9190000${String(tag).slice(-5)}`, Date.now(), target.id]);
     const srv = await mount(require("../src/routes/contacts"), who.id);
     try {
-      await fetch(`${srv.url}/count`); // creates the contacts table on first use
+      await require("../src/routes/contacts").migrate(); // creates the contacts table on first use
       const q = (name) => fetch(`${srv.url}/resolve?name=${encodeURIComponent(name)}`).then((r) => r.json());
       // The last pattern singles out THIS run's user, so the old query
       // (which matched it) returned their number.

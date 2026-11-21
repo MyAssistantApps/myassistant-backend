@@ -145,7 +145,7 @@ not install over existing ones.
 ### Professional workspaces (doctor / advocate / business)
 
 - `users.persona` is chosen at sign-up (`src/users/persona.js`:
-  `requirePersona`, `proKindFor`). Each profession sees only its own tools;
+  `requirePersona`). Each profession sees only its own tools;
   the server enforces it (403), the app just hides screens.
 - `/clinic` (`src/clinic/`) is shared by all three, with `only(...)` gates per
   profession: profile & timings, slot engine, appointments, follow-ups,

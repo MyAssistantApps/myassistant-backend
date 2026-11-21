@@ -4,8 +4,8 @@
  * Every externally-visible or destructive thing the assistant does gets one
  * row here: orders placed, calls dialed, calendar events created, email
  * drafts written, documents saved/deleted, reminders set/removed. The user
- * can read the log (GET /actions), export it (/privacy/export) and erase it
- * with their account (/privacy/account) — it is THEIR data.
+ * can export it (/privacy/export) and erase it with their account
+ * (/privacy/account) — it is THEIR data.
  *
  * Design rules:
  *   • record() NEVER throws and never blocks the action path — a broken
@@ -19,9 +19,9 @@
  *     erasure happens only via the privacy transaction.
  *
  * Action name convention: '<noun>.<verb past-tense>' — 'reminder.created',
- * 'document.deleted', 'call.placed', 'calendar.event.created'.
+ * 'document.deleted', 'call.placed', 'clinic.appointment.created'.
  */
-const { query, run } = require("../db");
+const { run } = require("../db");
 
 const MAX_DETAIL = 300;
 
@@ -46,29 +46,4 @@ async function record(userId, action, detail = "") {
   }
 }
 
-/**
- * Newest-first page of a user's action log.
- * @param {string|number} userId
- * @param {{limit?: number, before?: number}} [opts] `before` = id cursor from
- *        the previous page's last row (exclusive).
- * @returns {Promise<Array<{id:number, action:string, detail:string, created_at:number}>>}
- */
-async function list(userId, { limit = 50, before } = {}) {
-  const uid = Number(userId);
-  if (!Number.isFinite(uid)) return [];
-  const cap = Math.max(1, Math.min(200, Number(limit) || 50));
-  const args = [uid];
-  let where = "user_id = $1";
-  if (Number.isFinite(Number(before))) {
-    args.push(Number(before));
-    where += ` AND id < $${args.length}`;
-  }
-  args.push(cap);
-  return query(
-    `SELECT id, action, detail, created_at FROM actions_log
-     WHERE ${where} ORDER BY id DESC LIMIT $${args.length}`,
-    args
-  );
-}
-
-module.exports = { record, list };
+module.exports = { record };

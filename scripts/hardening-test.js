@@ -272,7 +272,7 @@ function spendDb({ global = 0, user = 0, sessions = 0, fail = false } = {}) {
 
   console.log("\nAdmin-only and dev-only switches");
 
-  await atest("/analytics-style admin gate: no key, a wrong key and a short key are all 404", async () => {
+  await atest("admin-key gate (/admin): no key, a wrong key and a short key are all 404", async () => {
     const { requireAdminKey } = require("../src/middleware/adminKey");
     const app = express(); app.get("/a", requireAdminKey, (_q, r) => r.json({ ok: true }));
     const s = await serve(app);

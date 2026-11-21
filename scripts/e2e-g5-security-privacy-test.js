@@ -264,9 +264,9 @@ async function seedRow(table, userCol, uid, over = {}) {
 
     await atest("every private route refuses a request that carries no session", async () => {
       const probes = [
-        ["GET", "/privacy/export"], ["DELETE", "/privacy/account"], ["GET", "/actions"],
+        ["GET", "/privacy/export"], ["DELETE", "/privacy/account"],
         ["GET", "/google/status"], ["DELETE", "/google"], ["GET", "/email/account"],
-        ["DELETE", "/email/account"], ["GET", "/email/inbox"], ["GET", "/mcp/servers"],
+        ["DELETE", "/email/account"], ["GET", "/email/sent"], ["GET", "/mcp/servers"],
         ["GET", "/profile/instructions"], ["GET", "/docs"], ["POST", "/ai/context"], ["POST", "/ai/tool"],
         ["GET", "/auth/me"], ["GET", "/reminders"],
       ];
@@ -294,13 +294,13 @@ async function seedRow(table, userCol, uid, over = {}) {
       // The shared app key is a dev-only door, shut unless ALLOW_APP_KEY.
       const k = await api("GET", "/privacy/export", { headers: { "X-App-Key": "anything" } });
       assert.strictEqual(k.status, 401);
-      assert.strictEqual((await api("GET", "/actions", { token: A.token })).status, 200);
+      assert.strictEqual((await api("GET", "/auth/me", { token: A.token })).status, 200);
     });
 
     await atest("a paused account and a signed-out (revoked) session are refused", async () => {
       await db.run(`UPDATE users SET status='paused' WHERE id=$1`, [A.id]);
       try {
-        assert.strictEqual((await api("GET", "/actions", { token: A.token })).status, 401);
+        assert.strictEqual((await api("GET", "/reminders", { token: A.token })).status, 401);
         assert.strictEqual((await api("GET", "/auth/me", { token: A.token })).status, 401);
       } finally {
         await db.run(`UPDATE users SET status='active' WHERE id=$1`, [A.id]);
@@ -309,9 +309,9 @@ async function seedRow(table, userCol, uid, over = {}) {
       const old = jwt.sign({ uid: A.id, iat: now - 600 }, SECRET, { expiresIn: "1h" });
       await db.run(`UPDATE users SET sessions_valid_after=$2 WHERE id=$1`, [A.id, now - 300]);
       try {
-        assert.strictEqual((await api("GET", "/actions", { token: old })).status, 401,
+        assert.strictEqual((await api("GET", "/reminders", { token: old })).status, 401,
           "a token issued before the revocation still works");
-        assert.strictEqual((await api("GET", "/actions", { token: A.token })).status, 200);
+        assert.strictEqual((await api("GET", "/reminders", { token: A.token })).status, 200);
       } finally {
         await db.run(`UPDATE users SET sessions_valid_after=0 WHERE id=$1`, [A.id]);
       }
@@ -393,11 +393,11 @@ async function seedRow(table, userCol, uid, over = {}) {
       assert.strictEqual(sentMail.length, 1);
       assert.strictEqual(sentMail[0].to, "ravi@corp.e2e-g5.test");
       // The approved action is in the owner's activity trail, nobody else's.
-      const logged = await waitFor(async () => (await api("GET", "/actions", { token: A.token })).json
-        .actions.find((x) => x.action === "tool.email_send"));
-      assert.ok(logged, "the sent mail is missing from GET /actions");
-      const bActs = (await api("GET", "/actions", { token: B.token })).json.actions;
-      assert.ok(!bActs.some((x) => x.action === "tool.email_send"), "B sees A's activity");
+      const sentRows = (uid) => db.query(
+        `SELECT 1 FROM actions_log WHERE user_id=$1 AND action='tool.email_send'`, [uid]);
+      const logged = await waitFor(async () => (await sentRows(A.id)).length > 0);
+      assert.ok(logged, "the sent mail is missing from the audit log");
+      assert.strictEqual((await sentRows(B.id)).length, 0, "B's audit log has A's activity");
       // A second yes replays nothing.
       const again = (await aiTool(A, c2, "email_send", args, { approvalToken: asked.approvalToken })).json;
       assert.ok(!again.ok);
@@ -717,7 +717,7 @@ async function seedRow(table, userCol, uid, over = {}) {
       assert.ok(!outbound.slice(n).some((o) => /googleapis\.com/.test(o.url)), "Google was called after unlink");
     });
 
-    await atest("after Disconnect the inbox stops: GET /email/inbox no longer serves the unlinked mailbox", async () => {
+    await atest("after Disconnect the inbox stops: email_read no longer serves the unlinked mailbox", async () => {
       const G = await mkUser("gmail");
       await db.run(
         `INSERT INTO google_tokens (user_id, refresh_token, access_token, expires_at, scopes, updated_at)
@@ -730,15 +730,14 @@ async function seedRow(table, userCol, uid, over = {}) {
         unread: true, labels: ["INBOX"],
       }] : null);
       try {
-        const first = await api("GET", "/email/inbox", { token: G.token });
-        assert.strictEqual(first.status, 200);
-        assert.strictEqual(first.json.connected, true);
-        assert.ok(first.json.messages.some((m) => m.subject === `Statement ${stamp}`), "precondition");
+        const first = await registry.execute("email_read", {}, { userId: G.id });
+        assert.strictEqual(first.ok, true, JSON.stringify(first).slice(0, 160));
+        assert.ok(first.data.messages.some((m) => m.subject === `Statement ${stamp}`), "precondition");
         assert.strictEqual((await api("DELETE", "/google", { token: G.token })).status, 200);
-        const after = await api("GET", "/email/inbox", { token: G.token });
-        assert.ok(!after.json.messages || after.json.messages.length === 0,
-          `the unlinked mailbox is still served: ${JSON.stringify(after.json).slice(0, 160)}`);
-        assert.strictEqual(after.json.connected, false, "the inbox still says connected after Disconnect");
+        const after = await registry.execute("email_read", {}, { userId: G.id });
+        const msgs = (after.data && after.data.messages) || [];
+        assert.ok(after.ok === false || msgs.length === 0,
+          `the unlinked mailbox is still served: ${JSON.stringify(after).slice(0, 160)}`);
       } finally {
         gapi.recentEmails = realRecent;
       }
@@ -780,7 +779,7 @@ async function seedRow(table, userCol, uid, over = {}) {
         risk: "low", source: "mcp", userId: A.id, serverId: id, execute: async () => ({ ok: true }) });
 
       for (const [m, p, body] of [["GET", `/mcp/servers/${id}`], ["PUT", `/mcp/servers/${id}/enabled`, { enabled: false }],
-        ["DELETE", `/mcp/servers/${id}`], ["POST", `/mcp/servers/${id}/connect`], ["GET", `/mcp/servers/${id}/tools`]]) {
+        ["DELETE", `/mcp/servers/${id}`], ["POST", `/mcp/servers/${id}/connect`]]) {
         const r = await api(m, p, { token: B.token, body });
         assert.strictEqual(r.status, 404, `B: ${m} ${p} -> ${r.status}`);
       }
@@ -851,17 +850,6 @@ async function seedRow(table, userCol, uid, over = {}) {
       assert.match(mine.speak, new RegExp(`Family ${stamp}`));
       const theirs = await registry.execute("check_recent_actions", { about: "family", minutes: 60 }, { userId: B.id });
       assert.doesNotMatch(String(theirs.speak), new RegExp(stamp), "B is told about A's actions");
-    });
-
-    await atest("GET /actions pages newest-first with a cursor and never mixes accounts", async () => {
-      const audit = require("../src/audit/log");
-      for (let i = 0; i < 3; i++) await audit.record(A.id, "test.paged", `page ${i} ${stamp}`);
-      const p1 = (await api("GET", "/actions?limit=2", { token: A.token })).json;
-      assert.strictEqual(p1.actions.length, 2);
-      const p2 = (await api("GET", `/actions?limit=2&before=${p1.next_before}`, { token: A.token })).json;
-      assert.ok(p2.actions.every((x) => Number(x.id) < Number(p1.next_before)));
-      const b = (await api("GET", "/actions?limit=200", { token: B.token })).json.actions;
-      assert.ok(!b.some((x) => String(x.detail).includes(stamp)), "B's trail shows A's actions");
     });
 
     /* ============================================================== *
@@ -1001,7 +989,7 @@ async function seedRow(table, userCol, uid, over = {}) {
         o.url.includes(encodeURIComponent(`refresh-${D.id}-${stamp}`))), "Google was not asked to revoke");
       assert.ok(!outbound.slice(before).some((o) => o.url.includes(`refresh-${K.id}-${stamp}`)), "K's Google grant was revoked");
       assert.ok(firebaseDeleted.includes(`+9192${stamp}`), "the phone sign-in was not removed");
-      for (const p of ["/auth/me", "/privacy/export", "/actions"]) {
+      for (const p of ["/auth/me", "/privacy/export", "/reminders"]) {
         assert.strictEqual((await api("GET", p, { token: D.token })).status, 401, `${p} still answers the deleted account`);
       }
     });

@@ -421,12 +421,6 @@ const src = (f) => fs.readFileSync(__dirname + "/../src/" + f, "utf8");
         assert.match(m.summary, /interrupted/);
       });
 
-      await atest("the old /audio endpoint no longer throws on the transcript", async () => {
-        const fd = new FormData();
-        fd.append("audio", new Blob([Buffer.alloc(4096, 2)]), "a.m4a");
-        const r = await fetch(`${mbase}/audio`, { method: "POST", body: fd });
-        assert.strictEqual(r.status, 201);
-      });
     } finally {
       ai2.transcribeAudio = realT;
       ai2.generateReply = realG;

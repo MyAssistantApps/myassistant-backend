@@ -391,46 +391,6 @@ async function ledger(userId, { limit = 40, sessionId, turnId } = {}) {
   return [...turns.values()];
 }
 
-/**
- * Everything that went wrong recently, across all users. A regression in
- * one tool used to be invisible until somebody complained: an operator
- * had to know which user to open, then read forty turns by eye.
- */
-async function failures({ sinceMs, limit = 100, tool, includeRefusals = true } = {}) {
-  await migrate();
-  const params = [sinceMs || Date.now() - 24 * 3600_000];
-  let where = "created_at >= $1 AND (ok = 0" +
-    (includeRefusals ? " OR decision <> 'ran'" : "") + ")";
-  if (tool) { params.push(clean(tool, 60)); where += ` AND tool = $${params.length}`; }
-  params.push(Math.min(Math.max(Number(limit) || 100, 1), 500));
-  // Counted from EVERY row (no words in a count); only rows of people who
-  // said yes to "Help improve" are shown, or used as a group's example.
-  const all = await query(
-    `SELECT *, ${require("../users/helpImprove").reviewableSql("user_id", "created_at")} AS reviewable
-       FROM executed_actions WHERE ${where} ORDER BY id DESC LIMIT $${params.length}`,
-    params
-  );
-  const rows = all.filter((r) => r.reviewable).map(({ reviewable: _r, ...r }) => r);
-  const byTool = new Map();
-  for (const r of all) {
-    const key = `${r.tool}|${r.decision || "ran"}`;
-    if (!byTool.has(key)) {
-      byTool.set(key, { tool: r.tool, decision: r.decision || "ran", n: 0, users: new Set(), last: 0, example: "" });
-    }
-    const g = byTool.get(key);
-    g.n++;
-    g.users.add(r.user_id);
-    if (Number(r.created_at) > g.last) g.last = Number(r.created_at);
-    if (r.reviewable && !g.example) g.example = r.result || r.detail || "";
-  }
-  return {
-    rows,
-    groups: [...byTool.values()]
-      .map((g) => ({ ...g, users: g.users.size }))
-      .sort((a, b) => b.n - a.n),
-  };
-}
-
 /** Plain-language line for one record — what the assistant tells the user. */
 function describe(r) {
   const when = new Date(Number(r.created_at)).toLocaleString("en-IN", {
@@ -486,6 +446,6 @@ function describe(r) {
 
 module.exports = {
   migrate, record, recent, didRun, findRecent, invalidate, attachReply,
-  attachResolvedTarget, ledger, failures, describe, targetOf, argsText,
+  attachResolvedTarget, ledger, describe, targetOf, argsText,
   intentKindOf,
 };
