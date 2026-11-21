@@ -44,6 +44,15 @@ const sessionLimit = rateLimit({
   message: { error: "Too many assistant calls in a short time. Please wait a few minutes." },
 });
 
+// The host has seen an urgent alert (tapped it): the pings stop.
+router.post("/urgent/ack", async (req, res) => {
+  const me = uid(req, res);
+  if (!me) return;
+  const id = Number(req.body?.id) || null;
+  const n = await require("./urgent").ack(me, { id }).catch(() => 0);
+  res.json({ ok: true, acknowledged: n });
+});
+
 router.get("/people", async (req, res) => {
   const id = uid(req, res);
   if (id === null) return;

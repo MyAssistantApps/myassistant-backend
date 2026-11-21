@@ -31,7 +31,7 @@ const STALE_CODES = new Set([
  * cleanly re-registered the next time the app opens (PushService.syncToken
  * re-sends the current token on every launch after sign-in).
  */
-async function send(fcmToken, title, body, data) {
+async function send(fcmToken, title, body, data, opts = {}) {
   init();
   if (!initialized) return { ok: false, stale: false, skipped: true, error: "push not configured on this server" };
   if (!fcmToken) return { ok: false, stale: false, skipped: true, error: "no device token" };
@@ -47,7 +47,21 @@ async function send(fcmToken, title, body, data) {
     // arrived instantly on the same device. Everything this server sends
     // is user-facing (a message, a reminder, an admin notice), so
     // immediate display is the correct default.
-    android: { priority: "high" },
+    android: {
+      priority: "high",
+      // An app-made channel (its sound and importance live on the phone)
+      // and a tag, so a repeat replaces the last banner and rings again.
+      ...(opts.channelId || opts.tag
+        ? {
+            notification: {
+              ...(opts.channelId ? { channelId: opts.channelId } : {}),
+              ...(opts.tag ? { tag: opts.tag } : {}),
+              notificationPriority: "PRIORITY_MAX",
+              visibility: "PUBLIC",
+            },
+          }
+        : {}),
+    },
     // FCM data values must all be strings; the app uses these to react to
     // the push (e.g. kind=agent_message → fetch the inbox and speak it).
     ...(data

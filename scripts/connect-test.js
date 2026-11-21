@@ -277,6 +277,55 @@ async function test(name, fn) {
     assert.match(no.speak, /does not use MyAssistant/);
   });
 
+  console.log("\nurgent alerts escalate until seen");
+  await test("the ping schedule: once, 5 min later twice, then every 20 s", async () => {
+    const u = require("../src/connect/urgent");
+    assert.deepStrictEqual([1, 2, 3, 4, 5].map(u.gapAfter), [300_000, 15_000, 60_000, 20_000, 20_000]);
+  });
+  await test("an urgent alert pings once and queues the next ping in 5 minutes", async () => {
+    const u = require("../src/connect/urgent");
+    await u.migrate();
+    await db.run(`DELETE FROM agent_messages WHERE message LIKE '[URGENT]%'`);
+    await db.run(`DELETE FROM connect_urgent`);
+    const r = await svc.runGuestTool(me, alan, "urgent_ping", { what_happened: "Server is down" });
+    assert.ok(r.ok, JSON.stringify(r));
+    const a = await db.one(`SELECT * FROM connect_urgent WHERE user_id=$1 ORDER BY id DESC LIMIT 1`, [alan]);
+    assert.ok(a && a.message_id, "alert recorded with its message");
+    assert.strictEqual(a.pings, 1);
+    const job = await db.one(`SELECT * FROM jobs WHERE kind=$1 AND (payload->>'id')::bigint=$2`, [u.JOB, a.id]);
+    assert.ok(job, "next ping queued");
+    assert.strictEqual(Number(job.payload.n), 2);
+    const wait = Number(job.run_after) - Number(job.created_at);
+    assert.ok(wait >= 299_000 && wait <= 301_000, `waits 5 min (${wait})`);
+  });
+  await test("unseen: the job pings again and queues the next, until acknowledged", async () => {
+    const u = require("../src/connect/urgent");
+    const a = await db.one(`SELECT * FROM connect_urgent WHERE user_id=$1 ORDER BY id DESC LIMIT 1`, [alan]);
+    await u.onJob({ id: a.id, n: 2 });
+    await u.onJob({ id: a.id, n: 3 });
+    await u.onJob({ id: a.id, n: 4 });
+    assert.strictEqual((await db.one(`SELECT pings FROM connect_urgent WHERE id=$1`, [a.id])).pings, 4);
+    // Reading the message in the inbox is seeing it.
+    assert.strictEqual(await u.ack(alan, { messageIds: [a.message_id] }), 1);
+    await u.onJob({ id: a.id, n: 5 });
+    const after = await db.one(`SELECT pings, acked_at FROM connect_urgent WHERE id=$1`, [a.id]);
+    assert.strictEqual(after.pings, 4, "no ping after it was seen");
+    assert.ok(after.acked_at);
+    assert.strictEqual(await u.ack(alan, { id: a.id }), 0, "acknowledged once only");
+  });
+  await test("only the host can acknowledge, and an old alert stops by itself", async () => {
+    const u = require("../src/connect/urgent");
+    await db.run(`DELETE FROM agent_messages WHERE message LIKE '[URGENT]%'`);
+    await svc.runGuestTool(me, alan, "urgent_ping", { what_happened: "Call me" });
+    const a = await db.one(`SELECT * FROM connect_urgent WHERE user_id=$1 ORDER BY id DESC LIMIT 1`, [alan]);
+    assert.strictEqual(await u.ack(me, { id: a.id }), 0, "the caller cannot silence it");
+    await db.run(`UPDATE connect_urgent SET created_at = $2 WHERE id=$1`, [a.id, Date.now() - 61 * 60_000]);
+    await u.onJob({ id: a.id, n: 9 });
+    const end = await db.one(`SELECT pings, ended_at FROM connect_urgent WHERE id=$1`, [a.id]);
+    assert.ok(end.ended_at, "ended after the hour");
+    assert.strictEqual(end.pings, 1);
+  });
+
   console.log(`\n${passed} passed${process.exitCode ? ", some FAILED" : ""}`);
   await db.close();
 })().catch((e) => {

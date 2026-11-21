@@ -293,9 +293,16 @@ async function freeSlots(hostRow, date, tz) {
 
 async function deliver(hostRow, callerRow, text, { urgent = false } = {}) {
   const toPhone = hostRow.phone_number;
-  await run(
-    `INSERT INTO agent_messages (from_user_id, to_phone_number, message, created_at) VALUES ($1,$2,$3,$4)`,
+  const msg = await one(
+    `INSERT INTO agent_messages (from_user_id, to_phone_number, message, created_at) VALUES ($1,$2,$3,$4) RETURNING id`,
     [callerRow.id, toPhone, text, Date.now()]);
+  if (urgent) {
+    // Rings once, louder after 5 minutes, then every 20 s until seen.
+    await require("./urgent").start({
+      hostId: Number(hostRow.id), callerId: Number(callerRow.id), messageId: msg?.id, text,
+    }).catch((e) => console.warn("[connect] urgent alert:", e.message));
+    return;
+  }
   if (hostRow.fcm_token) {
     const name = firstName(callerRow.name) || "Someone";
     await require("../services/push").sendNotification(
