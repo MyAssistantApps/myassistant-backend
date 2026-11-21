@@ -141,6 +141,28 @@ async function atest(name, fn) {
     }
   });
 
+  console.log("\nfinding documents");
+  await atest("'show my adhar card' shows the Aadhaar card only, not the PAN cards", () => {
+    const intel = require("../src/docs/intelligence");
+    const docs = [
+      { id: 3, title: "Aadhaar Card — Unique Identification Authority", category: "id" },
+      { id: 4, title: "PAN Card — Income Tax Department", category: "id" },
+      { id: 5, title: "PAN Card Back Side — NSDL", category: "id" },
+      { id: 1, title: "My photo", category: "other" },
+    ];
+    // Embedding scores are never zero; the PAN card even ranked first.
+    const ranked = [{ id: 4, score: 0.62 }, { id: 3, score: 0.6 }, { id: 5, score: 0.55 }, { id: 1, score: 0.3 }];
+    const ask = (q) => intel._keepWhatWasAsked(ranked, docs, q.split(/\s+/).filter((w) => w.length > 2)).map((r) => r.id);
+    for (const q of ["show my adhar card", "aadhar", "my aadhaar card"]) assert.deepStrictEqual(ask(q), [3], q);
+    assert.deepStrictEqual(ask("pan card"), [4, 5]);
+    // Asked by its full title, with a PAN card whose text says "authority".
+    docs[1].full_text = "Income Tax Department ... issuing authority";
+    assert.deepStrictEqual(ask("Aadhaar Card Unique Identification Authority"), [3]);
+    delete docs[1].full_text;
+    assert.deepStrictEqual(ask("passport"), [], "nothing that was not asked for");
+    assert.deepStrictEqual(ask("my documents"), [4, 3, 5], "a generic ask keeps the ranking");
+  });
+
   console.log(`\n${passed} passed${process.exitCode ? ", some FAILED" : ""}`);
   process.exit(process.exitCode || 0);
 })().catch((e) => {
