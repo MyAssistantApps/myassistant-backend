@@ -44,12 +44,16 @@ switches on as soon as you complete its step.
   `/legal/terms`, plus how a user unlinks and deletes data (You → Account →
   Delete).
 - **Redirect URLs** (register these exactly):
-  - `https://backend.envisionsit.in/rides/uber/callback`
-  - `https://backend.envisionsit.in/orders/swiggy/callback`
+  - `https://backend.envisionsit.in/link/uber/callback`
+  - `https://backend.envisionsit.in/link/swiggy/callback`
+  - `https://backend.envisionsit.in/link/ola/callback` (when Ola enables it)
 
-Once a company approves, the team builds its **"Link your account"** sign-in
-screen. That screen can only be finished once the company issues the OAuth
-credentials.
+**"Link your account" is built** (You → Linked Accounts in the app;
+`src/accounts/` on the server). A user taps Link, signs in on the company's
+own page, and comes back linked. Tokens are encrypted, refreshed
+automatically, and removed on Unlink or account deletion. It switches on for
+each company the moment its client ID is in `.env`. Ola appears as
+"Available Soon" until Ola shares its rider sign-in flow.
 
 Zomato, Blinkit, Zepto, BigBasket, Rapido, PharmEasy, Apollo 24|7 and Urban
 Company offer no partner route today. They stay as "open the app". Do not use

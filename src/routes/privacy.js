@@ -152,6 +152,7 @@ const USER_TABLES = [
   ...require("../connect/bookings").USER_TABLES, // bookings made through a contact's assistant
   ...require("../rides/service").USER_TABLES, // cabs booked by voice, linked ride accounts
   ...require("../orders/service").USER_TABLES, // food, grocery, medicine and parcel orders
+  ...require("../accounts/service").USER_TABLES, // account links still in progress
   // 2026-11-14: which partner links they tapped — the erase guard found
   // this was left behind.
   ["affiliate_clicks", "user_id"],

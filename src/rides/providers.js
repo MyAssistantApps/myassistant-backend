@@ -103,12 +103,8 @@ const uber = {
   id: "uber",
   label: "Uber",
   available: () => Boolean(process.env.UBER_CLIENT_ID && process.env.UBER_CLIENT_SECRET && process.env.UBER_RIDES_ENABLED === "on"),
-  async token(userId) {
-    const row = await require("../db").one(
-      `SELECT access_token FROM ride_accounts WHERE user_id = $1 AND provider = 'uber'`, [userId]);
-    if (!row) throw Object.assign(new Error("Uber account not linked"), { code: "link_required" });
-    return row.access_token;
-  },
+  // The rider's own linked token, refreshed when expired (accounts/service).
+  token: (userId) => require("../accounts/service").tokenFor(userId, "uber"),
   async call(userId, path, { method = "GET", body } = {}) {
     const r = await fetch(UBER_API + path, {
       method,
@@ -161,12 +157,10 @@ const ola = {
   label: "Ola",
   available: () => Boolean(process.env.OLA_XAPP_TOKEN && process.env.OLA_RIDES_ENABLED === "on"),
   async call(userId, path, { method = "GET", body } = {}) {
-    const acct = await require("../db").one(
-      `SELECT access_token FROM ride_accounts WHERE user_id = $1 AND provider = 'ola'`, [userId]);
-    if (!acct) throw Object.assign(new Error("Ola account not linked"), { code: "link_required" });
+    const access = await require("../accounts/service").tokenFor(userId, "ola");
     const r = await fetch(OLA_API + path, {
       method,
-      headers: { "X-APP-TOKEN": process.env.OLA_XAPP_TOKEN, Authorization: `Bearer ${acct.access_token}`, "Content-Type": "application/json" },
+      headers: { "X-APP-TOKEN": process.env.OLA_XAPP_TOKEN, Authorization: `Bearer ${access}`, "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(12_000),
     });

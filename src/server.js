@@ -321,6 +321,10 @@ app.use("/feedback", appAuth, perUserLimit, require("./feedback/routes"));
 app.use("/rides", appAuth, perUserLimit, require("./rides/routes"));
 // Orders placed by voice (food, groceries, medicines, parcels).
 app.use("/orders", appAuth, perUserLimit, require("./orders/routes"));
+// Link your Uber / Swiggy account (accounts/service.js): the sign-in
+// start and status are signed in; the company's redirect back is public.
+app.use("/accounts", appAuth, perUserLimit, require("./accounts/routes").accounts);
+app.use("/link", rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true }), require("./accounts/routes").link);
 app.use("/usage", appAuth, require("./routes/usage").router);
 app.use("/finance", appAuth, require("./routes/finance").router);
 

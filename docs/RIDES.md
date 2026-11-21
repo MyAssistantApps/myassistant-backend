@@ -46,9 +46,9 @@ app card `lib/features/home/ride_strip.dart`. Tests: `npm run test:rides`.
 | Uber | `UBER_CLIENT_ID`, `UBER_CLIENT_SECRET`, `UBER_REDIRECT_URI`, `UBER_RIDES_ENABLED=on` | Coded against the Ride Requests API (estimate, request, status, cancel). Needs Uber's approval and each rider's linked Uber account. |
 | Ola | `OLA_XAPP_TOKEN`, `OLA_RIDES_ENABLED=on` | Coded against Ola's partner booking API. Needs Ola's XAPP token and each rider's Ola authorisation. |
 
-Riders' provider tokens live in `ride_accounts`. Account linking (the OAuth
-screens) is the one piece still to build once a provider approves: it
-cannot be tested before they issue credentials.
+Riders link their accounts in the app (You → Linked Accounts). The OAuth
+flow is in `src/accounts/`, tokens are encrypted in `ride_accounts`, and
+the redirect URI is `https://backend.envisionsit.in/link/uber/callback`.
 
 ## What to send each provider
 
@@ -56,7 +56,7 @@ cannot be tested before they issue credentials.
 
 1. **Create an app** at developer.uber.com (Rides API product). You get a
    **Client ID** and **Client Secret**.
-2. **Redirect URI** to register: `https://backend.envisionsit.in/rides/uber/callback`
+2. **Redirect URI** to register: `https://backend.envisionsit.in/link/uber/callback`
 3. **Scopes to request:** `profile`, `request` (privileged), `request_receipt`
    (privileged), `places` (optional).
 4. **Privileged access request.** Uber's partnerships team reviews it, so
@@ -75,8 +75,7 @@ cannot be tested before they issue credentials.
    - **Policies:** links to the privacy policy and terms
      (`/legal/privacy`, `/legal/terms`), and how the user can unlink and
      delete data.
-   - **Webhook URL** for status changes (optional; we poll today):
-     `https://backend.envisionsit.in/rides/uber/webhook`.
+   - **Webhook URL:** none needed; status is polled.
 5. **Sandbox.** Uber provides `sandbox-api.uber.com` for testing requests
    without real drivers. Set `UBER_API_BASE` to it while testing.
 

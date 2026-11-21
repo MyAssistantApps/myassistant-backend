@@ -147,15 +147,18 @@ async function book({ userId, from, to, provider, confirmFare = false, here = nu
   }
   // Estimates from every candidate; real providers before the test one.
   const quotes = [];
+  const unlinked = [];
   for (const p of pool) {
     try {
       const e = await p.estimate({ pickup, drop, userId });
       quotes.push({ p, e });
     } catch (err) {
-      if (err?.code === "link_required" && provider) {
-        return { ok: false, error: "link_required", speak: `Please link your ${p.label} account in the app first.` };
-      }
+      if (err?.code === "link_required") unlinked.push(p.label);
     }
+  }
+  if (!quotes.length && unlinked.length) {
+    return { ok: false, error: "link_required",
+      speak: `Please link your ${unlinked.join(" or ")} account first; I have opened Linked Accounts for you.` };
   }
   if (!quotes.length) return { ok: false, error: "no_quote", speak: "No cab could be quoted for that trip right now." };
   const real = quotes.filter((q) => !q.p.test);

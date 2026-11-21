@@ -5728,7 +5728,7 @@ function registerBuiltins() {
           type: "string",
           enum: [
             "settings", "home", "hub", "chat",
-            "documents", "clients", "finance", "stocks",
+            "documents", "clients", "finance", "stocks", "linked_accounts",
             "diagnostics", "mcp", "meetings", "reminders", "call_notes",
             "news", "focus", "avatar_identity", "connected_apps", "shortcuts",
             "shopping_list", "calendar", "voice_settings",
@@ -7943,7 +7943,8 @@ function registerBuiltins() {
       deviceAction: { type: "order_placed", order: r.order } };
     if (r.error === "no_provider") return null;
     return { ok: false, error: r.error, needs_details: r.needs ? [r.needs] : undefined,
-      data: { total: r.total }, speak: r.speak };
+      data: { total: r.total }, speak: r.speak,
+      ...(r.error === "link_required" ? { deviceAction: { type: "open_app_screen", screen: "linked_accounts" } } : {}) };
   }
 
   registry.register({
@@ -8141,7 +8142,8 @@ function registerBuiltins() {
         }
         if (r.error !== "no_provider") {
           return { ok: false, error: r.error, needs_details: r.needs ? [r.needs] : undefined,
-            data: { fare: r.fare, ride: r.ride }, speak: r.speak };
+            data: { fare: r.fare, ride: r.ride }, speak: r.speak,
+            ...(r.error === "link_required" ? { deviceAction: { type: "open_app_screen", screen: "linked_accounts" } } : {}) };
         }
       }
       const provider = args.provider || "uber";

@@ -103,14 +103,17 @@ async function place({ userId, kind, items = [], restaurant, pickup, drop, provi
     speak: `${providers.ALL[provider]?.label || provider} cannot take this order from here yet.` };
   const args = { kind, items, restaurant, pickup, drop, userId };
   const quotes = [];
+  const unlinked = [];
   for (const p of pool) {
     try {
       quotes.push({ p, q: await p.quote(args) });
     } catch (e) {
-      if (e?.code === "link_required" && provider) {
-        return { ok: false, error: "link_required", speak: `Please link your ${p.label} account in the app first.` };
-      }
+      if (e?.code === "link_required") unlinked.push(p.label);
     }
+  }
+  if (!quotes.length && unlinked.length) {
+    return { ok: false, error: "link_required",
+      speak: `Please link your ${unlinked.join(" or ")} account first; I have opened Linked Accounts for you.` };
   }
   if (!quotes.length) return { ok: false, error: "no_quote", speak: `No ${NOUN[kind]} could be priced right now.` };
   const real = quotes.filter((x) => !x.p.test);

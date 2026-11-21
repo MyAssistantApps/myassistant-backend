@@ -101,14 +101,12 @@ const SWIGGY_URLS = {
 };
 
 async function swiggyClient(userId, kind) {
-  const acct = await require("../db").one(
-    `SELECT access_token FROM order_accounts WHERE user_id = $1 AND provider = 'swiggy'`, [userId]);
-  if (!acct) throw Object.assign(new Error("Swiggy account not linked"), { code: "link_required" });
+  const access = await require("../accounts/service").tokenFor(userId, "swiggy");
   const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
   const { StreamableHTTPClientTransport } = require("@modelcontextprotocol/sdk/client/streamableHttp.js");
   const client = new Client({ name: "myassistant", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(SWIGGY_URLS[kind]), {
-    requestInit: { headers: { Authorization: `Bearer ${acct.access_token}` } },
+    requestInit: { headers: { Authorization: `Bearer ${access}` } },
   }));
   const { tools } = await client.listTools();
   // The tool names are Swiggy's; match them by what they do.
