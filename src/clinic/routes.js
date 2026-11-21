@@ -320,6 +320,8 @@ router.patch("/appointments/:id", async (req, res) => {
     const row = await clinicStore.updateAppointment(uid, req.params.id, req.body || {});
     if (!row) return res.status(404).json({ error: "appointment not found" });
     audit.record(uid, "clinic.appointment.updated", `appointment #${row.id} → ${row.status}`);
+    // Booked through a contact's assistant: the caller hears about it.
+    require("../connect/bookings").onClinicChange(uid, row).catch((e) => console.warn("[connect] booking follow:", e.message));
     res.json({ appointment: clinicStore.apptShape(row) });
   } catch (e) {
     res.status(400).json({ error: e.message });

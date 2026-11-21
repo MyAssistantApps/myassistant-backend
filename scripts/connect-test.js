@@ -101,7 +101,7 @@ async function test(name, fn) {
     assert.match(s.instructions, /Software Engineer/);
     assert.match(s.instructions, /never what Alan is doing/i);
     assert.deepStrictEqual(s.tools.map((t) => t.name).sort(),
-      ["book_appointment", "check_availability", "end_call", "leave_message", "urgent_ping"]);
+      ["book_appointment", "cancel_appointment", "check_availability", "end_call", "get_info", "leave_message", "my_appointments", "reschedule_appointment", "urgent_ping"]);
   });
 
   console.log("\nguest tools");
@@ -153,7 +153,7 @@ async function test(name, fn) {
   });
   const meeting = (time, extra = {}) => ({
     purpose: "Demo", date: tomorrow, time, minutes: 45, mode: "online",
-    place: "Google Meet", attendees: "just the caller", prepare: "the slide deck", ...extra,
+    place: "Google Meet", attendees: "just the caller", prepare: "the slide deck", another: true, ...extra,
   });
   await test("a meeting needs only a time and a mode; the rest defaults", async () => {
     const r = await svc.runGuestTool(me, alan, "book_appointment", { purpose: "Demo", date: tomorrow, time: "15:00" }, { tz });
@@ -172,8 +172,8 @@ async function test(name, fn) {
     const myRem = await db.one(`SELECT text FROM reminders WHERE user_id=$1 AND due_at=$2`, [me, at15]);
     assert.match(hostRem.text, /Meeting with Dhanush: Demo \| Online \| 45 min \| Link: Google Meet \| With: just the caller \| Prepare: the slide deck/);
     assert.strictEqual(hostRem.ring, "gentle");
-    assert.match(myRem.text, /Meeting with Alan: Demo/);
-    assert.match((await inbox()).at(-1).message, /Booked by your assistant/);
+    assert.match(myRem.text, /^Demo with Alan \| Online \| Google Meet/);
+    assert.match((await inbox()).at(-1).message, /^Meeting booked: /);
   });
   await test("an urgent meeting over the urgent cap books as a normal one", async () => {
     // The urgent_ping test above used today's 3 urgent alerts.
@@ -227,8 +227,106 @@ async function test(name, fn) {
     const up = await clinic.listAppointments(doc, { from: Date.now() - 86_400_000, to: Date.now() + 30 * 86_400_000, includeClosed: false });
     assert.ok(up.some((x) => Number(x.id) === Number(appt.id)));
   });
+  console.log("\nbookings with professionals, end to end");
+  await test("an ADVOCATE: booked on their real slots, confirmed back to the caller, on the caller's Home", async () => {
+    const bookings = require("../src/connect/bookings");
+    const clinic = require("../src/clinic/store");
+    const adv = await mk("Priya Rao", P("08"), { persona: "advocate", profession: "Advocate" });
+    await save(me, "Adv Priya", P("08"));
+    await clinic.saveProfile(adv, { clinicName: "Rao Chambers", address: "MG Road, Mangalore", fee: 1500 });
+    let date = null, time = null;
+    for (let i = 1; i <= 7 && !time; i++) {
+      const day = new Date(Date.now() + tz * 60_000 + i * 86_400_000).toISOString().slice(0, 10);
+      const r = await svc.runGuestTool(me, adv, "check_availability", { date: day }, { tz });
+      if (r.ok && r.data.free_times.length) { date = day; time = r.data.free_times[0]; }
+    }
+    assert.ok(time, "the advocate has a free slot this week");
+    const r = await svc.runGuestTool(me, adv, "book_appointment", { purpose: "Property dispute", date, time, mode: "in_person" }, { tz });
+    assert.ok(r.ok, JSON.stringify(r));
+    assert.match(r.data.place, /Rao Chambers, MG Road/);
+    assert.match(r.speak, /It is on your home screen/);
+    // Their side: a real appointment in their schedule.
+    const appt = await db.one(`SELECT * FROM clinic_appointments WHERE user_id=$1 ORDER BY id DESC LIMIT 1`, [adv]);
+    assert.strictEqual(appt.source, "assistant");
+    assert.ok(appt.client_id, "a client record");
+    assert.strictEqual((await db.one(`SELECT kind FROM clients WHERE id=$1`, [appt.client_id])).kind, "client");
+    // Our side: the booking, the confirmation, the reminder, Home's strip.
+    const b = await db.one(`SELECT * FROM connect_bookings WHERE caller_id=$1 AND host_id=$2`, [me, adv]);
+    assert.strictEqual(Number(b.clinic_appt_id), Number(appt.id));
+    const mine = await db.query(`SELECT message FROM agent_messages WHERE to_phone_number=$1 ORDER BY id DESC LIMIT 1`, [P("01")]);
+    assert.match(mine[0].message, /^Confirmed: Property dispute with Adv Priya on \w{3} \d+ \w{3}, \d+:\d{2} (am|pm) \(In person, Rao Chambers/);
+    assert.ok(await db.one(`SELECT id FROM reminders WHERE id=$1 AND user_id=$2`, [b.caller_reminder_id, me]));
+    const home = await bookings.upcomingFor(me);
+    assert.ok(home.some((x) => x.id === Number(b.id) && x.modeLabel === "In person"));
+  });
+  await test("a second booking the same day asks: move it, or another?", async () => {
+    const adv = Number((await db.one(`SELECT id FROM users WHERE phone_number=$1`, [P("08")])).id);
+    const b = await db.one(`SELECT * FROM connect_bookings WHERE caller_id=$1 AND host_id=$2`, [me, adv]);
+    const day = new Date(Number(b.starts_at) + tz * 60_000).toISOString().slice(0, 10);
+    const r = await svc.runGuestTool(me, adv, "book_appointment", { date: day, time: "17:30", mode: "phone" }, { tz });
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.already_booked.booking_id, Number(b.id));
+  });
+  await test("'when is my appointment?', practice details, then move it and cancel it", async () => {
+    const adv = Number((await db.one(`SELECT id FROM users WHERE phone_number=$1`, [P("08")])).id);
+    const list = await svc.runGuestTool(me, adv, "my_appointments", {}, { tz });
+    assert.strictEqual(list.data.appointments.length, 1);
+    const info = await svc.runGuestTool(me, adv, "get_info", {}, { tz });
+    assert.strictEqual(info.data.practice, "Rao Chambers");
+    assert.strictEqual(info.data.fee, "Rs 1500");
+    assert.ok(info.data.timings);
+    // Move to another free slot two days later.
+    const b = await db.one(`SELECT * FROM connect_bookings WHERE caller_id=$1 AND host_id=$2`, [me, adv]);
+    let date = null, time = null;
+    for (let i = 2; i <= 9 && !time; i++) {
+      const day = new Date(Number(b.starts_at) + tz * 60_000 + i * 86_400_000).toISOString().slice(0, 10);
+      const r = await svc.runGuestTool(me, adv, "check_availability", { date: day }, { tz });
+      if (r.ok && r.data.free_times.length) { date = day; time = r.data.free_times[1] || r.data.free_times[0]; }
+    }
+    const mv = await svc.runGuestTool(me, adv, "reschedule_appointment", { date, time }, { tz });
+    assert.ok(mv.ok, JSON.stringify(mv));
+    const moved = await db.one(`SELECT starts_at FROM clinic_appointments WHERE id=$1`, [b.clinic_appt_id]);
+    const nb = await db.one(`SELECT starts_at FROM connect_bookings WHERE id=$1`, [b.id]);
+    assert.strictEqual(Number(moved.starts_at), Number(nb.starts_at), "both sides moved");
+    assert.notStrictEqual(Number(nb.starts_at), Number(b.starts_at));
+    const cx = await svc.runGuestTool(me, adv, "cancel_appointment", {}, { tz });
+    assert.ok(cx.ok, JSON.stringify(cx));
+    assert.strictEqual((await db.one(`SELECT status FROM clinic_appointments WHERE id=$1`, [b.clinic_appt_id])).status, "cancelled");
+    assert.strictEqual((await db.one(`SELECT status FROM connect_bookings WHERE id=$1`, [b.id])).status, "cancelled");
+    const none = await svc.runGuestTool(me, adv, "cancel_appointment", {}, { tz });
+    assert.strictEqual(none.ok, false);
+  });
+  await test("the professional cancels in their app: the caller is told and the reminder goes", async () => {
+    const bookings = require("../src/connect/bookings");
+    const clinic = require("../src/clinic/store");
+    const adv = Number((await db.one(`SELECT id FROM users WHERE phone_number=$1`, [P("08")])).id);
+    let date = null, time = null;
+    for (let i = 1; i <= 7 && !time; i++) {
+      const day = new Date(Date.now() + tz * 60_000 + i * 86_400_000).toISOString().slice(0, 10);
+      const r = await svc.runGuestTool(me, adv, "check_availability", { date: day }, { tz });
+      if (r.ok && r.data.free_times.length) { date = day; time = r.data.free_times[0]; }
+    }
+    const r = await svc.runGuestTool(me, adv, "book_appointment", { date, time, mode: "online", another: true }, { tz });
+    assert.ok(r.ok, JSON.stringify(r));
+    const b = await db.one(`SELECT * FROM connect_bookings WHERE id=$1`, [r.data.booking_id]);
+    const row = await clinic.updateAppointment(adv, b.clinic_appt_id, { status: "cancelled" });
+    await bookings.onClinicChange(adv, row);
+    assert.strictEqual((await db.one(`SELECT status, cancelled_by FROM connect_bookings WHERE id=$1`, [b.id])).cancelled_by, "host");
+    const last = await db.one(`SELECT message FROM agent_messages WHERE to_phone_number=$1 ORDER BY id DESC LIMIT 1`, [P("01")]);
+    assert.match(last.message, /cancelled your appointment/);
+    assert.strictEqual(await db.one(`SELECT id FROM reminders WHERE id=$1`, [b.caller_reminder_id]), null);
+    assert.ok(!(await bookings.upcomingFor(me)).some((x) => x.id === Number(b.id)), "off Home");
+  });
+  await test("only the caller can cancel their booking from Home", async () => {
+    const bookings = require("../src/connect/bookings");
+    const adv = Number((await db.one(`SELECT id FROM users WHERE phone_number=$1`, [P("08")])).id);
+    const r = await svc.runGuestTool(me, adv, "my_appointments", {}, { tz });
+    const any = await db.one(`SELECT id FROM connect_bookings WHERE caller_id=$1 ORDER BY id DESC LIMIT 1`, [me]);
+    assert.strictEqual(await bookings.cancelByCaller(adv, Number(any.id)), null, "the host cannot use the caller's cancel");
+    assert.ok(Array.isArray(r.data.appointments));
+  });
   await test("a minimal meeting books with defaults filled in", async () => {
-    const ok = await svc.runGuestTool(me, alan, "book_appointment", { date: tomorrow, time: "13:00", mode: "phone" }, { tz });
+    const ok = await svc.runGuestTool(me, alan, "book_appointment", { date: tomorrow, time: "13:00", mode: "phone", another: true }, { tz });
     assert.ok(ok.ok, JSON.stringify(ok));
     const at17 = Date.UTC(y, mo - 1, d, 13, 0) - tz * 60_000;
     const rem = await db.one(`SELECT text FROM reminders WHERE user_id=$1 AND due_at=$2`, [alan, at17]);
@@ -259,7 +357,7 @@ async function test(name, fn) {
     assert.ok(r.summarised);
     const all = await inbox();
     assert.strictEqual(all.length, before + 1);
-    assert.match(all.at(-1).message, /Call with your assistant Nova/);
+    assert.strictEqual(all.at(-1).message, "Dhanush booked a demo tomorrow at 15:00.");
   });
 
   console.log("\nthe owner's voice tool");

@@ -149,6 +149,7 @@ const USER_TABLES = [
   ...require("../listings/store").USER_TABLES, // public page, photo, posts, booking requests
   ...require("../workspace/store").USER_TABLES, // routines switched on, day plans
   ...require("../connect/urgent").USER_TABLES, // urgent alerts, as host and as caller
+  ...require("../connect/bookings").USER_TABLES, // bookings made through a contact's assistant
   // 2026-11-14: which partner links they tapped — the erase guard found
   // this was left behind.
   ["affiliate_clicks", "user_id"],

@@ -4,8 +4,8 @@
  * An urgent alert from a contact's assistant rings the host's phone, and
  * keeps ringing louder until the host shows they have seen it:
  *
- *   0:00          one ping                       (channel hari_urgent)
- *   5:00, 5:15    two pings, alarm volume        (channel hari_urgent_loud)
+ *   0:00          one ping                       (channel hari_emergency, the app's emergency tone)
+ *   5:00, 5:15    two pings, alarm volume        (channel hari_emergency_loud, longer tone)
  *   6:15 onward   three pings a minute (every 20 s), alarm volume,
  *                 until acknowledged — for at most MAX_MIN minutes
  *
@@ -70,7 +70,7 @@ async function ping(alert, host, callerName, n) {
     : `Urgent (Not Yet Seen): ${callerName} Needs You`;
   const r = await require("../services/push").send(host.fcm_token, title, body,
     { kind: "agent_message_urgent", alertId: alert.id, ping: n },
-    { channelId: loud ? "hari_urgent_loud" : "hari_urgent", tag: `urgent-${alert.id}` });
+    { channelId: loud ? "hari_emergency_loud" : "hari_emergency", tag: `urgent-${alert.id}` });
   return r.ok;
 }
 

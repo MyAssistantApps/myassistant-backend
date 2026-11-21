@@ -168,6 +168,8 @@ function guestInstructions(card, callerName, nowLine) {
     `  - "urgent meeting": earliest free time today or tomorrow, urgent true (${owner} is alerted at once)`,
     "Book as soon as you have a time and a mode.",
     "",
+    `APPOINTMENTS ALREADY MADE: "when is my appointment?" → my_appointments; "cancel it" → cancel_appointment at once; "move it to 4" → reschedule_appointment (check_availability first if no time was given). If book_appointment says already_booked, ask in ONE question: move it, or book another?`,
+    `PRACTICE DETAILS (get_info): timings, fee, address of ${owner}'s clinic or office. Say only what was asked.`,
     `AVAILABILITY (check_availability): times only, never what ${owner} is doing.`,
     "End the conversation when they say goodbye (end_call), after a brief, warm goodbye.",
     "",
@@ -233,9 +235,41 @@ const GUEST_TOOLS = [
         attendees: { type: "string", description: "Who attends besides the caller, or 'just the caller'." },
         prepare: { type: "string", description: "What the owner should prepare or bring, or 'nothing'." },
         urgent: { type: "boolean", description: "true when the caller said it is urgent: the owner is alerted at once." },
+        another: { type: "boolean", description: "true only when the caller wants a SECOND booking the same day." },
       },
       required: ["date", "time", "mode"],
     },
+  },
+  {
+    name: "my_appointments",
+    description: "The caller's upcoming bookings with your owner (when, what, how). Use for 'when is my appointment?'.",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    name: "cancel_appointment",
+    description: "Cancel the caller's booking with your owner. Act at once when there is one booking; ask which only if there are several.",
+    parameters: {
+      type: "object",
+      properties: { booking_id: { type: "number", description: "From my_appointments, when there are several." } },
+    },
+  },
+  {
+    name: "reschedule_appointment",
+    description: "Move the caller's booking to a new free time (check_availability first if they gave none).",
+    parameters: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "New day, YYYY-MM-DD" },
+        time: { type: "string", description: "New time, 24-hour HH:MM, a free time." },
+        booking_id: { type: "number", description: "From my_appointments, when there are several." },
+      },
+      required: ["date", "time"],
+    },
+  },
+  {
+    name: "get_info",
+    description: "Your owner's public practice details: clinic or office name, address, timings, fee, phone. For 'what are the timings / fees / where is it?'.",
+    parameters: { type: "object", properties: {} },
   },
   {
     name: "end_call",
@@ -273,7 +307,7 @@ async function busyTimes(hostId, start, end) {
 /** Free 30-minute starts in working hours, skipping the hour of anything booked. */
 async function freeSlots(hostRow, date, tz) {
   const hostId = Number(hostRow.id);
-  if (hostRow.persona === "doctor") {
+  if (require("./bookings").PRO.has(hostRow.persona)) {
     const clinic = require("../clinic/store");
     const startMs = at(date, "00:00", tz);
     const slots = await clinic.slotsFor(hostId, clinic.localMidnight(startMs + 12 * 3600_000, tz), { tzOffsetMin: tz }).catch(() => []);
@@ -354,7 +388,7 @@ async function runGuestTool(callerId, hostId, name, args = {}, { tz: _callerTz =
   const me = await caller(callerId);
   const owner = firstName(card.ownerName) || "them";
   const tz = hostTz(h, _callerTz);
-  if (["leave_message", "urgent_ping", "book_appointment"].includes(name) &&
+  if (["leave_message", "urgent_ping", "book_appointment", "cancel_appointment", "reschedule_appointment"].includes(name) &&
       (await countSent(me, h)) >= DELIVER_PER_DAY) {
     return { ok: false, error: `you have reached today's limit of messages to ${owner}; try again tomorrow` };
   }
@@ -369,7 +403,7 @@ async function runGuestTool(callerId, hostId, name, args = {}, { tz: _callerTz =
         clean(args.reply_via, 120) && `Reply via: ${clean(args.reply_via, 120)}`,
       ].filter(Boolean).join(" | ");
       await deliver(h, me,
-        `(Left with your assistant ${card.assistantName}) ${clean(args.message, 1000)}` + (extra ? `\n${extra}` : ""));
+        `${clean(args.message, 1000)}` + (extra ? `\n${extra}` : ""));
       return { ok: true, data: { delivered: true }, speak: `Done, ${owner} has your message.` };
     }
     case "urgent_ping": {
@@ -416,6 +450,19 @@ async function runGuestTool(callerId, hostId, name, args = {}, { tz: _callerTz =
       if (!mode) return { ok: false, needs_details: ["mode"], error: "Ask whether it is in person, online or a phone call." };
       const startsAt = at(date, time, tz);
       if (startsAt <= Date.now()) return { ok: false, error: "that time has passed; offer the next free time" };
+      const bookings = require("./bookings");
+      // One booking per caller per day with the same person: a second ask
+      // is almost always "move it", not "book another".
+      const dayStart = at(date, "00:00", tz);
+      const dup = await bookings.sameDay(Number(me.id), Number(h.id), dayStart, dayStart + 86_400_000);
+      if (dup && !(args.another === true || args.another === "true")) {
+        return {
+          ok: false,
+          already_booked: { booking_id: Number(dup.id), when: bookings.when(dup.starts_at, tz) },
+          error: `the caller already has a booking with ${owner} that day at ${bookings.when(dup.starts_at, tz)}; ` +
+            "ask in one short question whether to move it (reschedule_appointment) or book another (book_appointment with another: true)",
+        };
+      }
       const minutes = Math.max(10, Math.min(480, Math.round(Number(args.minutes) || 30)));
       const purpose = clean(args.purpose) || "Meeting";
       // An urgent booking rings the host's alarm: it shares the urgent cap.
@@ -429,13 +476,21 @@ async function runGuestTool(callerId, hostId, name, args = {}, { tz: _callerTz =
         `${clean(args.place) || (mode === "phone" ? `${me.phone_number || "caller's number"}` : "to be shared")} | ` +
         `With: ${clean(args.attendees, 120) || "just the caller"}` +
         (prep && !/^(nothing|none|no)$/i.test(prep) ? ` | Prepare: ${prep}` : "");
-      if (h.persona === "doctor") {
+      let clinicApptId = null, hostReminderId = null, place = clean(args.place);
+      const isPro = bookings.PRO.has(h.persona);
+      if (isPro) {
         const clinic = require("../clinic/store");
         try {
-          await clinic.createAppointment(Number(h.id), {
+          const appt = await clinic.createAppointment(Number(h.id), {
             patientName: callerName, patientPhone: me.phone_number || "", startsAt, source: "assistant",
             reason: `${purpose} (${details})`, durationMin: minutes,
           }, { requireFreeSlot: true, tzOffsetMin: tz });
+          clinicApptId = appt?.id || null;
+          // In person at a professional's: their own address, not "to be shared".
+          if (!place && mode === "in_person") {
+            const prof = await clinic.getProfile(Number(h.id)).catch(() => null);
+            place = [prof?.clinicName, prof?.address].filter(Boolean).join(", ");
+          }
         } catch (e) {
           if (e instanceof clinic.SlotTakenError) return { ok: false, error: "that slot is no longer free; check availability again" };
           throw e;
@@ -446,23 +501,102 @@ async function runGuestTool(callerId, hostId, name, args = {}, { tz: _callerTz =
           await c.query("SELECT pg_advisory_xact_lock(hashtext('connect_slot'), $1)", [Number(h.id)]);
           const free = await freeSlots(h, date, tz);
           if (!free.includes(time)) return false;
-          await require("../reminders/store").create(Number(h.id),
+          const rem = await require("../reminders/store").create(Number(h.id),
             `${urgent ? "URGENT meeting" : "Meeting"} with ${callerName}: ${purpose} | ${details} (booked by your assistant)`,
             startsAt, urgent ? "alarm" : "gentle", { tzOffsetMin: tz });
+          hostReminderId = rem?.id || null;
           return true;
         });
         if (!took) return { ok: false, error: "that time is not free; check availability and offer another" };
       }
-      // The caller's own reminder, and the host told at once (loudly if urgent).
-      await require("../reminders/store").create(Number(me.id),
-        `Meeting with ${card.ownerName}: ${purpose} | ${details}`, startsAt, "gentle", { tzOffsetMin: tz });
+      // The caller's own reminder, the booking that ties both sides, the
+      // caller's confirmation, and the host told at once (loudly if urgent).
+      const label = bookings.hostLabel({ ...h, contact_name: card.ownerName });
+      const mine = await require("../reminders/store").create(Number(me.id),
+        `${purpose} with ${label} | ${MODE_WORDS[mode]}${place ? ` | ${place}` : ""}`, startsAt, "gentle", { tzOffsetMin: tz });
+      const booking = await bookings.record({
+        callerId: Number(me.id), hostId: Number(h.id), startsAt, minutes, mode, purpose,
+        details: place ? `${details} | ${place}` : details, kind: isPro ? "clinic" : "meeting",
+        clinicApptId, hostReminderId, callerReminderId: mine?.id || null, urgent, tz,
+      });
+      await bookings.confirmToCaller(booking, { ...h, contact_name: card.ownerName }, place);
+      const nice = bookings.when(startsAt, tz);
       await deliver(h, me,
-        `${urgent ? "[URGENT] " : ""}(Booked by your assistant ${card.assistantName}) ${purpose} on ${date} at ${time} | ${details}`,
+        `${urgent ? "[URGENT] " : ""}Meeting booked: ${purpose} on ${nice} | ${details}`,
         { urgent });
       return {
         ok: true,
-        data: { booked: true, date, time, minutes, mode, urgent },
-        speak: `Done. You are booked with ${owner} on ${date} at ${time}${urgent ? ", and I have alerted them that it is urgent" : ""}.`,
+        data: { booked: true, booking_id: Number(booking.id), date, time, when: nice, minutes, mode, place, urgent },
+        speak: `Done. You are booked with ${label} on ${nice}${place && mode === "in_person" ? ` at ${place}` : ""}` +
+          `${urgent ? ", and I have alerted them that it is urgent" : ""}. It is on your home screen.`,
+      };
+    }
+    case "my_appointments": {
+      const bookings = require("./bookings");
+      const list = await bookings.withHost(Number(me.id), Number(h.id));
+      return {
+        ok: true,
+        data: {
+          appointments: list.map((b) => ({
+            booking_id: Number(b.id), when: bookings.when(b.starts_at, Number(b.tz_offset_min) || tz),
+            purpose: b.purpose, mode: MODE_WORDS[b.mode] || b.mode,
+          })),
+          note: list.length ? "Say them briefly." : `No upcoming bookings with ${owner}.`,
+        },
+      };
+    }
+    case "cancel_appointment": {
+      const bookings = require("./bookings");
+      const found = await bookings.findActive(Number(me.id), Number(h.id), args.booking_id);
+      if (!found) return { ok: false, error: `no upcoming booking with ${owner} to cancel` };
+      if (found.ambiguous) {
+        return { ok: false, needs_details: ["booking_id"], error: "several bookings; ask which one (say their times)",
+          data: { appointments: found.ambiguous.map((b) => ({ booking_id: Number(b.id), when: bookings.when(b.starts_at, tz) })) } };
+      }
+      await bookings.cancelByCaller(Number(me.id), Number(found.id), { hostId: Number(h.id) });
+      return { ok: true, data: { cancelled: true }, speak: `Done, your appointment on ${bookings.when(found.starts_at, tz)} is cancelled.` };
+    }
+    case "reschedule_appointment": {
+      const bookings = require("./bookings");
+      const need = missing(args, [["date", "the new date"], ["time", "the new time"]]);
+      if (need) return need;
+      const date = String(args.date || ""), time = String(args.time || "");
+      if (!DAY_RE.test(date) || !TIME_RE.test(time)) return { ok: false, error: "date must be YYYY-MM-DD and time HH:MM" };
+      const startsAt = at(date, time, tz);
+      if (startsAt <= Date.now()) return { ok: false, error: "that time has passed; offer the next free time" };
+      const found = await bookings.findActive(Number(me.id), Number(h.id), args.booking_id);
+      if (!found) return { ok: false, error: `no upcoming booking with ${owner} to move; offer to book one` };
+      if (found.ambiguous) {
+        return { ok: false, needs_details: ["booking_id"], error: "several bookings; ask which one to move",
+          data: { appointments: found.ambiguous.map((b) => ({ booking_id: Number(b.id), when: bookings.when(b.starts_at, tz) })) } };
+      }
+      const row = await bookings.reschedule(Number(me.id), found, startsAt, {
+        host: { ...h, contact_name: card.ownerName }, tz,
+        isFree: async () => (await freeSlots(h, date, tz)).includes(time),
+      });
+      if (!row) return { ok: false, error: "that time is not free; check availability and offer another" };
+      return { ok: true, data: { moved: true, when: bookings.when(startsAt, tz) },
+        speak: `Done, moved to ${bookings.when(startsAt, tz)}.` };
+    }
+    case "get_info": {
+      // Only what a professional publishes for patients and clients:
+      // name, address, timings, fee. Nothing private.
+      if (!require("./bookings").PRO.has(h.persona)) {
+        return { ok: true, data: { profession: card.profession || "", note: `${owner} has no public practice details; offer to take a message.` } };
+      }
+      const clinic = require("../clinic/store");
+      const p = await clinic.getProfile(Number(h.id)).catch(() => null);
+      return {
+        ok: true,
+        data: {
+          profession: card.profession || h.persona,
+          practice: p?.clinicName || "",
+          address: p?.address || "",
+          timings: p ? clinic.describeHours(p.hours) : "",
+          fee: p?.fee ? `Rs ${p.fee}` : "",
+          phone: p?.phone || "",
+          note: "Answer only what was asked, briefly.",
+        },
       };
     }
     case "end_call":
@@ -502,7 +636,7 @@ async function finish(callerId, hostId, transcript, { ai = summarise } = {}) {
     summary = String(await ai(lines.join("\n"), firstName(card.ownerName))).trim().slice(0, 600);
   } catch { /* no summary is fine */ }
   if (!summary) return { ok: true, summarised: false };
-  await deliver(h, me, `(Call with your assistant ${card.assistantName}) ${summary}`);
+  await deliver(h, me, summary);
   return { ok: true, summarised: true };
 }
 

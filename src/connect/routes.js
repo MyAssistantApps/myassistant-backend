@@ -44,6 +44,21 @@ const sessionLimit = rateLimit({
   message: { error: "Too many assistant calls in a short time. Please wait a few minutes." },
 });
 
+// My bookings made through contacts' assistants (Home's top strip).
+router.get("/bookings", async (req, res) => {
+  const me = uid(req, res);
+  if (!me) return;
+  res.json({ bookings: await require("./bookings").upcomingFor(me).catch(() => []) });
+});
+
+router.post("/bookings/:bid(\\d+)/cancel", async (req, res) => {
+  const me = uid(req, res);
+  if (!me) return;
+  const b = await require("./bookings").cancelByCaller(me, Number(req.params.bid)).catch(() => null);
+  if (!b) return res.status(404).json({ error: "That booking was not found or is already cancelled." });
+  res.json({ ok: true });
+});
+
 // The host has seen an urgent alert (tapped it): the pings stop.
 router.post("/urgent/ack", async (req, res) => {
   const me = uid(req, res);
