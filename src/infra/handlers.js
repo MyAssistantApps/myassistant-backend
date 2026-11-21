@@ -813,6 +813,7 @@ function install() {
   jobs.register("task_continue", taskContinue);
   require("../connect/urgent").register(jobs); // urgent alerts that escalate
   require("../rides/service").register(jobs); // a booked cab, followed until the trip ends
+  require("../orders/service").register(jobs); // an order, followed until it is delivered
   jobs.register("deep_research", deepResearch);
   jobs.register("generate_video", videoJob);
   // A call retry that survives a restart — see agentCall.handleNoAnswer.

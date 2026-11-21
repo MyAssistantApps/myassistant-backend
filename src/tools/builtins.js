@@ -7883,6 +7883,7 @@ function registerBuiltins() {
         dish: { type: "string", description: "What the user wants to eat, e.g. 'chicken biryani'" },
         restaurant: { type: "string", description: "Specific restaurant, if the user named one" },
         provider: { type: "string", enum: ["swiggy", "zomato"], description: "Default swiggy" },
+        confirm_total: { type: "boolean", description: "true only after the user said yes to a quoted high total." },
       },
     },
     async execute(args, ctx) {
@@ -7891,6 +7892,12 @@ function registerBuiltins() {
       if (!args.dish && !args.restaurant) {
         return { ok: false, needsArgs: ["dish"] };
       }
+      // A REAL ORDER when a provider can take it (Swiggy's MCP once
+      // approved, or the test provider while building), else the app.
+      const placed = await placeOrder(ctx, { kind: "food", items: args.dish ? [args.dish] : [],
+        restaurant: args.restaurant, provider: args.provider === "zomato" ? undefined : args.provider,
+        confirm: args.confirm_total });
+      if (placed) return placed;
       const provider = args.provider || "swiggy";
       const link = deeplinks.food({
         provider,
@@ -7920,6 +7927,139 @@ function registerBuiltins() {
         deviceAction: { type: "open_url", url: out.url },
         speak: out.speak,
       };
+    },
+  });
+
+  // ---------------- ORDERS: groceries, medicines, parcels, status ----------
+  // One helper for every kind (src/orders/service.js): placed and
+  // confirmed when a provider can take it, else null and the caller opens
+  // the right app.
+  async function placeOrder(ctx, { kind, items, restaurant, pickup, drop, provider, confirm }) {
+    const orders = require("../orders/service");
+    if (!ctx.userId || !orders.canOrder(kind)) return null;
+    const r = await orders.place({ userId: Number(ctx.userId), kind, items, restaurant, pickup, drop,
+      provider, confirmTotal: confirm === true });
+    if (r.ok) return { ok: true, data: { ordered: true, order: r.order }, speak: r.speak,
+      deviceAction: { type: "order_placed", order: r.order } };
+    if (r.error === "no_provider") return null;
+    return { ok: false, error: r.error, needs_details: r.needs ? [r.needs] : undefined,
+      data: { total: r.total }, speak: r.speak };
+  }
+
+  registry.register({
+    name: "order_groceries",
+    description:
+      "Order groceries or daily essentials for delivery: 'order milk and eggs', " +
+      "'get me 2 kg onions'. Places the order when grocery ordering is live " +
+      "and says so; otherwise opens a grocery app searching for them. Do not " +
+      "ask which app.",
+    risk: "low",
+    deviceAction: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: { type: "array", items: { type: "string" }, description: "Each item with its quantity, as said" },
+        confirm_total: { type: "boolean", description: "true only after the user said yes to a quoted high total." },
+      },
+      required: ["items"],
+    },
+    async execute(args, ctx) {
+      const items = (args.items || []).map(String).filter(Boolean);
+      if (!items.length) return { ok: false, needsArgs: ["items"] };
+      const placed = await placeOrder(ctx, { kind: "grocery", items, confirm: args.confirm_total });
+      if (placed) return placed;
+      const link = require("../fulfillment/deeplinks").shop({ provider: "blinkit", query: items.join(" "), platform: ctx.platform });
+      return { ok: true, deviceAction: { type: "open_url", url: link.url },
+        speak: `Opening Blinkit with ${items.join(", ")} searched; choose and pay there.` };
+    },
+  });
+
+  registry.register({
+    name: "order_medicines",
+    description:
+      "Order medicines for delivery: 'order Dolo 650', 'get my BP tablets'. " +
+      "Places the order when medicine ordering is live; otherwise opens Tata " +
+      "1mg searching for them. Prescription medicines need the prescription " +
+      "uploaded to the pharmacy; say so. Never suggest a dose.",
+    risk: "low",
+    deviceAction: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: { type: "array", items: { type: "string" }, description: "Medicine names with strength and quantity, as said" },
+        confirm_total: { type: "boolean", description: "true only after the user said yes to a quoted high total." },
+      },
+      required: ["items"],
+    },
+    async execute(args, ctx) {
+      const items = (args.items || []).map(String).filter(Boolean);
+      if (!items.length) return { ok: false, needsArgs: ["items"] };
+      const placed = await placeOrder(ctx, { kind: "medicine", items, confirm: args.confirm_total });
+      if (placed) return placed;
+      const url = `https://www.1mg.com/search/all?name=${encodeURIComponent(items.join(" "))}`;
+      return { ok: true, deviceAction: { type: "open_url", url },
+        speak: `Opening Tata 1mg with ${items.join(", ")} searched. Prescription medicines will need your prescription.` };
+    },
+  });
+
+  registry.register({
+    name: "send_parcel",
+    description:
+      "Send a parcel or package across town: 'send this file to my office', " +
+      "'pick up a parcel from Indiranagar and drop it at Jayanagar'. Books a " +
+      "two-wheeler pickup when parcel booking is live; otherwise opens Porter.",
+    risk: "low",
+    deviceAction: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        pickup: { type: "string", description: "Pickup address or place" },
+        drop: { type: "string", description: "Drop-off address or place" },
+        item: { type: "string", description: "What is being sent" },
+        confirm_total: { type: "boolean", description: "true only after the user said yes to a quoted high total." },
+      },
+      required: ["pickup", "drop"],
+    },
+    async execute(args, ctx) {
+      if (!args.pickup || !args.drop) return { ok: false, needsArgs: [!args.pickup ? "pickup" : "drop"] };
+      const placed = await placeOrder(ctx, { kind: "parcel", items: args.item ? [args.item] : ["a parcel"],
+        pickup: args.pickup, drop: args.drop, confirm: args.confirm_total });
+      if (placed) return placed;
+      return { ok: true, deviceAction: { type: "open_url", url: "https://porter.in/" },
+        speak: `Opening Porter to book the pickup from ${args.pickup} to ${args.drop}.` };
+    },
+  });
+
+  registry.register({
+    name: "order_status",
+    description: "The user's orders in progress (food, groceries, medicines, parcels): status, delivery partner, OTP, arrival. Use for 'where is my order', 'what is the delivery OTP'.",
+    risk: "low",
+    available: () => require("../orders/service").KINDS.some((k) => require("../orders/service").canOrder(k)),
+    inputSchema: { type: "object", properties: {} },
+    async execute(_args, ctx) {
+      const list = await require("../orders/service").activeList(Number(ctx.userId));
+      if (!list.length) return { ok: true, data: { orders: [] }, speak: "You have no orders in progress." };
+      const line = (o) => [
+        `${o.summary} from ${o.providerLabel}: ${o.status.replace(/_/g, " ")}`,
+        o.partner?.name ? `with ${o.partner.name}` : "",
+        o.otp ? `OTP ${o.otp.split("").join(" ")}` : "",
+        o.etaMin != null && !["placed", "delivered"].includes(o.status) ? `about ${o.etaMin} min` : "",
+      ].filter(Boolean).join(", ");
+      return { ok: true, data: { orders: list }, speak: list.map(line).join(". ") + "." };
+    },
+  });
+
+  registry.register({
+    name: "cancel_order",
+    description: "Cancel the user's latest order in progress (or the one they describe). Use for 'cancel my order'.",
+    risk: "low",
+    available: () => require("../orders/service").KINDS.some((k) => require("../orders/service").canOrder(k)),
+    inputSchema: { type: "object", properties: {} },
+    async execute(_args, ctx) {
+      const r = await require("../orders/service").cancel(Number(ctx.userId));
+      if (r.ok) return { ok: true, data: { order: r.order }, speak: `Done, ${r.order.summary} is cancelled.` };
+      if (r.error === "too_late") return { ok: false, error: "too_late", speak: "It is already on the way, so it can no longer be cancelled." };
+      return { ok: false, error: "none", speak: "You have no orders in progress." };
     },
   });
 

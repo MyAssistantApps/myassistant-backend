@@ -97,13 +97,26 @@ const SPECIALISTS = {
     label: "Shopping and money",
     role: "You are handling SHOPPING AND MONEY: the shopping list, orders, rides, tickets, " +
       "recharges and payments. Anything that spends or requests money needs their clear yes first.",
-    cues: /\b(buy|order|shopping|grocer\w*|cart|swiggy|zomato|blinkit|zepto|amazon|flipkart|uber|ola|cab|taxi|ride|otp|driver|airport|station|ticket|movie|recharge|pay|upi|rupees?|rs\.?|₹|payment|paid|owe|emi|loan|salary|budget|finance|pantry|run out of|dinner|lunch|breakfast|food|hungry|biryani|pizza|groceries)\b/i,
+    cues: /\b(buy|order|shopping|grocer\w*|cart|swiggy|zomato|blinkit|zepto|amazon|flipkart|uber|ola|cab|taxi|ride|airport|station|ticket|movie|recharge|pay|upi|rupees?|rs\.?|₹|payment|paid|owe|emi|loan|salary|budget|finance|pantry|run out of|dinner|lunch|breakfast|food|hungry|biryani|pizza|groceries)\b/i,
     tools: ["shopping_list_add", "shopping_list_show", "shopping_list_check", "shopping_list_remove",
       "shopping_list_clear", "shopping_list_clear_all", "shop_from_list", "share_shopping_list",
-      "pantry_update", "order_food", "book_ride", "ride_status", "cancel_ride", "book_movie_tickets", "mobile_recharge",
+      "pantry_update", "order_food", "book_ride", "book_movie_tickets", "mobile_recharge",
       "open_service_app", "pay_by_upi", "save_upi_id", "collect_payment", "check_payments",
       "list_my_errands", "check_task_outcomes", "add_finance_item", "update_finance_item",
       "remove_finance_item", "get_finance_plan"],
+  },
+  // RIDES AND DELIVERIES (2026-11-21): booking, following and cancelling
+  // cabs and orders. Its own small toolkit, so the shopping one does not
+  // grow past the cap and crowd out calls and reminders.
+  deliveries: {
+    scope: "cabs, deliveries, parcels, medicines, order status, OTP",
+    label: "Rides and deliveries",
+    role: "You are handling RIDES AND DELIVERIES: booking cabs, ordering food, groceries and " +
+      "medicines, sending parcels, and saying where they are (driver, OTP, arrival). " +
+      "Book at once when asked; never ask which company.",
+    cues: /\b(cab|taxi|ride|uber|ola|rapido|auto|driver|otp|parcel|courier|porter|deliver\w*|order status|my order|medicines?|tablets?|pharmacy|strips?|syrup|dolo|crocin|paracetamol|d+ ?mg|grocer\w*|milk|eggs|swiggy|instamart|blinkit|zepto)\b/i,
+    tools: ["book_ride", "ride_status", "cancel_ride", "order_food", "order_groceries",
+      "order_medicines", "send_parcel", "order_status", "cancel_order"],
   },
   creative: {
     scope: "images, video, photo edits, documents, drafts, music",

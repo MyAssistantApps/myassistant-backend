@@ -319,6 +319,8 @@ app.use("/messages", appAuth, require("./routes/messages"));
 app.use("/feedback", appAuth, perUserLimit, require("./feedback/routes"));
 // A cab booked by voice: its status for the Home strip, and Cancel.
 app.use("/rides", appAuth, perUserLimit, require("./rides/routes"));
+// Orders placed by voice (food, groceries, medicines, parcels).
+app.use("/orders", appAuth, perUserLimit, require("./orders/routes"));
 app.use("/usage", appAuth, require("./routes/usage").router);
 app.use("/finance", appAuth, require("./routes/finance").router);
 
