@@ -122,7 +122,7 @@ const FAMILIES = [
       // live in SOME family or the membership test (rightly) fails.
       "end_conversation",
       // These open an app or a screen too, and say so in the same words.
-      "enable_usage_tracking", "order_food", "book_ride", "book_movie_tickets",
+      "enable_usage_tracking", "order_food", "order_groceries", "order_medicines", "send_parcel", "book_ride", "book_movie_tickets",
       "try_a_look", "present_text", "draft_text", "edit_draft", "generate_image", "generate_video",
       // show_pictures pops a photo on the phone ("Here is X") — same claim.
       "show_pictures", "show_search_results",
