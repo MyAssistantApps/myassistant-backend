@@ -516,6 +516,10 @@ const shopping = require("./shopping");
 const kitchen = require("./kitchen");
 app.use("/shopping", appAuth, shopping.limiter, shopping.router);
 app.use("/kitchen", appAuth, kitchen.limiter, kitchen.router);
+// JYOTISH (2026-11-22) — the Vedic horoscope card at the bottom of Home:
+// chat onboarding, a local sidereal chart, readings from its data (src/jyotish).
+const jyotish = require("./jyotish");
+app.use("/jyotish", appAuth, jyotish.limiter, jyotish.router);
 
 // ASSISTANT FUNCTIONS (2026-09-29) — Android AppFunctions: Gemini and other
 // system agents add to the list, set reminders, plan Today's 3 and log a
