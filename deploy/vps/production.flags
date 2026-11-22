@@ -44,3 +44,11 @@ BOLNA_API_KEY=<secret>
 BOLNA_FROM_NUMBER=+917965860041
 BOLNA_AGENT_ID=5f68c977-d156-41f9-ab97-a505c34f346b
 BOLNA_AGENT_ID_MALE=cb752bce-9896-44ff-9442-3f54f7b22955
+# WALLET (2026-11-22, src/wallet): OFF on production until the launch gate.
+# Unset means off; at launch set WALLET_ENABLED=on, first with
+# WALLET_ALLOW_USERS=<team user ids, comma-separated>, then without it.
+# Needs RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET / RAZORPAY_WEBHOOK_SECRET
+# (<secret>, live keys) on the server — not set there yet. Limits and
+# referral amounts have defaults (WALLET_*, REFERRAL_*, BONUS_EXPIRY_DAYS).
+# Runbook: deploy/docker-vps/WALLET.md
+WALLET_ENABLED=off
