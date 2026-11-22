@@ -18,6 +18,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = process.env.NODE_ENV || "test";
 process.env.JYOTISH_RATE_PER_MIN = "100000";
 process.env.JYOTISH_AI_RATE_PER_MIN = "100000";
+process.env.LOG_LEVEL = process.env.LOG_LEVEL || "warn"; // no per-tool log lines
 
 const assert = require("assert");
 const express = require("express");
@@ -463,10 +464,125 @@ async function routeTests() {
   });
 }
 
+// ── voice tools ─────────────────────────────────────────────────────────
+
+async function toolTests() {
+  console.log("(d) voice tools");
+  // A FRESH registry holding only these tools (as scripts/kitchen-test.js does).
+  const registry = require("../src/tools/registry");
+  registry._clear();
+  jyotish.registerJyotishTools(registry);
+  const U = 900101;
+  const ctx = { userId: U, appBuild: 300, platform: "android", source: "voice", tzOffsetMin: 330, userName: "Asha" };
+  const exec = (name, args, c = ctx) => registry.execute(name, args, c);
+  const store = require("../src/jyotish/store");
+  for (const p of await store.listProfiles(U)) await store.deleteProfile(U, p.id);
+  await db.run(`DELETE FROM jyotish_predictions WHERE user_id = $1`, [U]);
+  const dataOf = (r) => r.data || r.result?.data || r;
+
+  await atest("jyotish_chart: nothing said and nothing saved → asks for date, place, time", async () => {
+    const r = await exec("jyotish_chart", {});
+    assert.strictEqual(r.ok, false, JSON.stringify(r));
+    assert.deepStrictEqual(r.needsArgs, ["date", "place", "time"]);
+  });
+
+  await atest("jyotish_chart: a vague time → asks for the clock time, nothing saved", async () => {
+    const r = await exec("jyotish_chart", { date: "2004-03-14", place: "Udupi" });
+    assert.strictEqual(r.ok, false);
+    assert.deepStrictEqual(r.needsArgs, ["time"]);
+    assert.match(r.note, /don't know/);
+    assert.strictEqual((await store.listProfiles(U)).length, 0);
+    const bad = await exec("jyotish_chart", { date: "2004-02-31", place: "Udupi", time: "06:30" });
+    assert.deepStrictEqual(bad.needsArgs, ["date"]);
+    assert.match(bad.note, /not a real date/);
+  });
+
+  await atest("jyotish_chart: told details → cast, saved under their name, facts to explain", async () => {
+    const r = await exec("jyotish_chart", { date: "2004-03-14", time: "06:30", place: "Udupi" });
+    assert.strictEqual(r.ok, true, JSON.stringify(r));
+    const d = dataOf(r);
+    assert.strictEqual(d.saved, true);
+    assert.strictEqual(d.person, "Asha");
+    assert.match(d.lagna, /^Aquarius/);
+    assert.match(d.moonSign, /^Sagittarius/);
+    assert.match(d.nakshatra, /^Mula/);
+    assert.match(d.dashaNow, /mahadasha/);
+    assert.strictEqual(d.placeUsed, "Udupi, Karnataka, India");
+    assert.match(r.note, /Use ONLY these facts/);
+    assert.match(r.note, /entertainment and self-reflection/);
+    assert.match(r.note, /which place you used/, "another match exists, so it says which it took");
+    const saved = await store.listProfiles(U);
+    assert.strictEqual(saved.length, 1);
+    assert.strictEqual(saved[0].birth.utc, "2004-03-14T01:00:00.000Z");
+  });
+
+  await atest("jyotish_chart: 'what is my rashi' later → the saved chart", async () => {
+    const r = await exec("jyotish_chart", { name: "me" });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(dataOf(r).saved, true);
+    assert.match(dataOf(r).moonSign, /^Sagittarius/);
+  });
+
+  await atest("jyotish_chart: unknown time → Moon-based only", async () => {
+    const r = await exec("jyotish_chart", { name: "Ravi", date: "1990-08-15", time_unknown: true, place: "Udupi" });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(dataOf(r).birthTimeKnown, false);
+    assert.strictEqual(dataOf(r).lagna, "needs the birth time");
+    assert.strictEqual((await store.listProfiles(U)).length, 2);
+  });
+
+  await atest("jyotish_reading: from the saved chart, cached, with the disclaimer", async () => {
+    let calls = 0, ctxText = "";
+    jai._setModel({ stream: async function* (m) { calls++; ctxText = m[0].content; yield "Career rises this month: Jupiter supports steady effort."; } });
+    const r = await exec("jyotish_reading", { range: "month", category: "career", language: "en" });
+    assert.strictEqual(r.ok, true, JSON.stringify(r));
+    const d = dataOf(r);
+    assert.strictEqual(d.person, "Ravi", "the most recent saved chart");
+    assert.strictEqual(d.reading, "Career rises this month: Jupiter supports steady effort.");
+    assert.strictEqual(d.fallback, false);
+    assert.match(r.note, /entertainment and self-reflection/);
+    assert.match(ctxText, /BIRTH TIME KNOWN: no/);
+    const asha = await exec("jyotish_reading", { name: "asha", range: "month", category: "career" });
+    assert.strictEqual(dataOf(asha).person, "Asha");
+    assert.strictEqual(calls, 2);
+    await exec("jyotish_reading", { name: "Asha", range: "month", category: "career" });
+    assert.strictEqual(calls, 2, "the second ask is served from the cache");
+  });
+
+  await atest("jyotish_reading: model down → the short outline, said to be short", async () => {
+    jai._setModel({ stream: async function* () { throw new Error("503"); } });
+    const r = await exec("jyotish_reading", { name: "Asha", range: "today", category: "health" });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(dataOf(r).fallback, true);
+    assert.match(dataOf(r).reading, /mahadasha/);
+    assert.match(r.note, /short outline/);
+  });
+
+  await atest("jyotish_reading: no saved chart for that name, custom date checked", async () => {
+    const r = await exec("jyotish_reading", { name: "Zubin", range: "week" });
+    assert.strictEqual(r.ok, false);
+    assert.match(r.note, /no saved chart for Zubin/i);
+    const c = await exec("jyotish_reading", { range: "custom", date: "nope" });
+    assert.deepStrictEqual(c.needsArgs, ["date"]);
+    const none = await exec("jyotish_reading", { range: "today" }, { ...ctx, userId: 900102 });
+    assert.match(none.note, /No chart is saved yet/);
+  });
+
+  await atest("the info agent offers both tools, and astrology words route to it", async () => {
+    const src = require("fs").readFileSync(require("path").join(__dirname, "../src/agents/manager.js"), "utf8");
+    assert.match(src, /"jyotish_chart", "jyotish_reading"/);
+    const cue = /kundli\|kundali\|jyotish/;
+    assert.match(src, cue);
+  });
+
+  for (const p of await store.listProfiles(U)) await store.deleteProfile(U, p.id);
+}
+
 (async () => {
   await engineTests();
   await timeTests();
   await routeTests();
+  await toolTests();
   server?.close();
   await db.close?.();
   console.log(`\njyotish: ${passed} passed${process.exitCode ? ", SOME FAILED" : ""}`);

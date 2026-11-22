@@ -11,6 +11,7 @@
  * The model never computes astrology: every planet, house, dasha and yoga
  * it mentions comes from engine.js, handed over as data.
  */
+const crypto = require("crypto");
 const ai = require("../services/ai/router");
 const engine = require("./engine");
 
@@ -198,7 +199,34 @@ function fallbackReading(natal, period, language = "en") {
   return (FALLBACK[language] || FALLBACK.en)(currentDasha(natal, mid), s);
 }
 
+/** Which chart a birth record makes (the cache and the voice tools key on it). */
+const chartHash = (b) => crypto.createHash("sha256").update([b.date, b.time || "-", b.lat, b.lng, b.tz].join("|")).digest("hex").slice(0, 32);
+
+/** One cache entry per user, chart, range, category, language and period. */
+const readingKey = (userId, birth, range, category, language, period) => crypto.createHash("sha256")
+  .update([userId, chartHash(birth), range, category, language, period.key].join("|")).digest("hex");
+
+/**
+ * The whole reading at once (the voice tools; the app streams instead).
+ * Tries twice, then the plain reading. Returns { text, fallback }.
+ */
+async function wholeReading(natal, period, category, { language = "en", name = null } = {}) {
+  const context = predictionContext(natal, period, category);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      let text = "";
+      for await (const d of streamPrediction(context, { language, name })) text += d;
+      if (text.trim()) return { text: text.trim(), fallback: false };
+    } catch (e) {
+      console.warn(`jyotish reading attempt ${attempt + 1} failed:`, e.message);
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 600));
+    }
+  }
+  return { text: fallbackReading(natal, period, language), fallback: true };
+}
+
 module.exports = {
+  chartHash, readingKey, wholeReading,
   extract, cleanDate, cleanTime, predictionContext, streamPrediction, fallbackReading, periodOf, currentDasha,
   RANGES, CATEGORIES, LANGUAGES, EXTRACT_SCHEMA, _setModel,
 };
