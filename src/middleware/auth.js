@@ -139,7 +139,7 @@ function makeAppAuth({ allowAppFn = false } = {}) {
       // here is the database (restart, dropped connection). 503, not 401:
       // the app treats 401 as "signed out" and would clear the session.
       console.warn("[auth] session check failed:", e && e.message);
-      return res.status(503).json({ error: "We're having a brief hiccup — please try again in a moment." });
+      return res.status(503).json({ error: "The service is temporarily unavailable. Please try again shortly." });
     }
   };
 }

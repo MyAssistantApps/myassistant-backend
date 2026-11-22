@@ -127,7 +127,7 @@ const src = (f) => fs.readFileSync(__dirname + "/../src/" + f, "utf8");
       assert.strictEqual(after.resolved_build, 144);
       if (u?.fcm_token) {
         assert.strictEqual(pushes.length, 1);
-        assert.match(pushes[0].title, /You asked: Make the reminder text bigger/);
+        assert.match(pushes[0].title, /Your Request: Make the reminder text bigger/);
         assert.match(pushes[0].body, /update 144/);
         assert.ok(after.notified_at > 0);
         // Telling them again would be noise.

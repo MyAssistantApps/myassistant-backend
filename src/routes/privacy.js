@@ -139,6 +139,18 @@ const USER_TABLES = [
   ["records", "user_id"],
   ["client_recalls", "user_id"], // professional mode, beside clients
   ["client_ledger", "user_id"],
+  // The doctor's clinic (src/clinic/store.js): exported with the account
+  // and erased with it, like every other row the user owns.
+  ["clinic_profiles", "user_id"],
+  ["clinic_appointments", "user_id"],
+  // Advocates' cases/hearings and business invoices/leads (src/pro/store.js).
+  ...require("../pro/store").USER_TABLES,
+  ...require("../listings/store").USER_TABLES, // public page, photo, posts, booking requests
+  // 2026-11-14: what they searched for and asked of ONDC sellers, and which
+  // partner links they tapped — the erase guard found these were left behind.
+  ["ondc_requests", "user_id"],
+  ["affiliate_clicks", "user_id"],
+  ...require("../services/callCode").USER_TABLES, // verification-call codes (hashed)
   ["pending_pushes", "user_id"], // notifications still waiting for a device
   ["user_devices", "user_id"], // phone model, OS, permissions
   ["studio_photos", "user_id"], // the bytes are documents; these point at them
@@ -259,6 +271,10 @@ const NOT_PERSONAL = {
   // deleting them cannot be undone. Kept until the owner decides otherwise;
   // clearing them is one line in USER_TABLES.
   payments: "financial record kept for accounting; the owner decides when it may go",
+  // 2026-11-14: same reasoning as payments — an order placed with an ONDC
+  // seller (items, quote, payment) is a transaction record the network may
+  // ask us to reconcile. Kept until the owner decides otherwise.
+  ondc_orders: "order record kept for reconciliation; the owner decides when it may go",
 };
 
 /** The column names the schema guard treats as "this row is a user's". */

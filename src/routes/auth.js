@@ -35,7 +35,7 @@ function respond(res, user, isNew = false) {
   // Every sign-in path ends here, so a paused account is refused here —
   // verifySession then keeps any token it already holds from working.
   if (user.status === "paused") {
-    return res.status(403).json({ error: "This account is paused. Please contact support and we'll help you right away." });
+    return res.status(403).json({ error: "This account has been paused. Please contact support for assistance." });
   }
   // isNew → the app shows the one-time sign-up interview.
   res.json({ token: issueSession(user), user: db.publicUser(user), isNew });
@@ -54,10 +54,10 @@ router.post("/signup", async (req, res) => {
     return res.status(400).json({ error: "Please enter a valid email address." });
   }
   if (typeof password !== "string" || password.length < 8) {
-    return res.status(400).json({ error: "Please choose a password with at least 8 characters." });
+    return res.status(400).json({ error: "Password must contain at least 8 characters." });
   }
   if (await db.findByEmail(email)) {
-    return res.status(409).json({ error: "You already have an account with this email — please sign in instead." });
+    return res.status(409).json({ error: "An account already exists for this email address. Please sign in instead." });
   }
   let user;
   try {
@@ -71,7 +71,7 @@ router.post("/signup", async (req, res) => {
   } catch (e) {
     // A double-tap on "Create account" races the existence check above.
     if (e && e.code === "23505") {
-      return res.status(409).json({ error: "You already have an account with this email — please sign in instead." });
+      return res.status(409).json({ error: "An account already exists for this email address. Please sign in instead." });
     }
     throw e;
   }
@@ -83,7 +83,7 @@ router.post("/login", async (req, res) => {
   const user = email ? await db.findByEmail(email) : null;
   // Same error for "no user" and "wrong password" — don't leak which emails exist.
   if (!user || !user.password_hash || !(await bcrypt.compare(password || "", user.password_hash))) {
-    return res.status(401).json({ error: "That email and password don't match. Please check and try again." });
+    return res.status(401).json({ error: "The email address and password do not match. Please check and try again." });
   }
   respond(res, user);
 });
@@ -102,8 +102,20 @@ router.post("/login", async (req, res) => {
 function googleAudiences() {
   const legacy = String(process.env.GOOGLE_WEB_CLIENT_ID_LEGACY || "")
     .split(",").map((s) => s.trim()).filter(Boolean);
-  return [process.env.GOOGLE_WEB_CLIENT_ID, ...legacy].filter(Boolean);
+  return [process.env.GOOGLE_WEB_CLIENT_ID, ...legacy, ...DEMO_GOOGLE_CLIENTS].filter(Boolean);
 }
+
+/**
+ * THE INVESTOR DEMO APP (com.myassistant.myassistant.demo, 2026-11-15)
+ * signs in through the Firebase project's web client: Google ties that
+ * package's Android sign-in to Firebase project hari-62ec0, so its tokens
+ * carry this audience. Same person, same `sub`, same account. Client ids
+ * are public identifiers, not secrets. Override with GOOGLE_WEB_CLIENT_ID_DEMO.
+ */
+const DEMO_GOOGLE_CLIENTS = String(
+  process.env.GOOGLE_WEB_CLIENT_ID_DEMO ||
+    "134941649419-9u0hmtpljbgm9m9kihar08g2ms953v8r.apps.googleusercontent.com"
+).split(",").map((s) => s.trim()).filter(Boolean);
 
 router.post("/google", async (req, res) => {
   const { idToken } = req.body || {};
@@ -111,7 +123,7 @@ router.post("/google", async (req, res) => {
   // With no audience, verifyIdToken accepts a token minted for ANY Google
   // app — refuse rather than skip the check.
   if (!process.env.GOOGLE_WEB_CLIENT_ID) {
-    return res.status(503).json({ error: "Google sign-in isn't available right now. Please try another way to sign in." });
+    return res.status(503).json({ error: "Google sign-in is currently unavailable. Please use another sign-in method." });
   }
   try {
     const ticket = await googleClient.verifyIdToken({
@@ -129,7 +141,7 @@ router.post("/google", async (req, res) => {
     respond(res, user, created);
   } catch (e) {
     console.error("Google verifyIdToken error:", String((e && e.message) || e).slice(0, 200));
-    res.status(401).json({ error: "We couldn't confirm your Google sign-in. Please try again." });
+    res.status(401).json({ error: "Unable to confirm your Google sign-in. Please try again." });
   }
 });
 
@@ -140,7 +152,7 @@ router.post("/apple", async (req, res) => {
   if (!identityToken) return res.status(400).json({ error: "identityToken required" });
   // jose skips the audience check when it is undefined — same hole as Google.
   if (!process.env.APPLE_BUNDLE_ID) {
-    return res.status(503).json({ error: "Apple sign-in isn't available right now. Please try another way to sign in." });
+    return res.status(503).json({ error: "Apple sign-in is currently unavailable. Please use another sign-in method." });
   }
   try {
     const { payload } = await jwtVerify(identityToken, appleJwks, {
@@ -158,7 +170,7 @@ router.post("/apple", async (req, res) => {
     });
     respond(res, user, created);
   } catch {
-    res.status(401).json({ error: "We couldn't confirm your Apple sign-in. Please try again." });
+    res.status(401).json({ error: "Unable to confirm your Apple sign-in. Please try again." });
   }
 });
 
@@ -180,7 +192,7 @@ router.patch("/me", async (req, res) => {
     res.json({ user: db.publicUser(user) });
   } catch (e) {
     console.warn("[auth] gender update failed:", e && e.message);
-    res.status(503).json({ error: "We're having a brief hiccup — please try again in a moment." });
+    res.status(503).json({ error: "The service is temporarily unavailable. Please try again shortly." });
   }
 });
 
@@ -199,7 +211,7 @@ router.get("/me", async (req, res) => {
   } catch (e) {
     // A throw is the database, not the token — 503 keeps the app signed in.
     console.warn("[auth] /me failed:", e && e.message);
-    res.status(503).json({ error: "We're having a brief hiccup — please try again in a moment." });
+    res.status(503).json({ error: "The service is temporarily unavailable. Please try again shortly." });
   }
 });
 

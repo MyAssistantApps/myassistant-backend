@@ -92,12 +92,12 @@ async function scheduledTask(payload, job) {
   // executing a food order hours late is worse than skipping it. A
   // recurring task skips THIS occurrence but keeps its future ones.
   if (Date.now() - Number(job.run_after) > STALE_AFTER_MS) {
-    await notify(userId, "Missed scheduled task",
-        `I couldn't run "${short(task)}" at its scheduled time (the server ` +
+    await notify(userId, "Missed Scheduled Task",
+        `"${short(task)}" could not be run at its scheduled time (the server ` +
         `was unreachable). ` +
         (payload?.repeat
           ? "The next scheduled run is unaffected."
-          : "Ask me again if you still want it."));
+          : "Please request it again if it is still required."));
     await reenqueueIfRecurring(job);
     return;
   }
@@ -149,8 +149,8 @@ async function scheduledTask(payload, job) {
       // "Done." must never come back.
       failed = true;
       outcome =
-        `I couldn't do it — "${short(task)}" needed a confirmation I ` +
-        `can't get in the background.`;
+        `Unable to complete "${short(task)}": it required a confirmation that ` +
+        `cannot be obtained in the background.`;
     } else {
       outcome = String(res?.text || "").trim() || "Done.";
     }
@@ -180,8 +180,8 @@ async function scheduledTask(payload, job) {
     if (neededPhone) {
       failed = true;
       outcome =
-        `${outcome} — but part of this needed your phone in hand (an app ` +
-        `or screen on the device) and could not actually run in the ` +
+        `${outcome} However, part of this required your phone in hand (an app ` +
+        `or screen on the device) and could not be run in the ` +
         `background.`.trim();
     }
   } catch (e) {
@@ -191,8 +191,8 @@ async function scheduledTask(payload, job) {
     errDetail = String(e && e.message).slice(0, 160);
     console.warn(`[scheduled_task] user ${userId} failed:`, String(e && e.message).slice(0, 300));
     outcome = /quota|429|rate.?limit/i.test(String(e && e.message))
-      ? "I'm sorry — I was too busy to do this at the scheduled time. Please ask me again and I'll take care of it."
-      : "I'm sorry — something went wrong on my side and I couldn't finish this. Please ask me again.";
+      ? "This task could not be run at the scheduled time owing to high demand. Please request it again."
+      : "An unexpected error has occurred and this task could not be completed. Please request it again.";
     retryable = isTransient(e) && !actedAlready(userId, jobSessionId, started);
   }
   if (retryable) {
@@ -214,7 +214,7 @@ async function scheduledTask(payload, job) {
   }
   await notify(
     userId,
-    failed ? "Scheduled task failed" : `Done: ${short(task)}`,
+    failed ? "Scheduled Task Failed" : `Completed: ${short(task)}`,
     outcome.slice(0, 400)
   );
   // Keep the outcome on the job row so "what happened to my 11 pm order?"
@@ -332,9 +332,9 @@ async function placeScheduledAgentCall(userId, action) {
       ok: false,
       replaceOutcome: true,
       line:
-        `I couldn't place the call to ${name} — I don't have a number for ` +
-        `them in your contacts, so nothing was dialled and the message was ` +
-        `not delivered. Save their number, or give me the number itself.`,
+        `Unable to place the call to ${name}: no number for them was found ` +
+        `in your contacts, so nothing was dialled and the message was ` +
+        `not delivered. Please save their number, or provide the number itself.`,
     };
   }
 
@@ -369,10 +369,10 @@ async function placeScheduledAgentCall(userId, action) {
     const st = agentCall.status(callId);
     if (!st) break;
     if (st.state === "completed") {
-      return { ok: true, replaceOutcome: true, line: st.result || `I spoke with ${resolvedName}.` };
+      return { ok: true, replaceOutcome: true, line: st.result || `The call with ${resolvedName} was completed.` };
     }
     if (st.state === "no_answer") {
-      return { ok: false, replaceOutcome: true, line: st.result || `${resolvedName} didn't pick up.` };
+      return { ok: false, replaceOutcome: true, line: st.result || `${resolvedName} did not answer.` };
     }
     if (st.state === "failed") {
       return { ok: false, replaceOutcome: true, line: st.result || `The call to ${resolvedName} failed.` };
@@ -381,7 +381,7 @@ async function placeScheduledAgentCall(userId, action) {
   return {
     ok: false,
     replaceOutcome: true,
-    line: `I called ${resolvedName} but didn't get a result back in time — check Task outcomes for what happened.`,
+    line: `${resolvedName} was called, but no result was received in time. Please check Task outcomes for details.`,
   };
 }
 
@@ -393,15 +393,15 @@ async function placeScheduledCall(userId, action) {
     if (!u?.fcm_token) {
       return {
         ok: false,
-        line: `I couldn't reach your phone to place the call to ${name} — no device is registered.`,
+        line: `Unable to reach your phone to place the call to ${name}: no device is registered.`,
       };
     }
     await require("../services/push").sendNotification(
       u.fcm_token,
-      `📞 Time to call ${name}`,
+      `📞 Time to Call ${name}`,
       message
-        ? `To tell them: ${message}`
-        : "Tap if the call doesn't start by itself.",
+        ? `Message to convey: ${message}`
+        : "Tap if the call does not start automatically.",
       { kind: "scheduled_call", name, message }
     );
     return {
@@ -409,12 +409,12 @@ async function placeScheduledCall(userId, action) {
       // NOT "the call is starting now" — this is a notification waiting
       // for a tap, and saying otherwise is how a call nobody made got
       // reported as a call that happened.
-      line: `I've sent a reminder to your phone to call ${name} — it needs a tap to dial.`,
+      line: `A reminder to call ${name} has been sent to your phone. Please tap it to dial.`,
     };
   } catch (e) {
     return {
       ok: false,
-      line: `I couldn't trigger the call to ${name}: ${String(e.message).slice(0, 120)}`,
+      line: `Unable to initiate the call to ${name}: ${String(e.message).slice(0, 120)}`,
     };
   }
 }
@@ -464,7 +464,7 @@ async function taskContinue(payload, job) {
   if (Date.now() - Number(job.run_after) > STALE_AFTER_MS) {
     const stopped = await tasks.cancel(userId, taskId, "too late to carry on").catch(() => null);
     await notify(userId, `Stopped: ${short(task.goal)}`,
-      `${driver.summarise(stopped || task)} The rest was due long ago, so I did not run it.`, "task");
+      `${driver.summarise(stopped || task)} The remaining steps were long overdue and were not run.`, "task");
     return;
   }
 
@@ -501,8 +501,8 @@ async function taskContinue(payload, job) {
   // Out of cranks with steps still to run: stopped, not left RUNNING.
   if (out.exhausted) await tasks.cancel(userId, taskId, "ran out of time").catch(() => null);
   const title =
-    left.status === tasks.STATUS.DONE ? `Done: ${short(left.goal)}` :
-    left.status === tasks.STATUS.BLOCKED ? `Needs you: ${short(left.goal)}` :
+    left.status === tasks.STATUS.DONE ? `Completed: ${short(left.goal)}` :
+    left.status === tasks.STATUS.BLOCKED ? `Action Required: ${short(left.goal)}` :
     `Stopped: ${short(left.goal)}`;
   await notify(userId, title, driver.summarise(left, out), "task");
 }
@@ -536,7 +536,7 @@ async function deepResearch(payload = {}) {
       intent: question, detail: why, result: why, surface: "background",
       decision: "ran", ms: Date.now() - started,
     });
-    await notify(userId, "Research didn't finish", why);
+    await notify(userId, "Research Not Completed", why);
   };
   let filed = false;
 
@@ -660,7 +660,7 @@ async function deepResearch(payload = {}) {
         ` across ${subs.length} searches → document ${row.id}`,
       reply: text.slice(0, 600),
     });
-    await notify(userId, "Your research is ready", short(question));
+    await notify(userId, "Your Research Is Ready", short(question));
   } catch (e) {
     // A busy model is a moment (RETRY_DELAYS_MS): the whole job runs
     // again a little later — nothing was filed, so nothing doubles.
@@ -698,7 +698,7 @@ async function videoJob(payload = {}) {
       intent: prompt, detail: why, result: why, surface: "background",
       decision: "ran", ms: Date.now() - started,
     });
-    await notify(userId, "The video didn't finish", why);
+    await notify(userId, "Video Not Completed", why);
   };
 
   let vid;
@@ -740,7 +740,7 @@ async function videoJob(payload = {}) {
       ms: Date.now() - started,
       result: `${vid.kind}, ${vid.frames || "?"} frames, ${Math.round(vid.buffer.length / 1024)} kB → document ${row.id}`,
     });
-    await notify(userId, "Your video is ready", short(prompt));
+    await notify(userId, "Your Video Is Ready", short(prompt));
   } catch (e) {
     await fail(`the video was made but could not be saved: ${String(e.message).slice(0, 120)}`);
   }

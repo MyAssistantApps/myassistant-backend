@@ -73,7 +73,8 @@ async function atest(name, fn) {
   }
 }
 
-const FLUTTER = path.resolve(__dirname, "../../myassistant-flutter");
+// Same rule as every other app-side check (APP_DIR, worktree twins, CI).
+const FLUTTER = require("./app-root").appRoot();
 const KT = path.join(FLUTTER, "android/app/src/main/kotlin/com/myassistant/myassistant");
 const readApp = (rel) => fs.readFileSync(path.join(FLUTTER, rel), "utf8");
 const readKt = (f) => fs.readFileSync(path.join(KT, f), "utf8");

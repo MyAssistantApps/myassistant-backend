@@ -514,11 +514,11 @@ let analysisReply = () => "{}";
         `SELECT status, transcript FROM task_outcomes WHERE user_id=$1 AND status='completed' AND detail LIKE 'I called you%'`,
         [U1]), 3000, "the outcome row");
       assert.match(row.transcript, /user: Yes, taking them now/);
-      await waitFor(() => pushesTo(me).some((p) => p.title === "I called you"), 3000, "the push");
+      await waitFor(() => pushesTo(me).some((p) => p.title === "Your Assistant Called"), 3000, "the push");
       await webhook({ id: dailyExec, status: "completed", conversation_duration: 14,
         transcript: "user: Yes, taking them now, thanks." });
       await sleep(100);
-      assert.strictEqual(pushesTo(me).filter((p) => p.title === "I called you").length, 1, "pushed twice");
+      assert.strictEqual(pushesTo(me).filter((p) => p.title === "Your Assistant Called").length, 1, "pushed twice");
     });
 
     await atest("birthdays: remembered once, one push the day before, never twice", async () => {
@@ -587,7 +587,7 @@ let analysisReply = () => "{}";
       assert.strictEqual(t.ctx.background, true);
       assert.strictEqual(t.ctx.sessionId, `job:${daily.id}`);
       const p = pushesTo(me).pop();
-      assert.deepStrictEqual([p.title, p.body], ["Done: Check the gold rate and tell me", "Gold is ₹7,100 a gram today."]);
+      assert.deepStrictEqual([p.title, p.body], ["Completed: Check the gold rate and tell me", "Gold is ₹7,100 a gram today."]);
       const next = await db.query(
         `SELECT run_after FROM jobs WHERE user_id=$1 AND kind='scheduled_task' AND status='pending'
            AND payload->>'task'='Check the gold rate and tell me'`, [U1]);
@@ -604,8 +604,8 @@ let analysisReply = () => "{}";
       const j = await runJob(id);
       assert.match(j.last_error, /^FAILED: /);
       const p = pushesTo(me).pop();
-      assert.strictEqual(p.title, "Scheduled task failed");
-      assert.match(p.body, /needed your phone in hand/);
+      assert.strictEqual(p.title, "Scheduled Task Failed");
+      assert.match(p.body, /required your phone in hand/);
     });
 
     await atest("a task the server missed by hours is skipped and said so, not run late", async () => {
@@ -615,8 +615,8 @@ let analysisReply = () => "{}";
       await runJob(id, { at: Date.now() - 2 * 3600e3 });
       assert.strictEqual(turns.length, n, "a stale task ran anyway");
       const p = pushesTo(me).pop();
-      assert.strictEqual(p.title, "Missed scheduled task");
-      assert.match(p.body, /Ask me again/);
+      assert.strictEqual(p.title, "Missed Scheduled Task");
+      assert.match(p.body, /Please request it again/);
     });
 
     await atest("cancel_scheduled_task stops it; another user cannot", async () => {
@@ -642,7 +642,7 @@ let analysisReply = () => "{}";
       assert.strictEqual(row.payload.tzOffsetMin, 330);
       await runJob(r.json.id);
       const p = pushesTo(me).pop();
-      assert.deepStrictEqual([p.title, p.body], ["Done: Check my PNR status", "Your PNR 1234567890 is confirmed, coach B2."]);
+      assert.deepStrictEqual([p.title, p.body], ["Completed: Check my PNR status", "Your PNR 1234567890 is confirmed, coach B2."]);
     });
 
     await atest("a scheduled 'call X and tell them Y' is placed by the assistant and the answer is pushed", async () => {
@@ -662,7 +662,7 @@ let analysisReply = () => "{}";
       const j = await running;
       assert.match(j.last_error, /^OK: /);
       const p = pushesTo(me).pop();
-      assert.match(p.title, /^Done: Call 98450 12345/);
+      assert.match(p.title, /^Completed: Call 98450 12345/);
       assert.match(p.body, /Okay, 5 pm works for me\./);
     });
 
@@ -1082,7 +1082,7 @@ let analysisReply = () => "{}";
       await webhook({ id: second.execId, status: "completed", conversation_duration: 18,
         transcript: "assistant: Is the car ready?\nuser: Yes, it is ready, he can pick it up at six." });
       assert.strictEqual((await api("GET", `/agent-call/${id}`)).json.state, "completed");
-      await waitFor(() => pushesTo(me).some((p) => p.title === "Call to Anil Rao done"), 3000, "the outcome push");
+      await waitFor(() => pushesTo(me).some((p) => p.title === "Call to Anil Rao Completed"), 3000, "the outcome push");
       await waitFor(() => db.one(`SELECT 1 FROM task_outcomes WHERE external_id=$1 AND status='completed'`, [id]),
         3000, "completed row");
     });
@@ -1129,7 +1129,7 @@ let analysisReply = () => "{}";
     // "I spoke with there." (handlers.js placeScheduledAgentCall sets
     // resolvedName = "there" and agentCall.finishCompleted prints it).
     await atest("a scheduled call to a spoken number reports who it reached, not 'there'", async () => {
-      const p = pushes.filter((x) => /^Done: Call 98450 12345/.test(x.title)).pop();
+      const p = pushes.filter((x) => /^Completed: Call 98450 12345/.test(x.title)).pop();
       assert.ok(p, "precondition: the scheduled call ran");
       assert.doesNotMatch(p.body, /\bwith there\b/, `push body: "${p.body}"`);
     });
@@ -1205,7 +1205,7 @@ let analysisReply = () => "{}";
       assert.strictEqual(task.due_at, null);
       const promise = await db.one(`SELECT owed_to, source FROM commitments WHERE user_id=$1 AND text='Send the invoice to Manish'`, [U1]);
       assert.deepStrictEqual([promise.owed_to, promise.source], ["Manish", "call"]);
-      const p = await waitFor(() => pushesTo(me).find((x) => x.title === "Call notes ready"), 3000, "the push");
+      const p = await waitFor(() => pushesTo(me).find((x) => x.title === "Call Notes Ready"), 3000, "the push");
       assert.strictEqual(p.body, "3 items from your call with Manish added to your agenda.");
     });
 

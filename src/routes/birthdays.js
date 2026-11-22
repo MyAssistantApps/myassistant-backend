@@ -15,7 +15,7 @@ router.get("/today", async (req, res) => {
     res.json(await svc.today());
   } catch (e) {
     console.error("birthdays today:", e && (e.stack || e.message));
-    res.status(500).json({ error: "error", message: "Birthdays did not load. Try again in a moment." });
+    res.status(500).json({ error: "error", message: "Unable to load birthdays. Please try again." });
   }
 });
 

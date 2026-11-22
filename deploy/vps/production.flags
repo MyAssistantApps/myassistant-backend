@@ -39,4 +39,8 @@ OPENAI_API_KEY=<secret>
 # gpt-image-1 on this account (2026-11-03).
 OPENAI_IMAGE_EDIT_MODEL=gpt-image-1.5
 # Flights page: Google Flights via SerpApi (2026-11-04; free plan 250/month).
-SERPAPI_KEY=<secret>
+GPT_LIVE=off
+BOLNA_API_KEY=<secret>
+BOLNA_FROM_NUMBER=+917965860041
+BOLNA_AGENT_ID=5f68c977-d156-41f9-ab97-a505c34f346b
+BOLNA_AGENT_ID_MALE=cb752bce-9896-44ff-9442-3f54f7b22955

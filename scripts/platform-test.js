@@ -598,7 +598,7 @@ const CHESS_TOOLS = [{
       assert.match(r.json.key, /^mya_/);
       const phone = await api("GET", "/platform/apps", { token: B.session });
       assert.ok(phone.json.apps.some((a) => a.name === "Quiz Night"));
-      const told = await waitFor(async () => pushed.find((x) => /Quiz Night is connected/.test(x.title)), 3000);
+      const told = await waitFor(async () => pushed.find((x) => /Quiz Night Is Connected/.test(x.title)), 3000);
       assert.ok(told, JSON.stringify(pushed));
       assert.strictEqual(await platform.wantsApps(B.id, "what was my quiz score?"), true);
       const u = await api("GET", `/console/api/apps/${r.json.app.id}/usage?days=30`, { token: B.console });

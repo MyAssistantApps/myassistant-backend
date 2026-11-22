@@ -1,93 +1,59 @@
-# VPS — backend.envisionsit.in
+# OLD VPS — myassistant.wishme.today (no longer deployed to)
 
-Production since 2026-11-07: `root@189.72.146.77` (Ubuntu 26.04, 4 GB RAM,
-48 GB disk). It replaced the shared host behind `myassistant.wishme.today`
-(`myass620@168.119.64.101`); the scripts for that host (`start.sh`,
-`supervise.sh`, `stop.sh`, `deploy.sh`) are kept here only for reference.
+> **2026-11-14: production moved to `backend.envisionsit.in`** — see
+> `deploy/docker-vps/README.md`. This page describes the old shared host,
+> kept for reference. `production.flags` in this folder now mirrors the NEW
+> server's `.env`.
 
-Everything runs in Docker Compose and restarts on reboot
-(`restart: unless-stopped`, Docker enabled in systemd). The firewall (ufw)
-allows only SSH, HTTP and HTTPS.
+The live backend runs on a shared host (`myass620@168.119.64.101`, Ubuntu
+22.04, no root, no Docker, no cron). These scripts are copies of the ones in
+`~/app/` on the server, kept here so the setup is versioned and can be
+rebuilt. **Editing them here does not change the server** — copy a changed
+script to `~/app/` by hand.
 
-## Layout on the server — `/opt/myassistant/` (mode 700, root)
+## Layout on the server
 
 | Path | What |
 |---|---|
-| `compose.yml` | three services: `backend`, `postgres` (16), `caddy` (HTTPS) |
-| `Caddyfile` | `backend.envisionsit.in` → `backend:3000`, Let's Encrypt automatic |
-| `.env` | production settings and secrets (600) — mirrors `production.flags` |
-| `pg.env` | `POSTGRES_PASSWORD` (600) |
-| `firebase-adminsdk.json` | mounted read-only into the backend |
-| `src-repo/` | the backend code being run (a `git archive`, not a clone) |
-| `src-prev/` | the code before the last deploy (rollback) |
-| `data/` | user files (`DATA_DIR`, `/app/data` in the container) |
-| `pgdata/` | the database |
-| `backups/` | `predeploy-*.sql.gz`, one per deploy, newest 14 kept |
-| `deploy.sh` | copy of `deploy-docker.sh` in this folder |
+| `~/opt/node22` | Node 22 (nodejs.org tarball, checksum verified); the host's own is 20 |
+| `~/opt/pg` | PostgreSQL 14 binaries (`apt-get download postgresql-14`, `dpkg -x`) |
+| `~/app/pgdata` | the database — unix socket in `~/app/pgrun` only, no TCP, peer auth |
+| `~/app/myassistant-backend` | this repo on `hardening`, with its `.env` and `firebase-adminsdk.json` |
+| `~/app/data` | user files (`DATA_DIR`) |
+| `~/app/backend.log` | the backend's log (rotated at ~50 MB) |
+| `~/public_html/.htaccess` | Apache forwards the domain (and WebSockets) to `127.0.0.1:38231` |
 
-Postgres has no published port; only Caddy listens on 80/443.
+## Scripts
+
+| Script | Does |
+|---|---|
+| `start.sh` | starts Postgres and the supervisor if they are not running (safe to repeat) |
+| `supervise.sh` | runs `node src/server.js`, restarts it 5 s after any exit |
+| `stop.sh` | stops the backend; `--all` stops Postgres too |
+| `deploy.sh` | `origin/hardening` → `npm ci` → restart → wait for `/health` |
+
+**After a server reboot run `~/app/start.sh`** — cron is not allowed here,
+so nothing starts it automatically.
 
 ## Deploy on push
 
-`.github/workflows/deploy.yml` runs on every push to `hardening`: it sends
-the commit as a tar over SSH to a key whose forced command is
-`/opt/myassistant/deploy.sh`, so that key can do nothing else:
+`.github/workflows/deploy.yml` runs `deploy.sh` on every push to
+`hardening`. GitHub's key is in `~/.ssh/authorized_keys` with a forced
+command, so it can only ever run `deploy.sh`:
 
 ```
-command="/opt/myassistant/deploy.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 … github-actions-deploy@myassistant-backend
+command="/home/myass620/app/deploy.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 … github-actions-deploy@myassistant-backend
 ```
 
-Repo secrets: `VPS_SSH_KEY` (the private half), `VPS_KNOWN_HOSTS`
-(`ssh-keyscan -t ed25519 189.72.146.77`).
-
-`deploy.sh` backs up the database, keeps the running image as
-`myassistant-backend:previous`, builds, restarts and polls `/health`; on
-any failure it restores the previous code and image.
-
-Deploy by hand from a checkout:
-
-```bash
-git archive --format=tar origin/hardening | ssh root@189.72.146.77 'bash /opt/myassistant/deploy.sh'
-```
-
-## Everyday commands (on the server, in `/opt/myassistant`)
-
-```bash
-docker compose ps                         # what is running
-docker compose logs backend -f --tail 100 # the backend's log
-docker compose up -d --force-recreate backend   # after editing .env
-```
-
-`docker compose restart` does NOT re-read `.env`; recreate instead.
-
-## Restore a backup
-
-```bash
-cd /opt/myassistant
-docker compose stop backend
-gunzip -c backups/predeploy-<stamp>.sql.gz | docker compose exec -T postgres \
-  sh -c 'dropdb -U myassistant --if-exists myassistant_restore &&
-         createdb -U myassistant myassistant_restore &&
-         psql -U myassistant -d myassistant_restore -v ON_ERROR_STOP=1 -q'
-# check it, then swap names:
-docker compose exec -T postgres psql -U myassistant -d postgres \
-  -c 'ALTER DATABASE myassistant RENAME TO myassistant_old' \
-  -c 'ALTER DATABASE myassistant_restore RENAME TO myassistant'
-docker compose start backend
-```
-
-**Limit:** backups are on the same disk as the data. Copy them off the
-server for protection against losing the machine.
+Secrets in the repo: `VPS_SSH_KEY`, `VPS_KNOWN_HOSTS`.
 
 ## Things that will bite
 
+- **No IPv6 route.** Node tried IPv6 first and every new connection to
+  OpenAI stalled ~7 s. `supervise.sh` sets
+  `NODE_OPTIONS=--dns-result-order=ipv4first`. Keep it.
 - **`.env` is production**: `NODE_ENV=production`, `ALLOW_APP_KEY=false`,
-  its own `JWT_SECRET`/`ADMIN_KEY`. Deploys never touch it.
-- **`ALLOW_DEV_PHONE_VERIFY=true`** — anyone can claim any phone number.
-  Turn it off before a public release.
-- **Bolna**: the webhook secret is derived from `BOLNA_API_KEY`. Rotating
-  the key means re-running `scripts/bolna_agents.js --apply` with
-  `PUBLIC_BASE_URL=https://backend.envisionsit.in` and updating `.env`
-  together, or call results stop arriving.
+  typed phone verification off, its own `JWT_SECRET`/`ADMIN_KEY`.
+  `deploy.sh` never touches it (git only resets tracked files).
 - **One process.** Sessions, rate limits and the scheduler live in memory
   (see `DEPLOYMENT.md`); never run two backends against this database.

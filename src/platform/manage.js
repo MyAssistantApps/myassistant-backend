@@ -83,7 +83,7 @@ router.post("/apps", async (req, res) => {
   audit.record(uid, "platform.app.connected", `Connected "${out.app.name}" to your assistant`);
   // Connected from the browser: the phone hears of it at once (it is also a
   // security signal — an app the user did not add is visible immediately).
-  if (req.auth && req.auth.scope === "console") tellPhone(uid, `${out.app.name} is connected`, "It can now use your assistant. See it in Hub → Your own apps; manage it in the Developer Console.");
+  if (req.auth && req.auth.scope === "console") tellPhone(uid, `${out.app.name} Is Connected`, "It may now use your assistant. View it in Hub → Your own apps, and manage it in the Developer Console.");
   res.status(201).json({ app: await summary(out.app), key: key.key, keyInfo: key.info, docsUrl: docsUrl(req), apiBase: apiBase(req) });
 });
 

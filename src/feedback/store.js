@@ -152,11 +152,11 @@ async function notifyResolved(row) {
   // The inbox runs as its own process: make sure push is set up there too.
   try { require("../services/push").init(); } catch (_) { /* reported by send */ }
   const body = [
-    row.resolved_build ? `It's in update ${row.resolved_build}.` : "It's done.",
+    row.resolved_build ? `Included in update ${row.resolved_build}.` : "This has been completed.",
     row.resolved_note,
   ].filter(Boolean).join(" ").slice(0, 180);
   const ok = await require("../services/push").sendNotification(
-    user.fcm_token, `You asked: ${clip(row.summary, 60)}`, body,
+    user.fcm_token, `Your Request: ${clip(row.summary, 60)}`, body,
     { kind: "feedback_done", id: String(row.id) }).catch(() => false);
   if (ok) await db.run(`UPDATE developer_feedback SET notified_at=$1 WHERE id=$2`, [Date.now(), row.id]);
   return Boolean(ok);

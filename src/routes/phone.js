@@ -2,7 +2,9 @@
  * Phone verification — the identity spine of agent-to-agent messaging.
  *
  *   GET  /phone          → { phone, verified }
- *   GET  /phone/methods  → { sim, typed }   which ways this server accepts
+ *   GET  /phone/methods  → { sim, call, typed }   which ways this server accepts
+ *   POST /phone/call-code   { phone }       → { ok, expiresAt }  our caller reads a code
+ *   POST /phone/call-verify { phone, code } → { ok, phone, user }
  *   POST /phone/verify   { pnvToken }      → { ok, phone, user }
  *
  * The number is never taken from the request body. The app runs Firebase
@@ -21,6 +23,7 @@
 const express = require("express");
 const db = require("../db");
 const pnv = require("../services/pnv");
+const callCode = require("../services/callCode");
 const { normalizePhone } = require("../users/phone");
 
 const router = express.Router();
@@ -43,7 +46,7 @@ router.get("/", async (req, res) => {
  * "Could not reach the server". Say what actually happened, as JSON the
  * app already displays, before touching anything.
  */
-const ACCOUNT_GONE = "This account no longer exists. Tap Sign out, then sign in again.";
+const ACCOUNT_GONE = "This account no longer exists. Please tap Sign Out, then sign in again.";
 async function accountGone(uid) {
   return !(await db.findById(uid).catch(() => null));
 }
@@ -86,8 +89,44 @@ async function assignNumber(uid, phone, res) {
 // What the verify screen may offer. "sim" is Phone Number Verification;
 // "typed" is the testing switch below. The app asks rather than assumes.
 router.get("/methods", (_req, res) =>
-  res.json({ sim: pnv.configured(), typed: devVerifyAllowed() })
+  res.json({ sim: pnv.configured(), call: callCode.configured(), typed: devVerifyAllowed() })
 );
+
+/**
+ * PROOF BY VOICE CALL (2026-11-14). Phone Number Verification does not
+ * cover Indian carriers, so this is how an Indian number is proven: our
+ * Bolna caller rings it and reads a 6-digit code (services/callCode.js has
+ * the security notes — the code never reaches the requesting account).
+ */
+router.post("/call-code", async (req, res) => {
+  const uid = Number(req.user?.sub);
+  if (!Number.isFinite(uid)) return res.status(401).json({ error: "unauthorized" });
+  if (await accountGone(uid)) return res.status(401).json({ error: ACCOUNT_GONE });
+  const phone = normalizePhone(req.body?.phone);
+  if (!phone) return res.status(400).json({ error: "Please enter a valid phone number." });
+  // Do not ring a number that already belongs to someone else.
+  const owner = await db.one("SELECT id FROM users WHERE phone_number = $1 LIMIT 1", [phone]);
+  if (owner && owner.id !== uid) return res.status(409).json({ error: TAKEN });
+  try {
+    const r = await callCode.start(uid, phone);
+    res.json({ ok: true, phone, expiresAt: r.expiresAt });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.status ? e.message : "Unable to place the call." });
+  }
+});
+
+router.post("/call-verify", async (req, res) => {
+  const uid = Number(req.user?.sub);
+  if (!Number.isFinite(uid)) return res.status(401).json({ error: "unauthorized" });
+  if (await accountGone(uid)) return res.status(401).json({ error: ACCOUNT_GONE });
+  const phone = normalizePhone(req.body?.phone);
+  if (!phone) return res.status(400).json({ error: "Please enter a valid phone number." });
+  const v = await callCode.check(uid, phone, req.body?.code);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+  if (!(await assignNumber(uid, phone, res))) return;
+  const user = await db.findById(uid);
+  res.json({ ok: true, phone, user: db.publicUser(user) });
+});
 
 router.post("/verify", async (req, res) => {
   const uid = Number(req.user?.sub);
@@ -95,7 +134,7 @@ router.post("/verify", async (req, res) => {
   // Builds up to 122 send the SMS code's Firebase ID token; that way in is
   // gone. The old app shows this text as it stands.
   if (req.body?.firebaseIdToken && !req.body?.pnvToken) {
-    return res.status(426).json({ error: "Update the app to verify your number." });
+    return res.status(426).json({ error: "Please update the app to verify your number." });
   }
   if (!pnv.configured()) {
     return res.status(503).json({ error: "phone verification unavailable" });
@@ -105,10 +144,10 @@ router.post("/verify", async (req, res) => {
   const v = await pnv.verify(req.body?.pnvToken);
   if (!v.ok) {
     if (v.error === "unavailable") {
-      return res.status(503).json({ error: "Couldn't reach Google to check your number. Try again in a minute." });
+      return res.status(503).json({ error: "Unable to reach Google to verify your number. Please try again in a minute." });
     }
     if (v.error === "expired") {
-      return res.status(401).json({ error: "That confirmation expired. Tap Confirm again." });
+      return res.status(401).json({ error: "This confirmation has expired. Please tap Confirm again." });
     }
     return res.status(401).json({ error: "invalid verification token" });
   }
@@ -125,7 +164,7 @@ router.post("/verify", async (req, res) => {
     return res.json({ ok: true, phone, user: db.publicUser(me) });
   }
   if (!(await pnv.claimOnce(v.hash, v.expiresAt))) {
-    return res.status(401).json({ error: "This confirmation was already used. Tap Confirm again." });
+    return res.status(401).json({ error: "This confirmation was already used. Please tap Confirm again." });
   }
   if (!(await assignNumber(uid, phone, res))) return;
 
@@ -177,12 +216,12 @@ router.post("/dev-verify", async (req, res) => {
   if (await accountGone(uid)) return res.status(401).json({ error: ACCOUNT_GONE });
 
   const phone = normalizePhone(req.body?.phone);
-  if (!phone) return res.status(400).json({ error: "Enter a valid phone number." });
+  if (!phone) return res.status(400).json({ error: "Please enter a valid phone number." });
   // Typed claims carry no proof: a few a day per account, so nobody can
   // walk through numbers looking for unclaimed ones (security review).
   const tries = (devTries.get(uid) || []).filter((t) => Date.now() - t < 86400_000);
   if (tries.length >= 5) {
-    return res.status(429).json({ error: "Too many tries today. Please try again tomorrow." });
+    return res.status(429).json({ error: "Too many attempts today. Please try again tomorrow." });
   }
   devTries.set(uid, [...tries, Date.now()]);
 

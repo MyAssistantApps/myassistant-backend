@@ -745,7 +745,7 @@ const MIME = {
       R.card = async () => ({ status: 500, json: {} });
       const r = await upload("/clients/scan-card", { bytes: fakeJpeg(), mime: "image/jpeg", filename: "card.jpg" });
       assert.strictEqual(r.status, 502);
-      assert.match((await r.json()).error, /couldn't read the card/);
+      assert.match((await r.json()).error, /Unable to read the card/);
     });
 
     /* ============================================================== */

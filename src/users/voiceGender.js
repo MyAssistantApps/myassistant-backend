@@ -132,8 +132,8 @@ async function check(name, voice) {
     voiceGender: vg,
     suggest: fitting.map((n) => n.toLowerCase()),
     message:
-      `${label(String(voice))} is a ${vg} voice, but your assistant is called ${assistant}. ` +
-      (list ? `Pick ${list} to keep the name ${assistant}, or ` : "") +
+      `${label(String(voice))} is a ${vg} voice, but your assistant is named ${assistant}. ` +
+      (list ? `Please select ${list} to keep the name ${assistant}, or ` : "Please ") +
       `change the assistant's name first.`,
   };
 }

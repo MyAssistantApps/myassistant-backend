@@ -77,7 +77,7 @@ const uploadLimit = rateLimit({
   max: 20,
   standardHeaders: true,
   keyGenerator: (req) => `avatar-upload:${req.user?.sub || req.ip}`,
-  message: { error: "Too many uploads for now — try again in a little while." },
+  message: { error: "Too many uploads. Please try again later." },
 });
 
 /** Spooled to disk, never RAM: the pod has 512Mi and live calls to relay. */

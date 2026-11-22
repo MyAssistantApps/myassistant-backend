@@ -544,12 +544,14 @@ async function mount(router, userId = 1) {
     const saved = { id: process.env.GOOGLE_WEB_CLIENT_ID, legacy: process.env.GOOGLE_WEB_CLIENT_ID_LEGACY };
     try {
       const { googleAudiences } = require("../src/routes/auth");
+      // The investor demo app's client is always accepted (2026-11-15).
+      const DEMO = "134941649419-9u0hmtpljbgm9m9kihar08g2ms953v8r.apps.googleusercontent.com";
       process.env.GOOGLE_WEB_CLIENT_ID = "new.apps.googleusercontent.com";
       delete process.env.GOOGLE_WEB_CLIENT_ID_LEGACY;
-      assert.deepStrictEqual(googleAudiences(), ["new.apps.googleusercontent.com"]);
+      assert.deepStrictEqual(googleAudiences(), ["new.apps.googleusercontent.com", DEMO]);
       process.env.GOOGLE_WEB_CLIENT_ID_LEGACY = " old.apps.googleusercontent.com , ";
       assert.deepStrictEqual(googleAudiences(),
-        ["new.apps.googleusercontent.com", "old.apps.googleusercontent.com"]);
+        ["new.apps.googleusercontent.com", "old.apps.googleusercontent.com", DEMO]);
     } finally {
       for (const [k, v] of [["GOOGLE_WEB_CLIENT_ID", saved.id], ["GOOGLE_WEB_CLIENT_ID_LEGACY", saved.legacy]]) {
         if (v === undefined) delete process.env[k]; else process.env[k] = v;

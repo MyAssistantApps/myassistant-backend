@@ -6,7 +6,7 @@
       "cloudFallback": "gpt-4.1-mini",
       "thinking": "low",
       "tts": "gpt-4o-mini-tts",
-      "ttsVoice": "sage",
+      "ttsVoice": "marin",
       "ttsStyle": "warm, friendly and natural",
       "ttsLanguage": "en-IN"
     },
@@ -17,6 +17,7 @@
         "alarm",
         "alarms",
         "app",
+        "appointment",
         "apps",
         "back",
         "bills",
@@ -160,7 +161,7 @@
     "live": {
       "on": true,
       "model": "gpt-realtime-2.1",
-      "voice": "sage",
+      "voice": "marin",
       "silenceMs": 800,
       "prefixMs": 100,
       "startSensitivity": "low",
@@ -194,7 +195,7 @@
       "cloudFallback": "gpt-4.1-mini",
       "thinking": "low",
       "tts": "gpt-4o-mini-tts",
-      "ttsVoice": "sage",
+      "ttsVoice": "marin",
       "ttsStyle": "warm, friendly and natural",
       "ttsLanguage": "en-IN"
     },
@@ -205,6 +206,7 @@
         "alarm",
         "alarms",
         "app",
+        "appointment",
         "apps",
         "back",
         "bills",
@@ -348,7 +350,7 @@
     "live": {
       "on": true,
       "model": "gpt-realtime-2.1",
-      "voice": "sage",
+      "voice": "marin",
       "silenceMs": 800,
       "prefixMs": 100,
       "startSensitivity": "low",

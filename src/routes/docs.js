@@ -188,9 +188,9 @@ async function understandDocument(userId, doc) {
     if (user?.fcm_token) {
       const body = filed.length
         ? `${filed.length} reminder${filed.length === 1 ? "" : "s"} set from "${doc.title}".`
-        : `"${doc.title}" saved — ask me about it any time.`;
+        : `"${doc.title}" has been saved. You may ask your assistant about it at any time.`;
       await require("../services/push").sendNotification(
-        user.fcm_token, "Document understood", body, { kind: "doc_understood" });
+        user.fcm_token, "Document Processed", body, { kind: "doc_understood" });
     }
   } catch (_) {}
 }
@@ -231,8 +231,8 @@ router.post(
   if (!readable && !STORE_ONLY.has(f.mimetype)) {
     // Worded for the person: the app shows this sentence as it is.
     return res.status(415).json({
-      error: `That kind of file can't be saved here (unsupported type ${f.mimetype}). ` +
-        "Photos, PDFs, and Word, Excel, PowerPoint or text files can.",
+      error: `This file type cannot be saved here (unsupported type ${f.mimetype}). ` +
+        "Photos, PDFs, and Word, Excel, PowerPoint or text files are supported.",
     });
   }
 
@@ -252,7 +252,7 @@ router.post(
   const explicit = Number(req.body.clientId);
   if (Number.isInteger(explicit) && explicit > 0) {
     targetClient = await clients.getClient(id, explicit);
-    if (!targetClient) return res.status(404).json({ error: "client not found — nothing was saved" });
+    if (!targetClient) return res.status(404).json({ error: "The client was not found. Nothing was saved." });
   } else {
     const spoken = String(req.body.person || "").trim() || String(req.body.note || "").trim();
     if (spoken) {
@@ -281,7 +281,7 @@ router.post(
       return res.status(409).json({ error: e.message });
     }
     console.error("docs create failed:", e.message);
-    return res.status(500).json({ error: "could not save the document" });
+    return res.status(500).json({ error: "Unable to save the document. Please try again." });
   }
 
   let linkedClient = null;
@@ -292,7 +292,7 @@ router.post(
       // The link is the whole point of a case-file upload — if it cannot
       // be made the save must not be reported as one. Roll back.
       await docs.deleteDocument(id, row.id).catch(() => {});
-      return res.status(500).json({ error: "could not file the document under that client" });
+      return res.status(500).json({ error: "Unable to file the document under that client. Nothing was saved." });
     }
   }
 
@@ -421,7 +421,7 @@ router.delete("/:id", async (req, res) => {
 // Multer's size-limit error otherwise falls through to the generic 500.
 router.use((err, _req, res, next) => {
   if (err && err.code === "LIMIT_FILE_SIZE") {
-    return res.status(413).json({ error: "file too large — the limit is 18 MB" });
+    return res.status(413).json({ error: "The file is too large. The maximum size is 18 MB." });
   }
   next(err);
 });

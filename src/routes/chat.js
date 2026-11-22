@@ -349,7 +349,7 @@ router.post("/send", async (req, res) => {
     [them]
   );
   if (!recipient) {
-    return res.status(404).json({ error: "That person isn't on the app yet." });
+    return res.status(404).json({ error: "This person is not yet registered on the app." });
   }
   const row = await one(
     `INSERT INTO agent_messages (from_user_id, to_phone_number, message, created_at)

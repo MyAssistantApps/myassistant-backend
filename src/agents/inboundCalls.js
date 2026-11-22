@@ -130,7 +130,7 @@ async function leaveMessage({ contact_number, message, caller_name } = {}) {
     console.log(`inbound: message from an unknown caller …${ten.slice(-4)} kept for the admin: ${text.slice(0, 120)}`);
     return { ok: true, saved: "admin" };
   }
-  const label = fromUser ? "Your note by phone" : `${who || `…${ten.slice(-4)}`} called back`;
+  const label = fromUser ? "Your Note by Phone" : `${who || `…${ten.slice(-4)}`} Called Back`;
   await require("../outcomes/store")
     .create(userId, { kind: "inbound_call", target: who || `…${ten.slice(-4)}`, detail: text, status: "completed", path: "relay" })
     .catch(() => {});

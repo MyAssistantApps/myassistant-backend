@@ -174,6 +174,9 @@ async function onAnswer({ to, from, callUuid }) {
 
   const assistantName = await assistantNameFor(userId);
   const userName = user?.name ? String(user.name).split(" ")[0] : "them";
+  // A doctor's line is a CLINIC line: timings, fee, address and — when the
+  // doctor allowed it — real free slots the caller can be booked into.
+  const clinic = await loadClinicContext(userId).catch(() => null);
 
   const rec = {
     callId: crypto.randomBytes(12).toString("hex"),
@@ -191,6 +194,8 @@ async function onAnswer({ to, from, callUuid }) {
     summary: "",
     startedAt: Date.now(),
     plivoUuid: callUuid || null,
+    clinic,
+    booking: null,
   };
   live.set(rec.callId, rec);
 
@@ -212,7 +217,10 @@ async function onAnswer({ to, from, callUuid }) {
     );
   }
 
-  const greeting = rec.known
+  const greeting = rec.clinic
+    ? `Hello, this is ${assistantName} from ${rec.clinic.clinicName || placeOf(rec)}. ` +
+      `How can I help you?`
+    : rec.known
     ? `Hello ${rec.callerName}, this is ${assistantName}, ${rec.userName}'s assistant. ` +
       `They can't take the call right now — can I take a message, or is there something I can help with?`
     : `Hello, this is ${assistantName}, ${rec.userName}'s assistant. ` +
@@ -241,8 +249,132 @@ function shouldForward(rec) {
  * THE CONVERSATION
  * ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ *
+ * CLINIC MODE (doctors)
+ * ------------------------------------------------------------------ */
+
+
+/** Clinic facts + bookable slots for a doctor's line, or null. */
+async function loadClinicContext(userId) {
+  const u = await one(`SELECT persona, timezone FROM users WHERE id=$1`, [userId]);
+  // A professional's line (owner, 2026-11-14): doctor's clinic, advocate's
+  // chamber, or a business owner's office — each with its own rules below.
+  if (!["doctor", "advocate", "business"].includes(u?.persona)) return null;
+  const store = require("../clinic/store");
+  const profile = await store.getProfile(userId);
+  const tz = 330; // Indian clinics; users.timezone is free text, not an offset
+  const slots = profile.receptionistBooks
+    ? await store.nextFreeSlots(userId, { tzOffsetMin: tz, days: 4, max: 10 })
+    : [];
+  return {
+    persona: u.persona,
+    clinicName: profile.clinicName,
+    address: profile.address,
+    fee: profile.fee,
+    hoursText: store.describeHours(profile.hours),
+    canBook: profile.receptionistBooks,
+    tz,
+    slots,
+  };
+}
+
+function slotLabel(ms, tzOffsetMin = 330) {
+  const d = new Date(ms + tzOffsetMin * 60 * 1000);
+  const wk = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
+  const mo = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
+  const h = d.getUTCHours();
+  const m = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${wk} ${d.getUTCDate()} ${mo}, ${h % 12 === 0 ? 12 : h % 12}:${m} ${h < 12 ? "am" : "pm"}`;
+}
+
+/** "Dr. Rao's clinic" / "Advocate Rao's chamber" / "Rao's office". */
+function placeOf(rec) {
+  const p = rec.clinic?.persona;
+  return p === "advocate" ? `Advocate ${rec.userName}'s chamber`
+    : p === "business" ? `${rec.userName}'s office`
+      : `Dr. ${rec.userName}'s clinic`;
+}
+
+/** Per-profession words and rules for the receptionist prompt. */
+const PRO_LINE = {
+  doctor: {
+    who: (n) => `A DOCTOR'S CLINIC LINE (Dr. ${n})`, place: "Clinic", fee: "Consultation fee",
+    booking: "an appointment", person: "PATIENT",
+    rules: [
+      "MEDICAL SAFETY — non-negotiable:",
+      "- Never give medical advice, a diagnosis, or any medicine or dose.",
+      "- EMERGENCY (chest pain, trouble breathing, heavy bleeding, unconscious,",
+      "  stroke signs, seizure, severe injury, poisoning, pregnancy bleeding):",
+      "  tell them to call 108 or go to the nearest emergency department NOW,",
+      "  set urgency \"urgent\", and end the call. Do not book them.",
+    ],
+  },
+  advocate: {
+    who: (n) => `AN ADVOCATE'S CHAMBER LINE (Advocate ${n})`, place: "Chamber", fee: "Consultation fee",
+    booking: "a consultation", person: "CLIENT",
+    rules: [
+      "LEGAL SAFETY — non-negotiable:",
+      "- Never give legal advice, an opinion on a case, or predict an outcome.",
+      "- Never discuss any case or client — the caller is not verified.",
+      "- URGENT (arrest, police at the door, a hearing today, a deadline today):",
+      "  set urgency \"urgent\", take the details and say the advocate will be told",
+      "  at once. For free legal aid, NALSA's helpline is 15100.",
+    ],
+  },
+  business: {
+    who: (n) => `A BUSINESS OWNER'S OFFICE LINE (${n})`, place: "Office", fee: null,
+    booking: "a meeting", person: "VISITOR",
+    rules: [
+      "BUSINESS RULES — non-negotiable:",
+      "- Never quote prices, agree terms, confirm orders or commit to any deal.",
+      "- Never share numbers, plans, clients or the owner's whereabouts.",
+      "- Screen politely: who they are, which company, what it is about. Sales",
+      "  pitches: take a one-line message and end courteously.",
+    ],
+  },
+};
+
+function clinicLines(rec) {
+  const c = rec.clinic;
+  if (!c) return [];
+  const w = PRO_LINE[c.persona] || PRO_LINE.doctor;
+  const lines = ["", `THIS IS ${w.who(rec.userName)}. You MAY tell callers:`];
+  if (c.clinicName) lines.push(`- ${w.place}: ${c.clinicName}`);
+  if (c.address) lines.push(`- Address: ${c.address}`);
+  lines.push(`- Timings: ${c.hoursText}`);
+  if (w.fee && c.fee > 0) lines.push(`- ${w.fee}: ₹${c.fee}`);
+  lines.push("", ...w.rules);
+  if (c.canBook && c.slots.length) {
+    lines.push(
+      "",
+      `BOOKING: you MAY book ${w.booking}, but ONLY into one of these free slots:`,
+      ...c.slots.map((s, i) => `  ${i + 1}) ${slotLabel(s, c.tz)}`),
+      `Offer two or three that suit them. Get the ${w.person}'s name (may differ from the`,
+      "caller) and the reason in a few words. Once they pick one, set book_slot to its",
+      "number and confirm the day and time back to them.",
+    );
+  } else if (c.canBook) {
+    lines.push("", "BOOKING: there are no free slots in the next few days. Take a message for a callback.");
+  }
+  return lines;
+}
+
+/**
+ * Validates the model's booking request against the slots WE offered.
+ * Returns {startsAt, patientName, reason} or null. Pure — unit-tested.
+ */
+function resolveBooking(out, clinic) {
+  if (!clinic?.canBook || !out) return null;
+  const n = Number(out.book_slot);
+  if (!Number.isInteger(n) || n < 1 || n > clinic.slots.length) return null;
+  const patientName = String(out.patient_name || "").trim().slice(0, 120);
+  if (!patientName) return null;
+  return { startsAt: clinic.slots[n - 1], patientName, reason: String(out.reason || "").trim().slice(0, 200) };
+}
+
 function systemFor(rec) {
   const s = rec.settings;
+  const clinicBooking = Boolean(rec.clinic?.canBook && rec.clinic.slots.length);
   return [
     `You are ${rec.assistantName}, the personal assistant of ${rec.userName}.`,
     `You are ON A PHONE CALL, answering ${rec.userName}'s phone. The person`,
@@ -264,9 +396,12 @@ function systemFor(rec) {
     s.availability
       ? `- On availability you MAY say exactly this and nothing more: "${s.availability}"`
       : "- Do not describe their availability at all — you have not been told it.",
-    s.may_book
+    clinicBooking
+      ? "- Appointments: follow the BOOKING rules below exactly."
+      : s.may_book
       ? "- You MAY offer to note down a preferred time for an appointment, but say it must be confirmed."
       : "- You may NOT offer or agree an appointment time. Offer to pass on the request.",
+    ...clinicLines(rec),
     "",
     "Reply with STRICT JSON only, no markdown:",
     '{"say":"<what you say next, spoken>",',
@@ -274,7 +409,10 @@ function systemFor(rec) {
     ' "outcome":"message|booked|answered|blocked",',
     ' "message":"<the message to pass on, or empty>",',
     ' "urgency":"urgent|normal|low",',
-    ' "summary":"<one line for the user: who called and what they want>"}',
+    ' "summary":"<one line for the user: who called and what they want>"' +
+      (clinicBooking
+        ? ',\n "book_slot":<slot number the caller chose, or 0>,\n "patient_name":"<patient name, or empty>",\n "reason":"<reason for visit, or empty>"}'
+        : "}"),
     "",
     "Set done=true once you have what you need and have said goodbye.",
     'Use outcome "blocked" for a sales or spam call.',
@@ -323,6 +461,43 @@ async function onGather(rec, params) {
     rec.outcome = "message";
     rec.summary = rec.summary || `Call from ${rec.callerName || rec.from}`;
     return hangup(bye);
+  }
+
+  // BOOK FOR REAL, or don't claim it. The slot must be one we offered and
+  // still free right now; otherwise the spoken confirmation is replaced.
+  const want = !rec.booking ? resolveBooking(out, rec.clinic) : null;
+  if (want) {
+    try {
+      const store = require("../clinic/store");
+      const row = await store.createAppointment(rec.userId, {
+        patientName: want.patientName,
+        patientPhone: rec.from || "",
+        startsAt: want.startsAt,
+        reason: want.reason,
+        source: "receptionist",
+      }, { requireFreeSlot: true, tzOffsetMin: rec.clinic.tz });
+      rec.booking = { id: Number(row.id), startsAt: want.startsAt, patientName: want.patientName };
+      out.outcome = "booked";
+      out.summary = `Booked ${want.patientName} for ${slotLabel(want.startsAt, rec.clinic.tz)}` +
+        (want.reason ? ` — ${want.reason}` : "");
+    } catch (e) {
+      // Don't offer the same stale slot again on the next turn.
+      rec.clinic.slots = rec.clinic.slots.filter((s) => s !== want.startsAt);
+      const next = rec.clinic.slots.slice(0, 2).map((s) => slotLabel(s, rec.clinic.tz));
+      out.say = next.length
+        ? `Sorry, that time was just taken. I can do ${next.join(" or ")} — would either work?`
+        : "Sorry, that time was just taken and nothing else is free soon. I'll ask the clinic to call you back.";
+      out.done = false;
+      out.outcome = "message";
+    }
+  } else if (rec.clinic && !rec.booking && out.outcome === "booked") {
+    // The model said "booked" without choosing a slot we offered. Nothing
+    // was written to the diary, so nothing may be claimed: record it as a
+    // request and correct what the caller is about to hear.
+    out.outcome = "message";
+    if (out.done === true) {
+      out.say = "I've noted the request — the clinic will call you to confirm the exact time. Thank you!";
+    }
   }
 
   rec.turns.push({ who: "assistant", text: out.say });
@@ -388,8 +563,8 @@ async function onHangup(rec, params = {}) {
       if (u?.fcm_token) {
         const title =
           rec.urgency === "urgent"
-            ? `Urgent: ${rec.callerName || "someone"} called`
-            : `${rec.callerName || "New caller"} called`;
+            ? `Urgent: ${rec.callerName || "Someone"} Called`
+            : `${rec.callerName || "New Caller"} Called`;
         await require("../services/push").sendNotification(
           u.fcm_token, title, rec.summary, { kind: "inbound_call" }
         );
@@ -468,6 +643,7 @@ module.exports = {
   getSettings, saveSettings,
   listCalls, markSeen,
   identifyCaller, shouldForward, normalize,
+  resolveBooking, slotLabel, clinicLines, systemFor,
   MAX_TURNS,
   _live: live,
 };

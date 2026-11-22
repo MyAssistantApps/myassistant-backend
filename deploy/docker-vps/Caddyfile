@@ -1,0 +1,6 @@
+backend.envisionsit.in {
+	reverse_proxy backend:3000
+}
+:80 {
+	reverse_proxy backend:3000
+}

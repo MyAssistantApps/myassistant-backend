@@ -217,8 +217,8 @@ async function processRecording(u, id, file, meta) {
       const n = out.actions?.length || 0;
       await require("../services/push").sendNotification(
         user.fcm_token,
-        "Meeting minutes ready",
-        `${out.title}: ${n ? `${n} action item${n === 1 ? "" : "s"}` : "summary and decisions"} — tap to read.`,
+        "Meeting Minutes Ready",
+        `${out.title}: ${n ? `${n} action item${n === 1 ? "" : "s"}` : "summary and decisions"}. Tap to read.`,
         { kind: "meeting_minutes", id: String(id) }
       );
     }
@@ -248,7 +248,7 @@ router.post("/record", recUpload.single("audio"), async (req, res) => {
   if (!u) { drop(); return res.status(401).json({ error: "unauthorized" }); }
   if (!file || file.size < 16 * 1024) {
     drop();
-    return res.status(400).json({ error: "the recording is too short" });
+    return res.status(400).json({ error: "The recording is too short." });
   }
   try {
     const id = await meetings.createPending(u, {
@@ -268,7 +268,7 @@ router.post("/record", recUpload.single("audio"), async (req, res) => {
   } catch (e) {
     drop();
     console.error("meeting record error:", e.message || e);
-    if (!res.headersSent) res.status(500).json({ error: "could not save the recording" });
+    if (!res.headersSent) res.status(500).json({ error: "Unable to save the recording. Please try again." });
   }
 });
 
@@ -278,7 +278,7 @@ router.get("/:id(\\d+)/pdf", async (req, res) => {
   if (!u) return res.status(401).json({ error: "unauthorized" });
   const m = await meetings.get(u, req.params.id).catch(() => null);
   if (!m) return res.status(404).json({ error: "not found" });
-  if (m.status !== "done") return res.status(409).json({ error: "the minutes are not ready yet" });
+  if (m.status !== "done") return res.status(409).json({ error: "The minutes are not yet ready." });
   try {
     const docgen = require("../services/docgen");
     const when = new Date(Number(m.created_at) + tz(req) * 60_000);
@@ -311,7 +311,7 @@ router.get("/:id(\\d+)/pdf", async (req, res) => {
     res.end(buffer);
   } catch (e) {
     console.error("meeting pdf error:", e.message || e);
-    res.status(500).json({ error: "could not make the PDF" });
+    res.status(500).json({ error: "Unable to generate the PDF. Please try again." });
   }
 });
 

@@ -7391,8 +7391,8 @@ function registerBuiltins() {
       if (appUser.fcm_token && !muted) {
         pushed = await push.sendNotification(
           appUser.fcm_token,
-          ctx.userName ? `${ctx.userName} sent you a message` : "You have a new message",
-          "Open the app and your assistant will read it to you.",
+          ctx.userName ? `${ctx.userName} Sent You a Message` : "You Have a New Message",
+          "Please open the app to have your assistant read it to you.",
           // Lets the recipient's app react: fetch the inbox and have their
           // assistant SPEAK the message the moment the app is open/opened.
           { kind: "agent_message" }
@@ -7633,9 +7633,9 @@ function registerBuiltins() {
           await require("../services/push").sendNotification(
             appUser.fcm_token,
             ctx.userName
-              ? `${ctx.userName} sent you a document`
-              : "You received a document",
-            "Open the app and your assistant will show it to you.",
+              ? `${ctx.userName} Sent You a Document`
+              : "Document Received",
+            "Please open the app to have your assistant show it to you.",
             { kind: "agent_message" }
           );
         } catch (e) {
@@ -8982,6 +8982,61 @@ function registerBuiltins() {
     },
   });
 
+  // DOCTORS ONLY: a real slot in the clinic's appointment book (clinic/
+  // store.js) — the same book the Clinic screen and the phone receptionist
+  // use, so a voice booking can never double-book a slot.
+  registry.register({
+    name: "book_patient_appointment",
+    description:
+      "DOCTOR users only: book a patient into a specific clinic APPOINTMENT slot " +
+      "('book Ramesh tomorrow at 10', 'put Asha in at 5:30 today for dressing'). " +
+      "Use this instead of schedule_patient_recall when the doctor names an exact " +
+      "day AND time to see the patient. The patient gets a reminder call a few " +
+      "hours before when they have a phone number on their card.",
+    risk: "medium",
+    inputSchema: {
+      type: "object",
+      properties: {
+        client_name: { type: "string", description: "The patient's name as spoken." },
+        starts_at: { type: "string", description: "ISO-8601 datetime of the appointment. Resolve relative phrases yourself." },
+        reason: { type: "string", description: "Reason for the visit, e.g. 'review', 'dressing'." },
+      },
+      required: ["client_name", "starts_at"],
+    },
+    async execute(args, ctx) {
+      if (!ctx.userId) return { ok: false, error: "not signed in" };
+      const { personaOf } = require("../users/persona");
+      if ((await personaOf(ctx.userId)) !== "doctor") {
+        return { ok: false, error: "clinic appointments are only for doctor profiles" };
+      }
+      const { client, err } = await requireClient(ctx.userId, args.client_name);
+      if (err) return err;
+      const when = parseUserTime(args.starts_at, ctx.tzOffsetMin);
+      if (!when || when < Date.now() - 60_000) {
+        return { ok: false, error: "starts_at must be a valid future datetime (ISO-8601)" };
+      }
+      const store = require("../clinic/store");
+      // Booked exactly as the doctor said, without the free-slot check the
+      // phone receptionist uses: a doctor squeezing someone in outside the
+      // grid is a deliberate choice, a caller doing it is not.
+      const row = await store.createAppointment(ctx.userId, {
+        clientId: client.id, patientName: client.name, patientPhone: client.phone || "",
+        startsAt: when, reason: args.reason || "", source: "voice",
+      });
+      const label = new Date(when).toLocaleString("en-IN", {
+        weekday: "short", day: "numeric", month: "short",
+        hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata",
+      });
+      const hasPhone = Boolean(String(client.phone || "").trim());
+      return {
+        ok: true,
+        data: { appointment: store.apptShape(row) },
+        speak: `${client.name} is booked for ${label}.` +
+          (hasPhone ? " I'll call them a few hours before to remind them." : " There's no number on their card, so I can't remind them."),
+      };
+    },
+  });
+
   registry.register({
     name: "complete_patient_recall",
     description:
@@ -9565,6 +9620,31 @@ function registerBuiltins() {
         console.warn("find_places_nearby search failed:", e.message);
       }
 
+      // PROFESSIONALS ON MYASSISTANT (2026-11-14): doctors, advocates and
+      // businesses who published a page (src/listings) come FIRST — "doctors
+      // near me" should point at the ones using this app. Real rows only.
+      let listed = [];
+      try {
+        const { searchNearby } = require("../listings/routes");
+        const r = await searchNearby({ lat, lng, q, radiusKm: 10, limit: 5 });
+        if (r.results.length && (r.persona || r.terms.length)) {
+          listed = r.results.slice(0, 3).map((l) => ({
+            name: l.persona === "business" && l.placeName ? l.placeName : l.displayName,
+            what: l.headline || l.specialty || "",
+            place: l.persona === "business" ? "" : l.placeName,
+            area: l.area || l.city || "",
+            distanceKm: Math.round(l.distanceKm * 10) / 10,
+            phone: l.phone,
+          }));
+        }
+      } catch (e) {
+        console.warn("find_places_nearby listings failed:", e.message);
+      }
+      const listedLine = listed.length
+        ? "On MyAssistant nearby (mention these FIRST, with distance, and offer to call or book): " +
+          listed.map((p) => `${p.name}${p.what ? ` (${p.what})` : ""}, ${p.distanceKm} km`).join("; ") + ". "
+        : "";
+
       const openMap = args.open_map !== false;
       // A google.com/maps SEARCH URL centred on where they are, not a
       // "geo:" URI. Google Maps claims these as app links, so the app
@@ -9579,9 +9659,9 @@ function registerBuiltins() {
 
       return {
         ok: true,
-        data: { query: q, area, places: found },
+        data: { query: q, area, places: found, onMyAssistant: listed },
         ...(openMap ? { deviceAction: { type: "open_url", url } } : {}),
-        speak: (found.length
+        speak: listedLine + (found.length
           ? `Real places near ${area || "them"}: ` +
             found.slice(0, 3).map((p) => p.name).join("; ") +
             (openMap
@@ -9590,8 +9670,8 @@ function registerBuiltins() {
           : openMap
           ? `The search returned only directory pages, no place names${area ? ` in ${area}` : ""}. ` +
             "Maps IS open at their search — say that in one sentence and ask " +
-            "them to look. NAME NOTHING: you were given no place names."
-          : "The search returned no place names. Say so plainly and offer to " +
+            "them to look. " + (listed.length ? "Name ONLY the MyAssistant ones above." : "NAME NOTHING: you were given no place names.")
+          : (listed.length ? "Name ONLY the MyAssistant ones above — the web search found nothing else. " : "") + "The search returned no place names. Say so plainly and offer to " +
             "open the map — never invent a place."),
       };
     },

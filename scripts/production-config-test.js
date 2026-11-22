@@ -245,7 +245,9 @@ function stable(cfg) {
     console.log("  !!  ALLOW_DEV_PHONE_VERIFY=true in production: anyone can sign in as any number. Turn it off before a public release.");
   }
   console.log(`production-config: ${passed} passed${failed ? `, ${failed} FAILED` : ""}`);
-  fs.rmSync(TMP, { recursive: true, force: true });
+  // Windows can still hold a file the server just closed: retry, and never
+  // let a leftover temp folder fail the run.
+  try { fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (_) { /* temp dir, harmless */ }
   process.exit(failed ? 1 : 0);
 })().catch((e) => {
   console.error("production-config-test crashed:", e);

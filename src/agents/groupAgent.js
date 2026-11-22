@@ -404,9 +404,9 @@ async function noteForUser(userId, groupId, { from, asked, why, answered }) {
   ]);
   if (!user?.fcm_token) return;
   const where = group?.title ? group.title : "a group";
-  const title = answered ? `I replied for you in ${where}` : `Unanswered in ${where}`;
+  const title = answered ? `Reply Sent for You in ${where}` : `Unanswered in ${where}`;
   const body = answered
-    ? `${from}: "${trim(asked, 60)}" — I said: "${trim(answered, 70)}"`
+    ? `${from}: "${trim(asked, 60)}". Reply sent: "${trim(answered, 70)}"`
     : `${from}: "${trim(asked, 90)}"${why ? ` — ${trim(why, 40)}` : ""}`;
   push
     .sendNotification(user.fcm_token, title, body, {

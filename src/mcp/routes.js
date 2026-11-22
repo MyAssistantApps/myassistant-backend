@@ -83,7 +83,7 @@ const CATALOG = [
     auth: {
       type: "bearer",
       label: "GitHub personal access token",
-      hint: "Create a fine-grained token at github.com/settings/tokens and paste it.",
+      hint: "Please create a fine-grained token at github.com/settings/tokens and paste it here.",
     },
   },
 ];
@@ -188,9 +188,9 @@ router.post("/servers", async (req, res) => {
     res.status(201).json({ server: schema.toClient(row) });
   } catch (e) {
     if (/idx_mcp_user_name|unique/i.test(e.message)) {
-      return res.status(409).json({ error: "a server with that name already exists" });
+      return res.status(409).json({ error: "A server with that name already exists." });
     }
-    res.status(500).json({ error: "could not save the server" });
+    res.status(500).json({ error: "Unable to save the server. Please try again." });
   }
 });
 
@@ -268,8 +268,8 @@ for (const path of ["/servers/:id/connect", "/servers/:id/reconnect"]) {
 
     const secrets = schema.decryptSecrets(row.secrets_enc);
     if (row.secrets_enc && secrets === null) {
-      await markStatus(user, row.id, "error", "stored credentials could not be read — re-enter them");
-      return res.status(400).json({ error: "stored credentials could not be read — re-enter them" });
+      await markStatus(user, row.id, "error", "The stored credentials could not be read. Please re-enter them.");
+      return res.status(400).json({ error: "The stored credentials could not be read. Please re-enter them." });
     }
 
     await markStatus(user, row.id, "connecting", "");

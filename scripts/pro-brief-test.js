@@ -170,11 +170,22 @@ const TZ = 330;
   await atest("an unknown kind is refused", async () => {
     assert.strictEqual((await get("/pro/brief?kind=chef", U)).status, 400);
   });
-  await atest("a real user gets their brief", async () => {
+  // EACH PROFESSION SEES ONLY ITS OWN ASSISTANT (owner, 2026-11-13).
+  await atest("a user who never chose a profession gets no brief", async () => {
+    await db.run("UPDATE users SET persona = '' WHERE id = $1", [U]);
+    assert.strictEqual((await get("/pro/brief?kind=doctor", U)).status, 403);
+  });
+  await atest("a real doctor gets their brief", async () => {
+    await db.run("UPDATE users SET persona = 'doctor' WHERE id = $1", [U]);
     const r = await get("/pro/brief?kind=doctor", U);
     assert.strictEqual(r.status, 200);
     assert.strictEqual(r.body.kind, "doctor");
     assert.ok(r.body.needs.length >= 3);
+  });
+  await atest("a doctor cannot open another profession's brief", async () => {
+    for (const k of ["advocate", "business"]) {
+      assert.strictEqual((await get(`/pro/brief?kind=${k}`, U)).status, 403, k);
+    }
   });
   await atest("a dev session gets the calm empty state, not an error", async () => {
     const r = await get("/pro/brief?kind=business", "dev");

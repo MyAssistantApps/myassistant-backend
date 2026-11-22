@@ -1,12 +1,12 @@
 # DEPLOY — every push to hardening updates the VPS (backend.envisionsit.in,
-# 189.72.146.77; moved from myassistant.wishme.today on 2026-11-07).
+# 189.72.146.77 — production since 2026-11-14; was myassistant.wishme.today).
 #
 # Gate first (every module loads, the smoke test, the manager agent's
-# tests), then send the commit as a tar over SSH with a key that can do ONE
-# thing: run /opt/myassistant/deploy.sh (forced command in root's
-# authorized_keys; source in deploy/vps/deploy-docker.sh). That script backs
-# up the database, rebuilds the Docker image, restarts, checks /health and
-# rolls back on failure. The server needs no GitHub access.
+# tests), then SSH to the server with a key that can do ONE thing: run
+# /opt/myassistant/deploy.sh (forced command in root's authorized_keys).
+# The commit goes up as a tar on stdin; the script backs up the database,
+# rebuilds the Docker image, restarts, checks /health and rolls back on
+# any failure.
 #
 # ci.yml still runs the whole suite on every push; this does not wait for
 # it so a deploy takes a minute, not ten.
@@ -75,8 +75,8 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
           printf '%s\n' "$KNOWN" > ~/.ssh/known_hosts
-          # The server's forced command runs /opt/myassistant/deploy.sh,
-          # which reads this commit's tar from stdin.
-          git archive --format=tar HEAD | ssh -i ~/.ssh/deploy -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes -p 22 root@189.72.146.77 deploy
+          # The forced command runs /opt/myassistant/deploy.sh, which reads this
+          # commit as a tar on stdin (backs up the DB, rebuilds, rolls back on failure).
+          git archive HEAD | ssh -i ~/.ssh/deploy -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -p 22 root@189.72.146.77 deploy
           curl -fsS -m 15 https://backend.envisionsit.in/health

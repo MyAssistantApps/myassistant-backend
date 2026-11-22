@@ -871,10 +871,10 @@ async function pushOutcome(rec) {
   if (!user?.fcm_token) return;
   const title =
     rec.state === "completed"
-      ? (rec.selfCall ? "I called you" : `Call to ${rec.contactName} done`)
+      ? (rec.selfCall ? "Your Assistant Called" : `Call to ${rec.contactName} Completed`)
       : rec.state === "no_answer"
-        ? (rec.selfCall ? "Missed my calls" : `Couldn't reach ${rec.contactName}`)
-        : "Call didn't go through";
+        ? (rec.selfCall ? "Missed Assistant Calls" : `Unable to Reach ${rec.contactName}`)
+        : "Call Not Connected";
   await require("../services/push").sendNotification(
     user.fcm_token,
     title,
@@ -939,8 +939,8 @@ async function closeStale({ olderThanMs = STALE_MS } = {}) {
       const who = r.target || "them";
       await require("../services/push").sendNotification(
         user.fcm_token,
-        `No result from the call to ${who}`,
-        `No result came back from the call to ${who}, so I can't say whether it got through.`,
+        `No Result from the Call to ${who}`,
+        `No result was received from the call to ${who}. It could not be confirmed whether the call connected.`,
         { kind: "agent_call", state: "failed" }
       );
     } catch (_) {

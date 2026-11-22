@@ -19,7 +19,7 @@ function makeLimiter(max = RATE_PER_MIN) {
     max,
     standardHeaders: true,
     keyGenerator: (req) => String(req.user?.sub || req.ip),
-    message: { error: "too_many_requests", message: "Too many requests — try again in a minute." },
+    message: { error: "too_many_requests", message: "Too many requests. Please try again in a minute." },
   });
 }
 

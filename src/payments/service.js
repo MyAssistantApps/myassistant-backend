@@ -208,8 +208,8 @@ async function notifyPaid(row) {
     const rupees = (Number(row.amount_paise) / 100).toLocaleString("en-IN");
     await require("../services/push").sendNotification(
       u.fcm_token,
-      `₹${rupees} received`,
-      `${row.payer_name || "Someone"} paid${row.description ? ` for ${row.description}` : ""}.`,
+      `₹${rupees} Received`,
+      `Payment received from ${row.payer_name || "a payer"}${row.description ? ` for ${row.description}` : ""}.`,
       { kind: "payment" }
     );
   } catch (_) {}

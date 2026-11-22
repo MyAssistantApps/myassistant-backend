@@ -111,7 +111,8 @@ async function touch(userId, id) {
 /* ------------------------------------------------------------------ */
 
 async function addNote(userId, clientId, text) {
-  const t = clean(text, 2000);
+  // 6000: a full SOAP consult note (clinic/ai.js) must fit, not be cut.
+  const t = clean(text, 6000);
   if (!t) return null;
   const row = await one(
     `INSERT INTO client_notes (user_id, client_id, text, created_at)

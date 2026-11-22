@@ -202,7 +202,7 @@ async function atest(name, fn) {
 
   await atest("an app still sending the SMS code's Firebase token is told to update (426)", async () => {
     const r = await call(B.id, "POST", "/verify", { firebaseIdToken: "eyJhbGciOi.x.y" });
-    assert.deepStrictEqual([r.status, r.body.error], [426, "Update the app to verify your number."]);
+    assert.deepStrictEqual([r.status, r.body.error], [426, "Please update the app to verify your number."]);
   });
 
   await atest("a deleted account is told to sign in again, before any token is looked at", async () => {

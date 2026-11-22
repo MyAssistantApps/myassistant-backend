@@ -77,8 +77,8 @@ async function sweepCommitments() {
     try {
       await push.sendNotification(
         c.fcm_token,
-        overdue ? "Overdue" : "Due soon",
-        `You said you'd ${lowerFirst(c.text)}${who}.`,
+        overdue ? "Overdue" : "Due Soon",
+        `You agreed to ${lowerFirst(c.text)}${who}.`,
         { kind: "commitment" }
       );
       await commitments.markNudged(c.id);
@@ -171,7 +171,7 @@ async function buildBrief(userId, event) {
         LIMIT 3`,
       [userId, ...names.map((n) => String(n))]
     ).catch(() => []);
-    for (const o of owed) parts.push(`You owe ${o.owed_to}: ${o.text}`);
+    for (const o of owed) parts.push(`Pending for ${o.owed_to}: ${o.text}`);
   }
 
   return parts;
@@ -272,15 +272,15 @@ function morningBody(b, tzOffsetMin) {
     const first = b.agenda[0];
     const at = first.at ? ` at ${hhmmLocal(first.at, tzOffsetMin)}` : "";
     bits.push(
-      `${b.agenda.length} on your plate — first: ${first.title}${at}`
+      `${b.agenda.length} on your agenda; first: ${first.title}${at}`
     );
   }
   if (b.messages.length) {
     bits.push(
-      `${b.messages.length} message${b.messages.length === 1 ? "" : "s"} waiting (${b.messages[0].from})`
+      `${b.messages.length} message${b.messages.length === 1 ? "" : "s"} pending (${b.messages[0].from})`
     );
   }
-  if (b.promises.length) bits.push(`You owe: ${b.promises[0].text}`);
+  if (b.promises.length) bits.push(`Pending commitment: ${b.promises[0].text}`);
   if (b.weather_line) bits.push(b.weather_line);
   return bits.join(" · ").slice(0, 320);
 }
@@ -289,11 +289,11 @@ function morningBody(b, tzOffsetMin) {
  *  the same sentence does not arrive every quiet day of the week. */
 function quietMorningLine() {
   const lines = [
-    "Nothing scheduled today. Tell me what to line up.",
-    "Your day is clear. Want me to plan it with you?",
-    "No meetings, no promises due. Ask me for anything.",
-    "A clear day. Say the word and I'll set your reminders.",
-    "Nothing waiting. Shall I check your mail or your week?",
+    "Nothing is scheduled today. Ask your assistant to arrange your day.",
+    "Your day is clear. Your assistant can help you plan it.",
+    "No meetings or commitments are due. Your assistant is available.",
+    "A clear day. Your assistant can set reminders on request.",
+    "Nothing is pending. Your assistant can review your mail or your week.",
   ];
   return lines[new Date().getDate() % lines.length];
 }
@@ -359,7 +359,7 @@ async function sweepMorningBriefs() {
         first ? `Good morning, ${first} ☀️` : "Good morning ☀️",
         quietDay
           ? quietMorningLine()
-          : morningBody(b, tz) || "Your day is ready — tap for your brief.",
+          : morningBody(b, tz) || "Your day is ready. Tap to view your brief.",
         { kind: "morning_brief" }
       );
       if (ok) sent++;
@@ -413,8 +413,8 @@ async function sweepPersonDates() {
         const ok = await push.sendNotification(
           u.fcm_token,
           `🎂 Tomorrow: ${d.name}'s ${d.label}`,
-          `${d.name}'s ${d.label} is tomorrow (${when}). Want me to ` +
-            `schedule a call or a message?`,
+          `${d.name}'s ${d.label} is tomorrow (${when}). Your assistant can ` +
+            `schedule a call or a message.`,
           { kind: "person_date" }
         );
         if (ok) sent++;
@@ -511,6 +511,91 @@ async function sweepMomentum() {
   }
 }
 
+/**
+ * APPOINTMENT REMINDER CALLS — same contract as recall calls above: one
+ * attempt per appointment, stamped BEFORE dialling, 2–16 hours ahead
+ * (clinic/store.appointmentsNeedingReminder). The single biggest lever on
+ * no-shows, which cost a busy OPD a dozen empty slots a day.
+ */
+async function sweepAppointmentReminders() {
+  const agentCall = require("../agents/agentCall");
+  if (!agentCall.enabled()) return;
+  const clinic = require("../clinic/store");
+  let due = [];
+  try {
+    due = await clinic.appointmentsNeedingReminder();
+  } catch (e) {
+    console.error("appointment reminder query failed:", e.message);
+    return;
+  }
+  for (const a of due) {
+    await clinic.markReminded(a.id); // one attempt, ever
+    try {
+      const first = String(a.doctor_name || "").split(" ")[0] || null;
+      const whenTxt = new Date(Number(a.starts_at)).toLocaleString("en-IN", {
+        weekday: "long", day: "numeric", month: "long",
+        hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata",
+      });
+      await agentCall.start({
+        userId: a.user_id,
+        userName: first,
+        toNumber: a.patient_phone,
+        contactName: a.patient_name,
+        task:
+          `Remind them of their appointment with Dr. ${first || "the doctor"} on ${whenTxt}` +
+          `${a.reason ? ` (${a.reason})` : ""}. Ask whether they will be able to come. ` +
+          `If they cannot, say the clinic will call to find a new time.`,
+        lang: null,
+      });
+      console.log(`appointment: reminding ${a.patient_name} for user ${a.user_id} (appt ${a.id})`);
+    } catch (e) {
+      console.error(`appointment reminder to ${a.patient_name} failed:`, e?.message || e?.code);
+    }
+  }
+}
+
+/**
+ * HEARING REMINDER CALLS (advocates) — the client is phoned 2–20 hours
+ * before their hearing: which court, when, what to bring. Same contract as
+ * the doctor's reminders: one attempt, stamped before dialling.
+ */
+async function sweepHearingReminders() {
+  const agentCall = require("../agents/agentCall");
+  if (!agentCall.enabled()) return;
+  const pro = require("../pro/store");
+  let due = [];
+  try {
+    due = await pro.hearingsNeedingReminder();
+  } catch (e) {
+    console.error("hearing reminder query failed:", e.message);
+    return;
+  }
+  for (const h of due) {
+    await pro.markHearingReminded(h.id); // one attempt, ever
+    try {
+      const first = String(h.advocate_name || "").split(" ")[0] || null;
+      const whenTxt = new Date(Number(h.at)).toLocaleString("en-IN", {
+        weekday: "long", day: "numeric", month: "long",
+        hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata",
+      });
+      await agentCall.start({
+        userId: h.user_id,
+        userName: first,
+        toNumber: h.client_phone,
+        contactName: h.client_name,
+        task:
+          `Remind them that their case "${h.case_title}" has a hearing${h.court ? ` at ${h.court}` : ""} on ${whenTxt}` +
+          `${h.purpose ? ` (${h.purpose})` : ""}. Their advocate asks them to be on time and to bring any ` +
+          `documents they were asked for. Do not discuss the case itself; if they have questions, say the advocate will call back.`,
+        lang: null,
+      });
+      console.log(`hearing: reminding ${h.client_name} for user ${h.user_id} (hearing ${h.id})`);
+    } catch (e) {
+      console.error(`hearing reminder to ${h.client_name} failed:`, e?.message || e?.code);
+    }
+  }
+}
+
 async function sweep() {
   // Calls whose result never came back (agentCall.closeStale): closed as
   // failed and the user told. On its own line — a failure here must not
@@ -528,6 +613,10 @@ async function sweep() {
     sweepMorningBriefs(),
     sweepPersonDates(),
     sweepMomentum(),
+    // Appended AFTER the named ones: the results below are read by
+    // position, so a sweep inserted mid-list would shift every count.
+    sweepAppointmentReminders(),
+    sweepHearingReminders(),
   ]);
   // One name per sweep, in order — it used to unpack six results into four
   // names, so "briefs" logged the recall count and "fares" the meetings.

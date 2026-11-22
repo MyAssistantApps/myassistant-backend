@@ -620,6 +620,11 @@ function publicUser(u) {
     // has to decide what counts as verified.
     phone: u.phone_number || null,
     phoneVerified: Boolean(u.phone_verified_at),
+    // What the user does (users/persona.js). '' = not chosen yet, and the
+    // app asks before anything else. Sent here so the very first frame
+    // after sign-in already knows which workspaces to show.
+    persona: u.persona || "",
+    specialty: u.specialty || "",
   };
 }
 

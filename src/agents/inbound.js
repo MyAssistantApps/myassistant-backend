@@ -124,8 +124,8 @@ async function onMessageDelivered({ toUserId, fromUserId, fromName, text }) {
     if (asker.fcm_token && !muted) {
       await push.sendNotification(
         asker.fcm_token,
-        `${ownerFirst}'s assistant replied`,
-        "Open the app and your assistant will read it to you.",
+        `${ownerFirst}'s Assistant Replied`,
+        "Please open the app to have your assistant read it to you.",
         { kind: "agent_message" }
       );
     }

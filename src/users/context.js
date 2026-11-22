@@ -27,6 +27,11 @@ async function migrate(exec) {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS location          TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_language TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone          TEXT NOT NULL DEFAULT '';
+    -- What the user does, chosen on the registration step (users/persona.js).
+    -- '' = not chosen yet. Gates the doctor workspace, app AND server.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS persona           TEXT NOT NULL DEFAULT '';
+    -- Doctor's specialty ("Dentist", "Paediatrician") — free text, optional.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS specialty         TEXT NOT NULL DEFAULT '';
     -- ASKED ONCE MEANS ONCE, NOT ONCE PER SOCKET.
     -- When the assistant last asked the user which language to speak. A
     -- live "session" is one WebSocket and the app rebuilds it on every
@@ -90,14 +95,14 @@ const uidOk = (u) => Number.isFinite(Number(u)) && Number(u) > 0;
 /// reads it out of a verified Phone Number Verification token. Writable here, it
 /// would let any signed-in client claim any number — including one already
 /// belonging to somebody else — and quietly receive that person's messages.
-const PROFILE_FIELDS = ["profession", "organisation", "location", "preferred_language", "timezone", "birthday", "fcm_token"];
+const PROFILE_FIELDS = ["profession", "organisation", "location", "preferred_language", "timezone", "birthday", "fcm_token", "specialty"];
 
 async function getProfile(userId) {
   if (!uidOk(userId)) throw new Error("authenticated userId required");
   const u = await one(
     `SELECT id, name, gender, birthday, profession, organisation, location,
             preferred_language, language_asked_at, timezone, fcm_token,
-            phone_number FROM users WHERE id=$1`,
+            phone_number, persona, specialty FROM users WHERE id=$1`,
     [userId]
   );
   if (!u) return null;
@@ -140,6 +145,14 @@ async function updateProfile(userId, fields = {}) {
   if (["male", "female", "other"].includes(String(fields.gender || "").toLowerCase())) {
     sets.push(`gender = $${i++}`);
     vals.push(String(fields.gender).toLowerCase());
+  }
+  // Persona is validated, never stored as free text: it gates workspaces.
+  if (fields.persona !== undefined) {
+    const p = require("./persona").cleanPersona(fields.persona);
+    if (p) {
+      sets.push(`persona = $${i++}`);
+      vals.push(p);
+    }
   }
   if (!sets.length) return getProfile(userId);
   await run(`UPDATE users SET ${sets.join(", ")} WHERE id = $1`, vals);
@@ -311,6 +324,15 @@ async function contextBlock(userId, { lat, lng, tz, at, appBuild = 0 } = {}) {
 
   const who = [
     u.name && `name: ${u.name}`,
+    u.persona === "doctor" &&
+      `works as a doctor${u.specialty ? ` (${u.specialty})` : ""} — their case files are PATIENTS, ` +
+      `follow-ups are patient recalls`,
+    u.persona === "advocate" &&
+      `works as an advocate${u.specialty ? ` (${u.specialty})` : ""} — their case files are CLIENTS with ` +
+      `matters and hearing dates; fees are tracked per client; never give legal opinions as fact`,
+    u.persona === "business" &&
+      `runs a business at a senior level — speak like an executive assistant: clients, deals, ` +
+      `meetings, invoices and receivables; be brief and decisive`,
     u.profession && `profession: ${u.profession}`,
     u.organisation && `organisation: ${u.organisation}`,
     u.location && `location: ${u.location}`,

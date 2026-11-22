@@ -599,7 +599,7 @@ const tmpUploads = () => filesIn(os.tmpdir()).filter((f) => /^(avatar|note)-\d+-
     assert.deepStrictEqual(toR.data, { kind: "agent_message", avatar: "1" });
     assert.match(toR.body, /AI/);
     const toS = pushes.find((p) => p.token === `tok-s-${stamp}`);
-    assert.ok(toS && /reached/.test(toS.body), "the sender was not told");
+    assert.ok(toS && /delivered to/.test(toS.body), "the sender was not told");
     const out = await db.one(`SELECT * FROM task_outcomes WHERE external_id = $1`, [`video_note:${noteR.id}`]);
     assert.strictEqual(out.status, "completed");
     // The kept copy for the admin page, under this upload's own key.
@@ -785,7 +785,7 @@ const tmpUploads = () => filesIn(os.tmpdir()).filter((f) => /^(avatar|note)-\d+-
     const row = await store.getRender(r.id);
     assert.strictEqual(row.status, "failed");
     assert.strictEqual(row.error, "the face was too dark to use");
-    assert.ok(pushes.some((p) => p.token === `tok-s-${stamp}` && /couldn't be made/.test(p.body)));
+    assert.ok(pushes.some((p) => p.token === `tok-s-${stamp}` && /could not be created/.test(p.body)));
     assert.strictEqual((await db.one(`SELECT status FROM task_outcomes WHERE external_id = $1`,
       [`video_note:${r.id}`])).status, "failed");
     const again = await admin(`/video-notes/${r.id}/fail`, {
