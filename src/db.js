@@ -483,6 +483,10 @@ async function init() {
   // Payment collection requests (money IN only — see payments/service.js).
   await require("./payments/service").migrate((sql) => pool.query(sql));
 
+  // The wallet's double-entry ledger, top-ups and Razorpay events
+  // (wallet/store.js; Phase 1 of the wallet plan).
+  await require("./wallet/store").migrate((sql) => pool.query(sql));
+
   // Fare watches: re-priced by the proactive sweep, alert on a real drop.
   await require("./travel/fares").migrate((sql) => pool.query(sql));
 

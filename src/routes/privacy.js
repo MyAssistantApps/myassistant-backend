@@ -256,6 +256,14 @@ const SHARED_TABLES = {
   // rows stay, so the totals stay right, but are no longer theirs —
   // user_id is cleared, which leaves nothing that points back at them.
   ai_spend: "user_id",
+  // 2026-11-22: THE WALLET (src/wallet) is a double-entry ledger and a set
+  // of financial records: deleting a person's rows would unbalance it and
+  // destroy records the law asks us to keep. Their rows stay with user_id
+  // cleared — amounts intact, nothing pointing back at them — and their
+  // accounts are closed. (Phase 2 refunds unspent cash before this runs.)
+  wallet_accounts: "user_id",
+  wallet_transactions: "user_id",
+  wallet_topups: "user_id",
 };
 
 /**
@@ -602,6 +610,21 @@ async function deleteUserEverywhere(userId, { reason = "" } = {}) {
     if (cols.has("ai_spend.user_id")) {
       const r = await client.query(`UPDATE ai_spend SET user_id = NULL WHERE user_id = $1`, [uid]);
       count("ai_spend (unlinked)", r.rowCount);
+    }
+    // The wallet's ledger stays whole; it just stops pointing at them
+    // (SHARED_TABLES). Accounts are closed first, so nothing can move on
+    // them afterwards.
+    if (cols.has("wallet_accounts.user_id")) {
+      const a = await client.query(
+        `UPDATE wallet_accounts SET status = 'closed', user_id = NULL, updated_at = $2 WHERE user_id = $1`,
+        [uid, Date.now()]);
+      count("wallet_accounts (closed, unlinked)", a.rowCount);
+    }
+    for (const t of ["wallet_transactions", "wallet_topups"]) {
+      if (cols.has(`${t}.user_id`)) {
+        const r = await client.query(`UPDATE ${q(t)} SET user_id = NULL WHERE user_id = $1`, [uid]);
+        count(`${t} (unlinked)`, r.rowCount);
+      }
     }
     if (cols.has("chat_group_messages.deleted")) {
       const r = await client.query(
@@ -1048,6 +1071,24 @@ router.get("/export", async (req, res) => {
       )).map(({ from_user_id: _a, from_document_id: _b, ...row }) => redactRow(row));
     } catch (e) {
       data.agent_messages_received = { error: "could not read: " + e.message };
+    }
+  }
+  // THEIR WALLET: SHARED_TABLES, so not in the loop. Balances, every
+  // transaction and every top-up (Razorpay ids, amounts, status).
+  if (cols.has("wallet_accounts.user_id")) {
+    try {
+      data.wallet = {
+        accounts: (await query(
+          `SELECT kind, balance_paise, status, created_at FROM wallet_accounts WHERE user_id = $1 ORDER BY id`, [uid])),
+        transactions: (await query(
+          `SELECT id, type, status, amount_paise, currency, title, reference_type, reference_id, created_at
+             FROM wallet_transactions WHERE user_id = $1 ORDER BY created_at`, [uid])),
+        topups: (await query(
+          `SELECT id, amount_paise, currency, status, method, razorpay_order_id, razorpay_payment_id,
+                  created_at, credited_at FROM wallet_topups WHERE user_id = $1 ORDER BY created_at`, [uid])),
+      };
+    } catch (e) {
+      data.wallet = { error: "could not read: " + e.message };
     }
   }
   // What they wrote in group chats: SHARED_TABLES, so not in the loop.

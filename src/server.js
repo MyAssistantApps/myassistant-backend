@@ -326,6 +326,11 @@ const paymentRoutes = require("./payments/routes");
 app.use("/payments", paymentRoutes.webhooks);
 app.use("/payments", appAuth, paymentRoutes.router);
 
+// WALLET — a closed-loop rupee wallet on a double-entry ledger, topped up
+// through Razorpay (src/wallet; credited only after Razorpay confirms the
+// payment, through the signed webhook above or a server-side fetch).
+app.use("/wallet", appAuth, require("./wallet/routes"));
+
 // MEETINGS — record or upload, get back decisions, action items and a
 // drafted follow-up. The user's own action items enter the commitment
 // tracker so they are nudged before they slip.
@@ -704,6 +709,14 @@ require("./db")
       require("./proactive/scheduler").start();
     } catch (e) {
       console.error("  proactive scheduler failed to start:", e.message);
+    }
+
+    // WALLET — credit any captured top-up whose webhook was lost (every
+    // 10 min) and audit the ledger + Razorpay once a day. Background only.
+    try {
+      require("./wallet/jobs").start();
+    } catch (e) {
+      console.error("  wallet jobs failed to start:", e.message);
     }
 
     // THE DAY'S QUOTE — today's and tomorrow's line and pictures, made
