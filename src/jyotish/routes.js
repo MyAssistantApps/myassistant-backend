@@ -16,7 +16,6 @@
  * birth = { name?, date:"YYYY-MM-DD", time:"HH:MM"|null, place?, lat, lng, tz?, gender? }
  * (time null = birth time unknown; tz is looked up from lat/lng when absent).
  */
-const crypto = require("crypto");
 const router = require("express").Router();
 const engine = require("./engine");
 const geo = require("./geo");
@@ -74,8 +73,6 @@ function cleanBirth(b, today = new Date()) {
     offsetMinutes,
   };
 }
-
-const chartHash = (b) => crypto.createHash("sha256").update([b.date, b.time || "-", b.lat, b.lng, b.tz].join("|")).digest("hex").slice(0, 32);
 
 const natalOf = (b, at = new Date()) => engine.chart({ utc: new Date(b.utc), lat: b.lat, lng: b.lng, timeKnown: !!b.time, at });
 
@@ -154,8 +151,7 @@ router.post("/predict", async (req, res) => {
     if (!custom || !body.date) return fail(res, 400, "bad_date", "Choose a date between 1900 and 2100");
   }
   const period = jai.periodOf(range, new Date(), custom ? String(body.date) : null);
-  const key = crypto.createHash("sha256")
-    .update([userId, chartHash(birth), range, category, language, period.key].join("|")).digest("hex");
+  const key = jai.readingKey(userId, birth, range, category, language, period);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");

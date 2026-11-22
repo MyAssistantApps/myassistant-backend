@@ -4,6 +4,7 @@
  * written by the model from that chart's data only. Wiring:
  *
  *   app.use("/jyotish", appAuth, jyotish.limiter, jyotish.router);
+ *   jyotish.registerJyotishTools(registry);             // in registerBuiltins(): the voice tools
  *   ...jyotish.USER_TABLES                              // privacy export / erase
  *
  * Two per-user buckets: everything (JYOTISH_RATE_PER_MIN, 120), and the
@@ -12,6 +13,7 @@
 const rateLimit = require("express-rate-limit");
 const routes = require("./routes");
 const { migrate, USER_TABLES } = require("./store");
+const { registerJyotishTools } = require("./tools");
 
 const keyGenerator = (req) => String(req.user?.sub || req.ip);
 const tooMany = (req, res) => res.status(429).json({ ok: false, error: "rate_limited", message: "Too many requests. Please wait a moment and try again." });
@@ -33,4 +35,4 @@ function limiter(req, res, next) {
   });
 }
 
-module.exports = { router: routes, limiter, migrate, USER_TABLES };
+module.exports = { router: routes, limiter, migrate, USER_TABLES, registerJyotishTools };

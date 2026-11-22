@@ -369,6 +369,8 @@ function registerBuiltins() {
   // tools that need the new app screens ask for build 124.
   require("../shopping").registerShoppingTools(registry);
   require("../kitchen").registerKitchenTools(registry);
+  // Jyotish by voice (2026-11-22): birth details told → chart cast, saved, explained; readings.
+  require("../jyotish").registerJyotishTools(registry);
   // Connected apps (2026-10-14): what happened in the apps the user built.
   require("../platform").registerPlatformTools(registry);
 
@@ -5746,7 +5748,7 @@ function registerBuiltins() {
             "documents", "clients", "finance", "stocks",
             "diagnostics", "mcp", "meetings", "reminders", "call_notes",
             "news", "focus", "avatar_identity", "connected_apps", "shortcuts",
-            "bills_email", "shopping_list", "calendar", "voice_settings",
+            "bills_email", "shopping_list", "calendar", "voice_settings", "jyotish",
           ],
           description:
             "settings = the assistant's own settings (voice, name, theme). " +
@@ -5763,7 +5765,8 @@ function registerBuiltins() {
             "assistant's voice: hear each voice's sample and pick one ('open " +
             "voice settings', 'change your voice', 'I want a different voice'; " +
             "build 163). Opening it ENDS this conversation, so say one short line " +
-            "first, e.g. 'Opening voice settings.' The " +
+            "first, e.g. 'Opening voice settings.' jyotish = the Vedic horoscope: " +
+            "their kundli, dasha and readings ('open my kundli', 'show my chart'). The " +
             "rest are feature screens.",
         },
       },
@@ -5775,7 +5778,7 @@ function registerBuiltins() {
         "settings", "home", "hub", "chat", "documents", "clients",
         "finance", "stocks", "diagnostics", "mcp", "meetings", "reminders",
         "call_notes", "news", "focus", "avatar_identity", "connected_apps", "shortcuts",
-        "bills_email", "shopping_list", "calendar", "voice_settings",
+        "bills_email", "shopping_list", "calendar", "voice_settings", "jyotish",
       ];
       if (!ALLOWED.includes(screen)) {
         return { ok: false, error: `I don't have a screen called "${args.screen}"` };
@@ -7186,7 +7189,7 @@ function registerBuiltins() {
 
   registry.register({
     name: "get_horoscope",
-    description: "Get daily astrological horoscope predictions for a given zodiac sign using an external astrology API.",
+    description: "Get the GENERIC daily horoscope for a western zodiac sign from an external astrology API. For anything personal — their kundli, rashi, nakshatra, dasha, or a reading from their own birth chart — use jyotish_chart / jyotish_reading instead.",
     risk: "low",
     inputSchema: {
       type: "object",
