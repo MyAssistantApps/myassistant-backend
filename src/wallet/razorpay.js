@@ -111,6 +111,29 @@ async function listPayments({ from, to, skip = 0 }) {
 }
 
 /**
+ * Refunds [amountPaise] of a captured payment, to the method it came from.
+ * notes carry our refund id, so the webhook finds it.
+ */
+function createRefund(paymentId, { amountPaise, notes = {} }) {
+  if (!/^pay_[A-Za-z0-9]+$/.test(String(paymentId || ""))) {
+    const e = new Error("not a payment id");
+    e.code = "bad_payment_id";
+    return Promise.reject(e);
+  }
+  return call("POST", `/payments/${paymentId}/refund`, { amount: amountPaise, speed: "normal", notes });
+}
+
+/** One refund, as Razorpay has it now. */
+function fetchRefund(refundId) {
+  if (!/^rfnd_[A-Za-z0-9]+$/.test(String(refundId || ""))) {
+    const e = new Error("not a refund id");
+    e.code = "bad_refund_id";
+    return Promise.reject(e);
+  }
+  return call("GET", `/refunds/${refundId}`);
+}
+
+/**
  * Checkout's success signature: HMAC-SHA256(order_id + "|" + payment_id)
  * keyed with the key SECRET, hex. Constant-time compare; any missing part
  * or a wrong length is simply false.
@@ -126,6 +149,7 @@ function verifyCheckoutSignature(orderId, paymentId, signature) {
 }
 
 module.exports = {
-  enabled, testMode, createOrder, fetchPayment, orderPayments, listPayments, verifyCheckoutSignature, keyId: () => cfg().keyId,
+  enabled, testMode, createOrder, fetchPayment, orderPayments, listPayments, createRefund, fetchRefund,
+  verifyCheckoutSignature, keyId: () => cfg().keyId,
   _setFetch(f) { fetchImpl = f || ((...a) => fetch(...a)); },
 };

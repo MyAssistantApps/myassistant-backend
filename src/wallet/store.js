@@ -48,7 +48,11 @@ const SYSTEM_KINDS = [
   "sys_revenue",
   // Money on its way back to a payer (Phase 2).
   "sys_refunds",
+  // Goodwill credits and corrections an admin posts, with a reason.
+  "sys_adjustments",
 ];
+
+const KIND_CHECK = `CHECK (kind IN ('cash', 'bonus', ${SYSTEM_KINDS.map((k) => `'${k}'`).join(", ")}))`;
 
 const now = () => Date.now();
 const newId = () => crypto.randomUUID();
@@ -64,8 +68,7 @@ async function migrate(exec = (sql) => query(sql)) {
       status        TEXT NOT NULL DEFAULT 'active', -- active | frozen | closed
       created_at    BIGINT NOT NULL,
       updated_at    BIGINT NOT NULL,
-      CONSTRAINT wallet_accounts_kind_ok CHECK (kind IN
-        ('cash', 'bonus', 'sys_razorpay_clearing', 'sys_referral_expense', 'sys_revenue', 'sys_refunds')),
+      CONSTRAINT wallet_accounts_kind_ok ${KIND_CHECK},
       -- A person's money never goes below zero; system accounts may.
       CONSTRAINT wallet_accounts_user_nonneg CHECK (kind LIKE 'sys\\_%' OR balance_paise >= 0)
     );
@@ -190,6 +193,70 @@ async function migrate(exec = (sql) => query(sql)) {
       received_at  BIGINT NOT NULL,
       processed_at BIGINT,
       result       TEXT NOT NULL DEFAULT ''
+    );
+  `);
+
+  // PHASE 2 + 3 additions (2026-11-22). Every statement is idempotent.
+  await exec(`
+    -- The kinds list grew (sys_adjustments): replace the check in place.
+    ALTER TABLE wallet_accounts DROP CONSTRAINT IF EXISTS wallet_accounts_kind_ok;
+    ALTER TABLE wallet_accounts ADD CONSTRAINT wallet_accounts_kind_ok ${KIND_CHECK};
+
+    -- How much of a top-up has gone back to the payer, and a hash of who
+    -- paid (UPI id / card / wallet) for the referral fraud checks.
+    ALTER TABLE wallet_topups ADD COLUMN IF NOT EXISTS refunded_paise BIGINT NOT NULL DEFAULT 0;
+    ALTER TABLE wallet_topups ADD COLUMN IF NOT EXISTS payer_fingerprint TEXT NOT NULL DEFAULT '';
+    ALTER TABLE wallet_topups DROP CONSTRAINT IF EXISTS wallet_topups_refund_ok;
+    ALTER TABLE wallet_topups ADD CONSTRAINT wallet_topups_refund_ok
+      CHECK (refunded_paise >= 0 AND refunded_paise <= amount_paise);
+
+    -- A refund of unspent cash, to the payment it came from. The ledger
+    -- holds the money (cash → sys_refunds) when it is asked for; a refund
+    -- Razorpay fails is reversed back to the wallet.
+    CREATE TABLE IF NOT EXISTS wallet_refunds (
+      id                 TEXT PRIMARY KEY,
+      user_id            INTEGER,
+      topup_id           TEXT NOT NULL REFERENCES wallet_topups(id),
+      amount_paise       BIGINT NOT NULL CHECK (amount_paise > 0),
+      -- requested | processing | processed | failed
+      status             TEXT NOT NULL DEFAULT 'requested',
+      razorpay_refund_id TEXT UNIQUE,
+      hold_txn_id        TEXT,
+      reverse_txn_id     TEXT,
+      reason             TEXT NOT NULL DEFAULT '',
+      failure_reason     TEXT NOT NULL DEFAULT '',
+      -- The app's Idempotency-Key for the request this part belongs to.
+      request_key        TEXT NOT NULL DEFAULT '',
+      created_at         BIGINT NOT NULL,
+      updated_at         BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_wallet_refunds_user ON wallet_refunds (user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_wallet_refunds_open ON wallet_refunds (status, created_at)
+      WHERE status IN ('requested', 'processing');
+
+    -- Bonus money arrives in lots, each with its own expiry; spends use
+    -- the soonest-expiring first, and the expiry job takes back what is
+    -- left of a lot past its date.
+    CREATE TABLE IF NOT EXISTS wallet_bonus_lots (
+      id              BIGSERIAL PRIMARY KEY,
+      user_id         INTEGER,
+      txn_id          TEXT NOT NULL REFERENCES wallet_transactions(id),
+      amount_paise    BIGINT NOT NULL CHECK (amount_paise > 0),
+      remaining_paise BIGINT NOT NULL CHECK (remaining_paise >= 0),
+      expires_at      BIGINT NOT NULL,
+      created_at      BIGINT NOT NULL,
+      CONSTRAINT wallet_bonus_lots_remaining_ok CHECK (remaining_paise <= amount_paise)
+    );
+    CREATE INDEX IF NOT EXISTS idx_wallet_bonus_lots_user ON wallet_bonus_lots (user_id, expires_at)
+      WHERE remaining_paise > 0;
+
+    -- The wallet PIN asked before a large spend or a refund (scrypt hash).
+    CREATE TABLE IF NOT EXISTS wallet_pins (
+      user_id      INTEGER PRIMARY KEY,
+      pin_hash     TEXT NOT NULL,
+      failed       INTEGER NOT NULL DEFAULT 0,
+      locked_until BIGINT NOT NULL DEFAULT 0,
+      updated_at   BIGINT NOT NULL
     );
   `);
 }
@@ -391,7 +458,54 @@ async function integrity() {
   return { drift, unbalanced };
 }
 
+/* ------------------------------------------------------------------ */
+/* Bonus lots                                                          */
+
+/** Records a bonus credit as a lot that expires. Inside the posting's transaction. */
+async function addBonusLot(client, { userId, txnId, amount, expiresAt }) {
+  await client.query(
+    `INSERT INTO wallet_bonus_lots (user_id, txn_id, amount_paise, remaining_paise, expires_at, created_at)
+     VALUES ($1, $2, $3, $3, $4, $5)`, [userId, txnId, amount, expiresAt, now()]);
+}
+
+/**
+ * Uses [amount] of a user's bonus, soonest-expiring lot first (locked).
+ * Inside the spend's transaction; the ledger debit is posted by the caller.
+ */
+async function consumeBonus(client, userId, amount) {
+  let left = amount;
+  const lots = (await client.query(
+    `SELECT id, remaining_paise FROM wallet_bonus_lots
+      WHERE user_id = $1 AND remaining_paise > 0 ORDER BY expires_at, id FOR UPDATE`, [userId])).rows;
+  for (const lot of lots) {
+    if (left <= 0) break;
+    const take = Math.min(left, Number(lot.remaining_paise));
+    await client.query(`UPDATE wallet_bonus_lots SET remaining_paise = remaining_paise - $2 WHERE id = $1`, [lot.id, take]);
+    left -= take;
+  }
+  if (left > 0) throw new Error("wallet: bonus lots do not cover the bonus balance");
+}
+
+/** Lots past their date with something left (for the expiry job). */
+function expiredLots(t = now(), limit = 200) {
+  return query(
+    `SELECT * FROM wallet_bonus_lots WHERE remaining_paise > 0 AND expires_at < $1 AND user_id IS NOT NULL
+      ORDER BY expires_at LIMIT $2`, [t, limit]);
+}
+
+/** Users whose unexpired bonus lots do not add up to their bonus balance. */
+function lotDrift() {
+  return query(
+    `SELECT a.user_id, a.balance_paise, COALESCE(SUM(l.remaining_paise), 0) AS lots_paise
+       FROM wallet_accounts a
+       LEFT JOIN wallet_bonus_lots l ON l.user_id = a.user_id AND l.remaining_paise > 0
+      WHERE a.kind = 'bonus' AND a.user_id IS NOT NULL
+      GROUP BY a.user_id, a.balance_paise
+     HAVING a.balance_paise <> COALESCE(SUM(l.remaining_paise), 0)`);
+}
+
 module.exports = {
   migrate, userAccount, systemAccount, validateLegs, post, balances, history, integrity,
+  addBonusLot, consumeBonus, expiredLots, lotDrift,
   USER_KINDS, SYSTEM_KINDS, newId, tx, one, query,
 };

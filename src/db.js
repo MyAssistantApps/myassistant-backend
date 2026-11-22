@@ -486,6 +486,8 @@ async function init() {
   // The wallet's double-entry ledger, top-ups and Razorpay events
   // (wallet/store.js; Phase 1 of the wallet plan).
   await require("./wallet/store").migrate((sql) => pool.query(sql));
+  // Referral codes and referrals (wallet/referrals.js; Phase 3).
+  await require("./wallet/referrals").migrate((sql) => pool.query(sql));
 
   // Fare watches: re-priced by the proactive sweep, alert on a real drop.
   await require("./travel/fares").migrate((sql) => pool.query(sql));

@@ -18,6 +18,8 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || "postgres://test:test@loc
 process.env.RAZORPAY_KEY_ID = "rzp_test_walletsuite";
 process.env.RAZORPAY_KEY_SECRET = "wallet_suite_secret";
 process.env.RAZORPAY_WEBHOOK_SECRET = "wallet_suite_webhook_secret";
+process.env.WALLET_ENABLED = "1";
+process.env.JWT_SECRET = process.env.JWT_SECRET || "wallet_suite_jwt_secret_long_enough";
 
 const assert = require("assert");
 const crypto = require("crypto");
@@ -99,6 +101,55 @@ const sign = (order, pay) => crypto.createHmac("sha256", process.env.RAZORPAY_KE
     await assert.rejects(razorpay.orderPayments("order_x/../y"), /not an order id/);
   });
 
+  await test("spend splits bonus first, then cash", () => {
+    const { split } = require("../src/wallet/spend");
+    assert.deepStrictEqual(split(5000, { cash: 10000, bonus: 2000 }), { fromBonus: 2000, fromCash: 3000, enough: true });
+    assert.deepStrictEqual(split(5000, { cash: 1000, bonus: 2000 }), { fromBonus: 2000, fromCash: 3000, enough: false });
+    assert.deepStrictEqual(split(1500, { cash: 0, bonus: 2000 }), { fromBonus: 1500, fromCash: 0, enough: true });
+  });
+
+  await test("refunds go to the newest top-ups first, never above cash", () => {
+    const { allocate } = require("../src/wallet/refunds");
+    const tops = [{ id: "b", amount_paise: 5000, refunded_paise: 1000 }, { id: "a", amount_paise: 10000, refunded_paise: 0 }];
+    let r = allocate(20000, tops);
+    assert.strictEqual(r.refundable_paise, 14000);
+    assert.deepStrictEqual(r.parts.map((x) => [x.topup.id, x.amount]), [["b", 4000], ["a", 10000]]);
+    r = allocate(6000, tops);
+    assert.deepStrictEqual(r.parts.map((x) => [x.topup.id, x.amount]), [["b", 4000], ["a", 2000]]);
+    r = allocate(20000, tops, 3000);
+    assert.deepStrictEqual(r.parts.map((x) => [x.topup.id, x.amount]), [["b", 3000]]);
+  });
+
+  await test("PIN rules: 4–6 digits, not repeated, not a run", () => {
+    const sec = require("../src/wallet/security");
+    assert.strictEqual(sec.pinProblem("4829"), null);
+    assert.strictEqual(sec.pinProblem("905172"), null);
+    assert.ok(sec.pinProblem("123"));
+    assert.ok(sec.pinProblem("1111"));
+    assert.ok(sec.pinProblem("1234"));
+    assert.ok(sec.pinProblem("98765"));
+    assert.ok(sec.pinProblem("12a4"));
+    const h = sec.hashPin("4829");
+    assert.ok(sec.pinMatches("4829", h));
+    assert.ok(!sec.pinMatches("4830", h));
+    assert.notStrictEqual(sec.hashPin("4829"), h, "salted");
+  });
+
+  await test("referral helpers: codes, one mailbox, initials, device hash", () => {
+    const r = require("../src/wallet/referrals");
+    for (let i = 0; i < 50; i++) assert.ok(r.normalizeCode(r.newCode()));
+    assert.strictEqual(r.normalizeCode(" ab3d-ef7h "), "AB3DEF7H");
+    assert.strictEqual(r.normalizeCode("ABCD0FGH"), null); // 0 is not in the alphabet
+    assert.strictEqual(r.normalizeCode("x"), null);
+    assert.strictEqual(r.emailKey("A.Sha+promo@Gmail.com"), "asha@gmail.com");
+    assert.strictEqual(r.emailKey("ravi+x@example.in"), "ravi@example.in");
+    assert.strictEqual(r.initials("Asha Rao"), "A.R.");
+    assert.strictEqual(r.initials(""), "A friend");
+    assert.strictEqual(r.deviceHash("short"), "");
+    assert.strictEqual(r.deviceHash("install-1234567890"), r.deviceHash("install-1234567890"));
+    assert.notStrictEqual(r.deviceHash("install-1234567890"), r.deviceHash("install-1234567891"));
+  });
+
   if (!hasDb) {
     console.log(`\n${passed} passed (database part skipped: set DATABASE_URL to a THROWAWAY database to run it)`);
     return;
@@ -113,7 +164,7 @@ const sign = (order, pay) => crypto.createHmac("sha256", process.env.RAZORPAY_KE
   // Ids carry a per-run prefix: real Razorpay ids are never reused, and a
   // second run on the same database must not collide with the first.
   const run = Date.now().toString(36);
-  const fake = { orders: new Map(), payments: new Map(), n: 0, down: false };
+  const fake = { orders: new Map(), payments: new Map(), refunds: new Map(), n: 0, down: false, refundFail: false };
   const respond = (status, body) => ({ ok: status < 400, status, json: async () => body });
   razorpay._setFetch(async (url, opts = {}) => {
     if (fake.down) throw new Error("ECONNREFUSED");
@@ -135,13 +186,25 @@ const sign = (order, pay) => crypto.createHmac("sha256", process.env.RAZORPAY_KE
       return respond(200, { items: [...fake.payments.values()].filter((x) => x.order_id === m[1]) });
     }
     if (p === "/payments") return respond(200, { items: [...fake.payments.values()] });
+    if (opts.method === "POST" && (m = p.match(/^\/payments\/(pay_\w+)\/refund$/))) {
+      if (fake.refundFail) return respond(400, { error: { description: "refund not allowed" } });
+      const b = JSON.parse(opts.body);
+      const id = `rfnd_T${run}${++fake.n}`;
+      const rf = { id, payment_id: m[1], amount: b.amount, status: "processing", notes: b.notes };
+      fake.refunds.set(id, rf);
+      return respond(200, rf);
+    }
+    if ((m = p.match(/^\/refunds\/(rfnd_\w+)$/))) {
+      const rf = fake.refunds.get(m[1]);
+      return rf ? respond(200, rf) : respond(400, { error: { description: "not found" } });
+    }
     return respond(404, { error: { description: "no route" } });
   });
-  const pay = (orderId, { amount, status = "captured", currency = "INR" } = {}) => {
+  const pay = (orderId, { amount, status = "captured", currency = "INR", vpa } = {}) => {
     const o = fake.orders.get(orderId);
     const id = `pay_T${run}${++fake.n}`;
     const p = { id, order_id: orderId, amount: amount ?? o.amount, currency, status, method: "upi",
-      notes: o.notes, created_at: Math.floor(Date.now() / 1000) };
+      vpa: vpa || `payer${run}${fake.n}@upi`, notes: o.notes, created_at: Math.floor(Date.now() / 1000) };
     fake.payments.set(id, p);
     return p;
   };
@@ -156,6 +219,9 @@ const sign = (order, pay) => crypto.createHmac("sha256", process.env.RAZORPAY_KE
     next();
   });
   app.use("/wallet", require("../src/wallet/routes"));
+  app.use("/referrals", require("../src/wallet/referrals").router);
+  process.env.ADMIN_KEY = "wallet-suite-admin-key-0123456789";
+  app.use("/admin/wallet", require("../src/wallet/admin"));
   const server = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
   const http = async (uid, method, path, body, headers = {}) => {
@@ -355,6 +421,301 @@ const sign = (order, pay) => crypto.createHmac("sha256", process.env.RAZORPAY_KE
       (SELECT COUNT(*)::int FROM wallet_accounts WHERE user_id = $1) +
       (SELECT COUNT(*)::int FROM wallet_transactions WHERE user_id = $1) +
       (SELECT COUNT(*)::int FROM wallet_topups WHERE user_id = $1) AS n`, [u2]);
+    assert.strictEqual(left.n, 0);
+    assert.deepStrictEqual(await store.integrity(), { drift: [], unbalanced: [] });
+  });
+
+  /* ------------------------- Phase 2 ------------------------- */
+  const admin = (method, path, body) => http(0, method, `/admin/wallet${path}`, body, { "X-Admin-Key": process.env.ADMIN_KEY });
+  const topUp = async (uid, amount, opts = {}) => {
+    const t = await http(uid, "POST", "/wallet/topups", { amount_paise: amount }, { "Idempotency-Key": key() });
+    assert.strictEqual(t.status, 201, JSON.stringify(t.body));
+    const p = pay(t.body.razorpay_order_id, opts);
+    const r = await service.handleEvent({ event: "payment.captured", payload: { payment: { entity: p } } }, `evt_${p.id}`);
+    assert.strictEqual(r, "credited");
+    return { topup: t.body, payment: p };
+  };
+  const spendLib = require("../src/wallet/spend");
+  const paidItems = new Map();
+  spendLib.registerPayable("test_item", {
+    async resolve(_uid, refId) {
+      const price = Number(String(refId).split("-")[1]);
+      if (!price) throw new service.WalletError("unknown_reference", "no such item", 404);
+      return { amount: price, title: `Test item ${refId}` };
+    },
+    async onPaid(_c, { refId, txnId }) {
+      if (refId.startsWith("boom")) throw new Error("the item could not be delivered");
+      paidItems.set(refId, txnId);
+    },
+  });
+
+  await test("the staged launch: off → hidden and refused; a list → only those accounts", async () => {
+    process.env.WALLET_ENABLED = "0";
+    let r = await http(u1, "GET", "/wallet");
+    assert.deepStrictEqual(r.body, { available: false });
+    r = await http(u1, "POST", "/wallet/topups", { amount_paise: 10_000 }, { "Idempotency-Key": key() });
+    assert.strictEqual(r.status, 403);
+    process.env.WALLET_ENABLED = "1";
+    process.env.WALLET_ALLOW_USERS = String(u1);
+    assert.strictEqual((await http(u1, "GET", "/wallet")).body.available, true);
+    assert.strictEqual((await http(u3x(), "GET", "/wallet")).body.available, false);
+    delete process.env.WALLET_ALLOW_USERS;
+  });
+  function u3x() { return 987654321; }
+
+  const u4 = await mkUser("four");
+  let stepUp;
+  await test("PIN: weak ones refused; changing needs the old one; 5 wrong tries lock it", async () => {
+    let r = await http(u4, "POST", "/wallet/pin", { pin: "1234" });
+    assert.strictEqual(r.status, 400);
+    r = await http(u4, "POST", "/wallet/pin", { pin: "4829" });
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual((await http(u4, "GET", "/wallet")).body.has_pin, true);
+    r = await http(u4, "POST", "/wallet/pin", { pin: "7351" });
+    assert.strictEqual(r.status, 400, "a stolen session cannot replace the PIN");
+    r = await http(u4, "POST", "/wallet/pin", { pin: "7351", current_pin: "4829" });
+    assert.strictEqual(r.status, 200);
+    for (let i = 0; i < 4; i++) assert.strictEqual((await http(u4, "POST", "/wallet/step-up", { pin: "0000" })).status, 401);
+    r = await http(u4, "POST", "/wallet/step-up", { pin: "0000" });
+    assert.strictEqual(r.status, 429);
+    r = await http(u4, "POST", "/wallet/step-up", { pin: "7351" });
+    assert.strictEqual(r.status, 429, "locked even for the right PIN");
+    await db.query(`UPDATE wallet_pins SET locked_until = 0, failed = 0 WHERE user_id = $1`, [u4]);
+    r = await http(u4, "POST", "/wallet/step-up", { pin: "7351" });
+    assert.strictEqual(r.status, 200);
+    stepUp = r.body.step_up_token;
+    const sec = require("../src/wallet/security");
+    assert.ok(sec.stepUpValid(u4, stepUp));
+    assert.ok(!sec.stepUpValid(u1, stepUp), "another user's token is useless");
+  });
+
+  await test("spend: priced on the server, paid once, all-or-nothing with the item", async () => {
+    await topUp(u4, 100_000);
+    let r = await http(u4, "POST", "/wallet/spend", { reference_type: "test_item", reference_id: `a${run}-30000` });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+    assert.strictEqual(r.body.amount_paise, 30_000);
+    assert.strictEqual(r.body.cash_paise, 70_000);
+    assert.ok(paidItems.has(`a${run}-30000`));
+    r = await http(u4, "POST", "/wallet/spend", { reference_type: "test_item", reference_id: `a${run}-30000` });
+    assert.strictEqual(r.status, 409);
+    assert.strictEqual(r.body.error, "already_paid");
+    r = await http(u4, "POST", "/wallet/spend", { reference_type: "test_item", reference_id: `boom${run}-1000` });
+    assert.strictEqual(r.status, 500);
+    assert.strictEqual((await store.balances(u4)).cash, 70_000, "the failed item took no money");
+    r = await http(u4, "POST", "/wallet/spend", { reference_type: "nope", reference_id: "x" });
+    assert.strictEqual(r.status, 404);
+    r = await http(u4, "POST", "/wallet/spend", { reference_type: "test_item", reference_id: `b${run}-90000` });
+    assert.strictEqual(r.status, 402);
+  });
+
+  await test("a large spend needs the PIN step-up", async () => {
+    let r = await http(u4, "POST", "/wallet/spend", { reference_type: "test_item", reference_id: `big${run}-250000` });
+    assert.strictEqual(r.status, 403);
+    await topUp(u4, 200_000);
+    r = await http(u4, "POST", "/wallet/spend", { reference_type: "test_item", reference_id: `big${run}-250000` },
+      { "X-Wallet-Step-Up": stepUp });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+    assert.strictEqual(r.body.cash_paise, 20_000);
+  });
+
+  await test("two phones spending at once never overdraw", async () => {
+    const rs = await Promise.all([1, 2, 3, 4, 5].map((i) =>
+      http(u4, "POST", "/wallet/spend", { reference_type: "test_item", reference_id: `race${run}${i}-8000` })));
+    assert.strictEqual(rs.filter((r) => r.status === 200).length, 2, JSON.stringify(rs.map((r) => r.body.error)));
+    assert.strictEqual((await store.balances(u4)).cash, 4_000);
+  });
+
+  await test("bonus (from support) is spent before cash, and its lots follow", async () => {
+    let r = await admin("POST", "/adjust", { user_id: u4, kind: "bonus", amount_paise: 3_000, reason: "goodwill test", key: key() });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+    r = await http(u4, "POST", "/wallet/spend", { reference_type: "test_item", reference_id: `mix${run}-5000` });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+    assert.strictEqual(r.body.paid_bonus_paise, 3_000);
+    assert.strictEqual(r.body.paid_cash_paise, 2_000);
+    assert.deepStrictEqual(await store.lotDrift(), []);
+  });
+
+  await test("admin: a wrong key is a 404; freeze stops spending; reverse returns the money", async () => {
+    assert.strictEqual((await http(0, "GET", "/admin/wallet/health", null, { "X-Admin-Key": "wrong-key-wrong-key-123" })).status, 404);
+    let r = await admin("POST", `/users/${u4}/freeze`, { reason: "suspicious test" });
+    assert.strictEqual(r.status, 200);
+    r = await http(u4, "POST", "/wallet/spend", { reference_type: "test_item", reference_id: `frz${run}-100` });
+    assert.strictEqual(r.status, 423);
+    await admin("POST", `/users/${u4}/unfreeze`, { reason: "checked, fine" });
+    const spentTxn = paidItems.get(`a${run}-30000`);
+    r = await admin("POST", "/reverse", { transaction_id: spentTxn, reason: "order never arrived" });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+    assert.strictEqual((await store.balances(u4)).cash, 32_000);
+    r = await admin("POST", "/reverse", { transaction_id: spentTxn, reason: "again" });
+    assert.strictEqual(r.status, 409);
+    r = await admin("POST", "/adjust", { user_id: u4, kind: "cash", amount_paise: 100, reason: "x", key: key() });
+    assert.strictEqual(r.status, 400, "a reason is required");
+    const h = await admin("GET", "/health");
+    assert.deepStrictEqual(h.body.drift, []);
+    assert.deepStrictEqual(h.body.unbalanced, []);
+  });
+
+  await test("refunds: PIN needed; held at once; processed by webhook; a refused one comes back", async () => {
+    const before = (await store.balances(u4)).cash;
+    let r = await http(u4, "POST", "/wallet/refunds", { amount_paise: 5_000 }, { "Idempotency-Key": key() });
+    assert.strictEqual(r.status, 403);
+    const k = key();
+    r = await http(u4, "POST", "/wallet/refunds", { amount_paise: 5_000 }, { "Idempotency-Key": k, "X-Wallet-Step-Up": stepUp });
+    assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+    assert.strictEqual(r.body.refunds[0].status, "processing");
+    assert.strictEqual((await store.balances(u4)).cash, before - 5_000);
+    const again = await http(u4, "POST", "/wallet/refunds", { amount_paise: 5_000 }, { "Idempotency-Key": k, "X-Wallet-Step-Up": stepUp });
+    assert.strictEqual(again.body.refunds[0].refund_id, r.body.refunds[0].refund_id, "same key, same refund");
+    assert.strictEqual((await store.balances(u4)).cash, before - 5_000);
+    const rfRow = await db.one(`SELECT razorpay_refund_id FROM wallet_refunds WHERE id = $1`, [r.body.refunds[0].refund_id]);
+    const w = await service.handleEvent({ event: "refund.processed", payload: { refund: { entity: { id: rfRow.razorpay_refund_id, status: "processed" } } } }, `evt_${rfRow.razorpay_refund_id}`);
+    assert.strictEqual(w, "refund_processed");
+    fake.refundFail = true;
+    r = await http(u4, "POST", "/wallet/refunds", { amount_paise: 2_000 }, { "Idempotency-Key": key(), "X-Wallet-Step-Up": stepUp });
+    fake.refundFail = false;
+    assert.strictEqual(r.body.refunds[0].status, "failed");
+    assert.strictEqual((await store.balances(u4)).cash, before - 5_000, "the refused refund went back to the wallet");
+    r = await http(u4, "POST", "/wallet/refunds", { amount_paise: 99_999_999 }, { "Idempotency-Key": key(), "X-Wallet-Step-Up": stepUp });
+    assert.strictEqual(r.status, 409);
+    assert.strictEqual(r.body.error, "exceeds_refundable");
+    assert.deepStrictEqual(await store.integrity(), { drift: [], unbalanced: [] });
+  });
+
+  await test("a refund.failed webhook returns a processing refund to the wallet", async () => {
+    const before = (await store.balances(u4)).cash;
+    const r = await http(u4, "POST", "/wallet/refunds", { amount_paise: 1_000 }, { "Idempotency-Key": key(), "X-Wallet-Step-Up": stepUp });
+    const row = await db.one(`SELECT razorpay_refund_id FROM wallet_refunds WHERE id = $1`, [r.body.refunds[0].refund_id]);
+    assert.strictEqual((await store.balances(u4)).cash, before - 1_000);
+    const w = await service.handleEvent({ event: "refund.failed", payload: { refund: { entity: { id: row.razorpay_refund_id } } } }, `evt_f_${row.razorpay_refund_id}`);
+    assert.strictEqual(w, "refund_failed");
+    assert.strictEqual((await store.balances(u4)).cash, before);
+  });
+
+  await test("an ONDC order is a wallet payable; an unknown one is refused", async () => {
+    require("../src/routes/shop");
+    const r = await http(u4, "POST", "/wallet/spend", { reference_type: "ondc_order", reference_id: "999999999" });
+    assert.strictEqual(r.status, 404);
+  });
+
+  /* ------------------------- Phase 3 ------------------------- */
+  const ref = require("../src/wallet/referrals");
+  const u5 = await mkUser("five");
+  const u6 = await mkUser("six");
+  let code1;
+  await test("each user gets one code and a share link", async () => {
+    const a = await http(u1, "GET", "/referrals/me");
+    const b = await http(u1, "GET", "/referrals/me");
+    assert.ok(ref.normalizeCode(a.body.code));
+    assert.strictEqual(a.body.code, b.body.code);
+    assert.match(a.body.share_url, /\/r\/[A-Z2-9]{8}$/);
+    code1 = a.body.code;
+  });
+
+  await test("applying: bad code generic; own code refused; once only", async () => {
+    let r = await http(u5, "POST", "/referrals/apply", { code: "ZZZZZZZZ" });
+    assert.strictEqual(r.status, 400);
+    assert.strictEqual(r.body.message, "This code cannot be used.");
+    r = await http(u1, "POST", "/referrals/apply", { code: code1 });
+    assert.strictEqual(r.status, 409);
+    r = await http(u5, "POST", "/referrals/apply", { code: code1 }, { "X-Device-Id": `device-five-${run}` });
+    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
+    r = await http(u5, "POST", "/referrals/apply", { code: code1 });
+    assert.strictEqual(r.status, 409);
+    assert.strictEqual(r.body.error, "already_referred");
+  });
+
+  await test("the same phone install cannot be referred twice", async () => {
+    const r = await http(u6, "POST", "/referrals/apply", { code: code1 }, { "X-Device-Id": `device-five-${run}` });
+    assert.strictEqual(r.status, 409);
+    assert.strictEqual(r.body.error, "not_eligible");
+  });
+
+  await test("qualify → 7-day hold → wait for a verified phone → rewarded, both sides", async () => {
+    const { topup } = await topUp(u5, 10_000);
+    let row = await db.one(`SELECT * FROM referrals WHERE referee_user_id = $1`, [u5]);
+    assert.strictEqual(row.status, "held");
+    assert.strictEqual(row.qualifying_topup_id, topup.topup_id);
+    let p = await ref.payout();
+    assert.strictEqual(p.rewarded, 0, "nothing before the hold ends");
+    const later = Date.now() + 8 * 86_400_000;
+    p = await ref.payout({ now: later });
+    assert.strictEqual(p.waiting, 1, "the friend's phone is not verified yet");
+    await db.query(`UPDATE users SET phone_verified_at = $2 WHERE id = $1`, [u5, Date.now()]);
+    p = await ref.payout({ now: later });
+    assert.strictEqual(p.rewarded, 1);
+    assert.strictEqual((await store.balances(u5)).bonus, 2_500);
+    assert.strictEqual((await store.balances(u1)).bonus, 5_000);
+    row = await db.one(`SELECT * FROM referrals WHERE referee_user_id = $1`, [u5]);
+    assert.strictEqual(row.status, "rewarded");
+    p = await ref.payout({ now: later });
+    assert.strictEqual(p.rewarded, 0, "paid once");
+    const h = await http(u1, "GET", "/referrals/history");
+    const rewarded = h.body.items.find((x) => x.status === "rewarded");
+    assert.strictEqual(rewarded.friend, "W.F.");
+    assert.strictEqual(rewarded.reward_paise, 5_000);
+    assert.ok(h.body.items.every((x) => !("name" in x) && !("email" in x)), "no names or contacts");
+    assert.deepStrictEqual(await store.lotDrift(), []);
+  });
+
+  await test("paying with the referrer's own UPI id is caught at payout", async () => {
+    const u7 = await mkUser("seven");
+    await http(u7, "POST", "/referrals/apply", { code: code1 }, { "X-Device-Id": `device-seven-${run}` });
+    const mine = await topUp(u1, 10_000, { vpa: `shared${run}@upi` });
+    assert.ok(mine);
+    await topUp(u7, 10_000, { vpa: `shared${run}@upi` });
+    await db.query(`UPDATE users SET phone_verified_at = $2 WHERE id = $1`, [u7, Date.now()]);
+    await ref.payout({ now: Date.now() + 8 * 86_400_000 });
+    const row = await db.one(`SELECT status, reject_reason FROM referrals WHERE referee_user_id = $1`, [u7]);
+    assert.strictEqual(row.status, "rejected");
+    assert.match(row.reject_reason, /same payment method/);
+  });
+
+  await test("refunding the qualifying top-up takes the friend's bonus back", async () => {
+    const r = await http(u5, "POST", "/wallet/pin", { pin: "5820" });
+    assert.strictEqual(r.status, 200);
+    const su = (await http(u5, "POST", "/wallet/step-up", { pin: "5820" })).body.step_up_token;
+    const rf = await http(u5, "POST", "/wallet/refunds", { amount_paise: 10_000 }, { "Idempotency-Key": key(), "X-Wallet-Step-Up": su });
+    assert.strictEqual(rf.status, 201, JSON.stringify(rf.body));
+    assert.strictEqual((await store.balances(u5)).bonus, 0);
+    const row = await db.one(`SELECT status FROM referrals WHERE referee_user_id = $1`, [u5]);
+    assert.strictEqual(row.status, "clawed_back");
+    assert.deepStrictEqual(await store.integrity(), { drift: [], unbalanced: [] });
+  });
+
+  await test("bonus expires after its days, and only what is left", async () => {
+    // The clawback above took the referrer's bonus back too: give some now.
+    await admin("POST", "/adjust", { user_id: u1, kind: "bonus", amount_paise: 1_500, reason: "expiry test", key: key() });
+    const before = (await store.balances(u1)).bonus;
+    assert.ok(before > 0);
+    const r = await ref.expireBonuses({ now: Date.now() + 91 * 86_400_000 });
+    assert.ok(r.expired >= 1);
+    assert.strictEqual((await store.balances(u1)).bonus, 0);
+    assert.deepStrictEqual(await store.lotDrift(), []);
+  });
+
+  await test("the share link always lands on the Play Store, carrying only a well-formed code", async () => {
+    const pr = express();
+    pr.use("/r", ref.publicRouter);
+    const s2 = await new Promise((res) => { const s = pr.listen(0, () => res(s)); });
+    const at = (c) => fetch(`http://127.0.0.1:${s2.address().port}/r/${c}`, { redirect: "manual" });
+    let r = await at(code1);
+    assert.strictEqual(r.status, 302);
+    assert.match(r.headers.get("location"), new RegExp(`referrer=code%3D${code1}$`));
+    r = await at("notacode");
+    assert.strictEqual(r.status, 302);
+    assert.ok(!r.headers.get("location").includes("referrer"));
+    s2.close();
+  });
+
+  await test("erasing an account refunds its cash first and keeps every ledger whole", async () => {
+    const privacy = require("../src/routes/privacy");
+    const cashBefore = (await store.balances(u4)).cash;
+    assert.ok(cashBefore > 0);
+    await privacy.deleteUserEverywhere(u4, { reason: "wallet suite" });
+    const refunds = await db.query(`SELECT r.amount_paise FROM wallet_refunds r JOIN wallet_topups t ON t.id = r.topup_id
+      WHERE r.reason = 'account deleted' AND r.user_id IS NULL`);
+    assert.ok(refunds.length >= 1, "a refund was requested before the account closed");
+    const left = await db.one(`SELECT COUNT(*)::int AS n FROM wallet_accounts WHERE user_id = $1`, [u4]);
     assert.strictEqual(left.n, 0);
     assert.deepStrictEqual(await store.integrity(), { drift: [], unbalanced: [] });
   });

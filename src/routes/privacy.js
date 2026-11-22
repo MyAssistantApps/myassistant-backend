@@ -159,6 +159,8 @@ const USER_TABLES = [
   // nothing left that it covers.
   ["studio_consent", "user_id"],
   ["chat_group_members", "user_id"], // what they SAID in groups: see SHARED_TABLES
+  ["wallet_pins", "user_id"], // the wallet PIN's hash
+  ["referral_codes", "user_id"], // their own referral code
   ["chat_prefs", "user_id"], // their own mute / clear-chat settings
   ["chat_hidden_messages", "user_id"],
   // Momentum (2026-09-25): Today's 3, habits and their ticks, focus sessions.
@@ -264,6 +266,8 @@ const SHARED_TABLES = {
   wallet_accounts: "user_id",
   wallet_transactions: "user_id",
   wallet_topups: "user_id",
+  wallet_refunds: "user_id",
+  wallet_bonus_lots: "user_id",
 };
 
 /**
@@ -518,6 +522,13 @@ async function deleteUserEverywhere(userId, { reason = "" } = {}) {
   report.revoked.google = await revokeGoogle(uid);
   report.revoked.notion = await revokeNotion(uid);
   report.revoked.mcpConnections = await closeMcp(uid, cols);
+  // The wallet's unspent cash goes back to the payments it came from before
+  // the account closes (wallet/refunds.js). Best effort: what cannot be
+  // refunded stays in the closed ledger for support.
+  if (cols.has("wallet_topups.user_id")) {
+    report.revoked.walletRefund = await require("../wallet/refunds").refundAllOnErase(uid)
+      .catch((e) => ({ error: String(e.message || e).slice(0, 200) }));
+  }
   // A call still open on this pod would write audio after its row is gone.
   report.revoked.liveRecordings = await recorder.abortUser(uid).catch(() => 0);
   // ...and the call itself would carry on (review, 2026-09-25): the live
@@ -620,11 +631,18 @@ async function deleteUserEverywhere(userId, { reason = "" } = {}) {
         [uid, Date.now()]);
       count("wallet_accounts (closed, unlinked)", a.rowCount);
     }
-    for (const t of ["wallet_transactions", "wallet_topups"]) {
+    for (const t of ["wallet_transactions", "wallet_topups", "wallet_refunds", "wallet_bonus_lots"]) {
       if (cols.has(`${t}.user_id`)) {
         const r = await client.query(`UPDATE ${q(t)} SET user_id = NULL WHERE user_id = $1`, [uid]);
         count(`${t} (unlinked)`, r.rowCount);
       }
+    }
+    // Referrals link two people: either side leaving clears only their
+    // own link, so the other person's history keeps its row.
+    if (cols.has("referrals.referee_user_id")) {
+      const a = await client.query(`UPDATE referrals SET referee_user_id = NULL, device_hash = '' WHERE referee_user_id = $1`, [uid]);
+      const b = await client.query(`UPDATE referrals SET referrer_user_id = NULL WHERE referrer_user_id = $1`, [uid]);
+      count("referrals (unlinked)", a.rowCount + b.rowCount);
     }
     if (cols.has("chat_group_messages.deleted")) {
       const r = await client.query(
@@ -1084,8 +1102,18 @@ router.get("/export", async (req, res) => {
           `SELECT id, type, status, amount_paise, currency, title, reference_type, reference_id, created_at
              FROM wallet_transactions WHERE user_id = $1 ORDER BY created_at`, [uid])),
         topups: (await query(
-          `SELECT id, amount_paise, currency, status, method, razorpay_order_id, razorpay_payment_id,
+          `SELECT id, amount_paise, currency, status, method, refunded_paise, razorpay_order_id, razorpay_payment_id,
                   created_at, credited_at FROM wallet_topups WHERE user_id = $1 ORDER BY created_at`, [uid])),
+        refunds: (await query(
+          `SELECT id, amount_paise, status, razorpay_refund_id, created_at FROM wallet_refunds
+            WHERE user_id = $1 ORDER BY created_at`, [uid])),
+        bonus_lots: (await query(
+          `SELECT amount_paise, remaining_paise, expires_at, created_at FROM wallet_bonus_lots
+            WHERE user_id = $1 ORDER BY created_at`, [uid])),
+        referral_used: (await query(
+          `SELECT code, status, created_at FROM referrals WHERE referee_user_id = $1`, [uid])),
+        referrals_made: (await query(
+          `SELECT status, referrer_reward_paise, created_at FROM referrals WHERE referrer_user_id = $1 ORDER BY created_at`, [uid])),
       };
     } catch (e) {
       data.wallet = { error: "could not read: " + e.message };

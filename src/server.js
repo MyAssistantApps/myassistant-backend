@@ -330,6 +330,16 @@ app.use("/payments", appAuth, paymentRoutes.router);
 // through Razorpay (src/wallet; credited only after Razorpay confirms the
 // payment, through the signed webhook above or a server-side fetch).
 app.use("/wallet", appAuth, require("./wallet/routes"));
+// REFERRALS — codes, applying one, history (signed in), and the public
+// share link /r/<code> → the Play Store with the code as install referrer.
+{
+  const referrals = require("./wallet/referrals");
+  const walletSecurity = require("./wallet/security");
+  app.use("/referrals", appAuth, (req, res, next) => (walletSecurity.allowed(req.user?.sub)
+    ? next()
+    : res.status(403).json({ error: "not_available", message: "Referrals are not available yet." })), referrals.router);
+  app.use("/r", referrals.publicRouter);
+}
 
 // MEETINGS — record or upload, get back decisions, action items and a
 // drafted follow-up. The user's own action items enter the commitment
@@ -370,6 +380,10 @@ app.use("/mailin", appAuth, require("./mailin/routes").router);
 // The X-Admin-Key routes: 10 tries per 10 minutes per IP (security
 // review 2026-10-09) — the panel's login was throttled, these were not.
 const adminKeyLimit = rateLimit({ windowMs: 600_000, max: 10, standardHeaders: true });
+// Wallet support tools (src/wallet/admin.js: same ADMIN_KEY check, every
+// action reasoned and audited), mounted first with a limit that fits a
+// support session; a wrong key still answers 404.
+app.use("/admin/wallet", rateLimit({ windowMs: 600_000, max: 60, standardHeaders: true }), require("./wallet/admin"));
 app.use("/admin", adminKeyLimit, require("./routes/admin"));
 
 // Live data for the Today screen (weather card, headlines, astrology).

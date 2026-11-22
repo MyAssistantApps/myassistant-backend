@@ -304,22 +304,38 @@ async function creditFromPayment(payment, source) {
     const upd = (await c.query(
       `UPDATE wallet_topups
           SET status = 'credited', razorpay_payment_id = $2, method = $3, paid_at = $4,
-              credited_at = $5, credited_txn_id = $6, updated_at = $5
+              credited_at = $5, credited_txn_id = $6, updated_at = $5, payer_fingerprint = $7
         WHERE id = $1 RETURNING *`,
       [topup.id, payment.id, String(payment.method || "").slice(0, 40),
-        payment.created_at ? Number(payment.created_at) * 1000 : t, t, posted.transaction.id])).rows[0];
+        payment.created_at ? Number(payment.created_at) * 1000 : t, t, posted.transaction.id,
+        payerFingerprint(payment)])).rows[0];
     return { result: posted.duplicate ? "already_credited" : "credited", topup: upd };
   });
 
   if (out.result === "credited") {
     require("../audit/log").record(out.topup.user_id, "wallet.topup.credited",
       `${rupees(out.topup.amount_paise)} added to the wallet`).catch(() => {});
+    // A friend's first qualifying top-up starts their referral's hold.
+    await require("./referrals").onTopupCredited(out.topup).catch((e) =>
+      console.warn(`wallet: referral hook for ${out.topup.id} failed — ${e.message}`));
   }
   if (["mismatch", "duplicate_payment", "orphan"].includes(out.result)) {
     alert(`Wallet top-up needs a look: ${out.result}`,
       `top-up ${out.topup?.id}, order ${orderId}, payment ${payment.id} (${payment.amount} ${payment.currency}), via ${source}`);
   }
   return out;
+}
+
+/**
+ * Who paid, as a one-way hash (method + UPI id / card id / wallet / bank):
+ * enough to tell that two top-ups came from the same payer, never enough
+ * to recover the UPI id or card. Keyed with the server secret.
+ */
+function payerFingerprint(p) {
+  const who = p?.vpa || p?.card_id || p?.wallet || p?.bank || "";
+  if (!who) return "";
+  return require("crypto").createHmac("sha256", process.env.JWT_SECRET || "wallet")
+    .update(`${p.method || ""}:${String(who).toLowerCase()}`).digest("hex").slice(0, 32);
 }
 
 function alert(title, details) {
@@ -349,6 +365,8 @@ async function handleEvent(body, eventId) {
     if (event === "payment.captured" || event === "order.paid" || event === "payment.failed") {
       const payment = body?.payload?.payment?.entity;
       if (payment) result = (await creditFromPayment(payment, `webhook:${event}`)).result;
+    } else if (event === "refund.processed" || event === "refund.failed") {
+      result = await require("./refunds").handleRefundEvent(event, body?.payload?.refund?.entity);
     }
     await query(`UPDATE razorpay_events SET processed_at = $2, result = $3 WHERE event_id = $1`, [id, Date.now(), result]);
   } catch (e) {
@@ -437,5 +455,5 @@ async function dailyCheck({ now = Date.now() } = {}) {
 
 module.exports = {
   limits, rupees, WalletError, checkTopupAmount, summary, createTopup, getTopup, topupView,
-  verifyTopup, creditFromPayment, handleEvent, reconcileOpen, dailyCheck, dailyUsed,
+  verifyTopup, creditFromPayment, handleEvent, reconcileOpen, dailyCheck, dailyUsed, payerFingerprint, alert,
 };

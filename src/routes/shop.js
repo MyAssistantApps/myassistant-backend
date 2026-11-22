@@ -223,6 +223,44 @@ router.post("/pay", async (req, res) => {
   }
 });
 
+/**
+ * PAY FROM THE WALLET (2026-11-22). An ONDC order is a wallet payable: the
+ * price comes from the seller's latest on_init quote (never from the app),
+ * and paying marks the order paid in the same database transaction as the
+ * wallet debit. /shop/confirm then confirms it with the seller exactly as
+ * it does after a Razorpay link payment.
+ */
+async function quotedTotalPaise(order) {
+  const rows = await store.responses(order.transaction_id, "on_init");
+  const onInit = rows[rows.length - 1]?.payload?.message?.order;
+  const total = Number(onInit?.quote?.price?.value);
+  return { onInit, paise: Number.isFinite(total) && total > 0 ? Math.round(total * 100) : null };
+}
+
+require("../wallet/spend").registerPayable("ondc_order", {
+  async resolve(userId, refId) {
+    const { WalletError } = require("../wallet/service");
+    await store.migrate(); // the ONDC tables are made on first use
+    const order = await db().one("SELECT * FROM ondc_orders WHERE id = $1 AND user_id = $2", [Number(refId) || 0, userId]);
+    if (!order) throw new WalletError("unknown_reference", "This order was not found.", 404);
+    if (["paid", "placed", "cancelled"].includes(order.state) || order.payment?.paid) {
+      throw new WalletError("already_paid", "This order has already been paid.", 409);
+    }
+    const { onInit, paise } = await quotedTotalPaise(order);
+    if (!onInit || !paise) throw new WalletError("price_not_ready", "The store has not yet confirmed the price.", 409);
+    return { amount: paise, title: `${order.provider_name || "Order"} via MyAssistant` };
+  },
+  async onPaid(client, { userId, refId, txnId, amount }) {
+    const r = await client.query(
+      `UPDATE ondc_orders SET state = 'paid', updated_at = $4,
+              payment = COALESCE(payment, '{}'::jsonb) || jsonb_build_object(
+                'method', 'wallet', 'paid', true, 'amount', ($3::numeric / 100), 'paymentId', 'wallet:' || $5::text)
+        WHERE id = $1 AND user_id = $2 AND state NOT IN ('paid', 'placed', 'cancelled')`,
+      [Number(refId), userId, amount, Date.now(), txnId]);
+    if (r.rowCount !== 1) throw new Error("order could not be marked paid");
+  },
+});
+
 router.post("/confirm", async (req, res) => {
   const order = await myOrder(req, req.body?.orderId);
   if (!order) return res.status(404).json({ error: "not found" });
@@ -231,7 +269,12 @@ router.post("/confirm", async (req, res) => {
   }
   const p = order.payment || {};
   let st;
-  try { st = await pay.linkStatus(p.linkId); } catch (e) { return res.status(502).json({ error: e.message }); }
+  if (p.method === "wallet" && p.paid) {
+    // Paid from the wallet: the ledger already holds the money.
+    st = { paid: true, paymentId: p.paymentId };
+  } else {
+    try { st = await pay.linkStatus(p.linkId); } catch (e) { return res.status(502).json({ error: e.message }); }
+  }
   if (!st.paid) return res.json({ orderId: order.id, state: "awaiting_payment", paid: false });
   const rows = await store.responses(order.transaction_id, "on_init");
   const onInit = rows[rows.length - 1]?.payload?.message?.order || {};
