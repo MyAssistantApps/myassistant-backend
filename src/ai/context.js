@@ -593,8 +593,6 @@ async function prepare(uid, body) {
         : voiceRules(assistantName, preferred, build, { declared: decls.map((d) => d.name) })) +
       (expressive ? "\n\n" + EXPRESSIVE_SPEECH : "") +
       "\n\n" + require("../agents/appGuide").appGuide(assistantName) +
-      (decls.some((d) => d.name === "hand_to_manager")
-        ? "\n\n" + require("../agents/manager").managerRule(assistantName) : "") +
       (limits ? "\n\n" + limits : "") +
       voiceTail({ unreadMessages: unread, personalContext, tzOffsetMin: tz, languageAsk }) +
       thisTurn;

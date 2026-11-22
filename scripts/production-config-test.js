@@ -220,18 +220,13 @@ function stable(cfg) {
     assert.ok(!/\[MANAGER\]|specialist agents/i.test(r.json.system), "no team in the prompt");
   });
 
-  await test("'talk to your manager': the Manager pops up, with the internet, apps and every tool", async () => {
+  await test("'talk to your manager': no Manager takes over (removed 2026-11-22)", async () => {
     const r = await api("POST", "/ai/context", { token: A.token, build: 179,
       body: { text: "I want to talk to your manager", mode: "voice" } });
     assert.strictEqual(r.status, 200, r.text.slice(0, 200));
-    assert.deepStrictEqual(r.json.manager.addressed, { id: "manager", label: "Manager" });
-    const names = r.json.tools.map((t) => t.name);
-    for (const n of ["web_search", "read_webpage", "open_named_app", "phone_control"]) assert.ok(names.includes(n), n);
-    assert.ok(names.length > 40, `${names.length} tools`);
-    assert.match(r.json.system, /you ARE the Manager/);
-    const after = await api("POST", "/ai/context", { token: A.token, build: 179,
-      body: { text: "thanks manager, back to Maya", mode: "voice", sessionId: r.json.sessionId } });
-    assert.strictEqual(after.json.manager.addressed, undefined, "handed back");
+    assert.strictEqual(r.json.manager.addressed, undefined);
+    assert.ok(!r.json.tools.some((t) => t.name === "hand_to_manager"));
+    assert.doesNotMatch(r.json.system, /you ARE the Manager|hand_to_manager/);
   });
 
   console.log("(4) safety");
