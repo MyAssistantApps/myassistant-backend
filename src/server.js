@@ -432,6 +432,10 @@ app.use("/shortcuts", appAuth, shortcutLimit, require("./routes/shortcuts"));
 // a turn.
 const shopping = require("./shopping");
 app.use("/shopping", appAuth, shopping.limiter, shopping.router);
+// JYOTISH (2026-11-22) — the Vedic horoscope card at the bottom of Home:
+// chat onboarding, a local sidereal chart, readings from its data (src/jyotish).
+const jyotish = require("./jyotish");
+app.use("/jyotish", appAuth, jyotish.limiter, jyotish.router);
 
 // CONNECTED APPS — THE MY ASSISTANT API (2026-10-14, src/platform). The
 // apps a user builds reach THEIR assistant with an app key (mya_…): /v1 is
