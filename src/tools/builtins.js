@@ -5736,7 +5736,7 @@ function registerBuiltins() {
             "documents", "clients", "finance", "stocks", "linked_accounts",
             "diagnostics", "mcp", "meetings", "reminders", "call_notes",
             "news", "focus", "avatar_identity", "connected_apps", "shortcuts",
-            "shopping_list", "calendar", "voice_settings",
+            "shopping_list", "calendar", "voice_settings", "contacts",
           ],
           description:
             "settings = the assistant's own settings (voice, name, theme). " +
@@ -5752,9 +5752,34 @@ function registerBuiltins() {
             "assistant's voice: hear each voice's sample and pick one ('open " +
             "voice settings', 'change your voice', 'I want a different voice'; " +
             "build 163). Opening it ENDS this conversation, so say one short line " +
-            "first, e.g. 'Opening voice settings.' The " +
-            "rest are feature screens.",
+            "first, e.g. 'Opening voice settings.' " +
+            "contacts = Hub → Contacts, the phone's contacts and the other " +
+            "names (aliases) each one answers to. USE IT for anything about a " +
+            "contact's aliases or showing a contact: 'give the alias Papa to " +
+            "Allen', 'call Rohan Boss from now on', 'change Allen's alias " +
+            "Papa to Dad', 'remove the alias Boss from Rohan', 'show me " +
+            "Allen's contact' — with contact (and contact_action, alias, " +
+            "new_alias). The phone finds the contact, opens their card and " +
+            "makes the change there. Calling someone is still " +
+            "place_phone_call. The rest are feature screens.",
         },
+        contact: {
+          type: "string",
+          description:
+            "screen=contacts only: the contact's name as the user said it " +
+            "('Allen', 'Rohan Kulkarni', 'Dad').",
+        },
+        contact_action: {
+          type: "string",
+          enum: ["show", "add_alias", "change_alias", "remove_alias"],
+          description:
+            "screen=contacts only. add_alias: alias = the new name. " +
+            "change_alias: alias = the current alias, new_alias = what it " +
+            "becomes. remove_alias: alias = the alias to remove. show: just " +
+            "open their card.",
+        },
+        alias: { type: "string", description: "screen=contacts only: see contact_action." },
+        new_alias: { type: "string", description: "screen=contacts, change_alias only: the new name." },
       },
       required: ["screen"],
     },
@@ -5764,7 +5789,7 @@ function registerBuiltins() {
         "settings", "home", "hub", "chat", "documents", "clients",
         "finance", "stocks", "diagnostics", "mcp", "meetings", "reminders",
         "call_notes", "news", "focus", "avatar_identity", "connected_apps", "shortcuts",
-        "shopping_list", "calendar", "voice_settings",
+        "shopping_list", "calendar", "voice_settings", "contacts",
       ];
       if (!ALLOWED.includes(screen)) {
         return { ok: false, error: `I don't have a screen called "${args.screen}"` };
@@ -5835,7 +5860,39 @@ function registerBuiltins() {
         shopping_list: "your shopping list",
         calendar: "your calendar",
         voice_settings: "voice settings",
+        contacts: "your contacts",
       };
+      // HUB → CONTACTS BY VOICE (2026-11-22): the phone resolves the name
+      // against its own contacts (they never reach the server), opens the
+      // card and makes the alias change there. The phone says the result.
+      if (screen === "contacts") {
+        const clip = (v) => String(v || "").trim().slice(0, 80);
+        const contact = clip(args.contact);
+        const action = ["show", "add_alias", "change_alias", "remove_alias"]
+          .includes(args.contact_action) ? args.contact_action : (contact ? "show" : "");
+        const alias = clip(args.alias);
+        const newAlias = clip(args.new_alias);
+        if (action === "add_alias" && !alias) {
+          return { ok: false, error: "ask which name to add as the alias" };
+        }
+        if (action === "change_alias" && (!alias || !newAlias)) {
+          return { ok: false, error: "ask which alias to change and what it should become" };
+        }
+        if (action === "remove_alias" && !alias) {
+          return { ok: false, error: "ask which alias to remove" };
+        }
+        if (action && !contact) {
+          return { ok: false, error: "ask which contact they mean" };
+        }
+        const deviceAction = { type: "open_app_screen", screen };
+        if (contact) Object.assign(deviceAction, { contact, contact_action: action });
+        if (alias) deviceAction.alias = alias;
+        if (newAlias) deviceAction.new_alias = newAlias;
+        const speak = !contact ? "Opening your contacts."
+          : action === "show" ? `Opening ${contact}'s contact.`
+          : `Opening ${contact}'s contact to make that change.`;
+        return { ok: true, deviceAction, speak };
+      }
       return {
         ok: true,
         deviceAction: { type: "open_app_screen", screen },
