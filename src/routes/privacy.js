@@ -195,6 +195,8 @@ const USER_TABLES = [
   ["kitchen_pantry", "user_id"],
   ["kitchen_recipes", "user_id"],
   ["kitchen_plans", "user_id"],
+  // Jyotish (2026-11-22): saved birth profiles and cached readings.
+  ...require("../jyotish/store").USER_TABLES,
   // Connected apps (2026-10-14, src/platform): their apps, hashed keys,
   // the apps' records and activity, API threads and per-day usage.
   ...require("../platform/store").USER_TABLES,

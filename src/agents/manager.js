@@ -79,18 +79,18 @@ const SPECIALISTS = {
       "complete_commitment", "prepare_meeting", "record_meeting", "recall_meeting", "start_task"],
   },
   info: {
-    scope: "search, news, weather, places, directions, law, travel",
+    scope: "search, news, weather, places, directions, law, travel, Vedic astrology (kundli, readings)",
     label: "Information",
     role: "You are handling INFORMATION: search, news, weather, places, maps, law and travel. " +
       "Use live tools for anything that can change; say where an answer came from.",
     // Not "what is / how / why": every question starts so, and "what is on
     // my shopping list" is no lookup (seen in the app, 2026-10-31).
-    cues: /\b(who was|search|google|look up|news|headlines|weather|rain|temperature|near (me|by)|nearby|directions?|navigate|route to|how far|law|act|section|judg(e)?ment|flight|fare|convert|exchange rate|horoscope|research|pdf of|forecast|cold|jacket|umbrella|sunny)\b/i,
+    cues: /\b(who was|search|google|look up|news|headlines|weather|rain|temperature|near (me|by)|nearby|directions?|navigate|route to|how far|law|act|section|judg(e)?ment|flight|fare|convert|exchange rate|horoscope|kundli|kundali|jyotish|astrolog\w*|rashi|nakshatra|lagna|dasha|sade ?sati|manglik|birth chart|janma|research|pdf of|forecast|cold|jacket|umbrella|sunny)\b/i,
     tools: ["web_search", "deep_research", "read_webpage", "get_news", "show_news",
       "read_news_story", "get_weather", "find_places_nearby", "get_current_location",
       "start_navigation", "consult_knowledge", "indian_law", "indian_case_law", "convert_currency",
       "search_flights", "watch_flight_fare", "show_pictures", "show_search_results",
-      "open_public_pdf", "get_horoscope", "going_out_check"],
+      "open_public_pdf", "get_horoscope", "jyotish_chart", "jyotish_reading", "going_out_check"],
   },
   commerce: {
     scope: "shopping, food, rides, tickets, recharge, payments, money",
