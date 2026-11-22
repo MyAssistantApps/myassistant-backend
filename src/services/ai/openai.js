@@ -82,6 +82,9 @@ function isBusy(e) {
 async function call(path, { body, form, timeoutMs = TIMEOUT_MS, raw = false, headers = {} } = {}) {
   const k = key();
   if (!k) throw new OpenAIError("OPENAI_API_KEY is not set", 0, "");
+  // The spend circuit-breaker (ops/budget.js): today's global and
+  // per-user caps, checked before any money is spent.
+  await require("../../ops/budget").check({ path });
   const h = { authorization: `Bearer ${k}`, ...headers };
   let payload = form;
   if (!form) {
@@ -520,13 +523,16 @@ async function imageGenerate(prompt, { width, height, quality = env("OPENAI_IMAG
 }
 
 /** A picture changed as instructed, keeping what the instruction keeps. images: [{buffer, mime}] */
-async function imageEdit(prompt, images, { width, height, quality = env("OPENAI_IMAGE_QUALITY", "high"), timeoutMs = 120_000 } = {}) {
+async function imageEdit(prompt, images, { width, height, quality = env("OPENAI_IMAGE_QUALITY", "high"), inputFidelity = "", timeoutMs = 120_000 } = {}) {
   const form = new FormData();
   form.append("model", models.imageEdit());
   form.append("prompt", String(prompt).slice(0, 4000));
   form.append("n", "1");
   form.append("size", imageSize(width, height));
   form.append("quality", quality);
+  // "high" keeps faces and fine detail of the FIRST image much closer to
+  // the original (gpt-image-1 only; costs extra input tokens).
+  if (inputFidelity === "high" || inputFidelity === "low") form.append("input_fidelity", inputFidelity);
   (images || []).slice(0, 4).forEach((im, i) => {
     const mime = /png/i.test(im.mime || "") ? "image/png" : /webp/i.test(im.mime || "") ? "image/webp" : "image/jpeg";
     form.append("image[]", new Blob([im.buffer], { type: mime }), `image-${i}.${mime.split("/")[1]}`);
@@ -624,8 +630,6 @@ async function realtimeClientSecret({ voice, instructions = "", tools = [], mode
   if (!value) throw new OpenAIError("openai realtime: no client secret in the answer", 0, JSON.stringify(j).slice(0, 200));
   return { value, expiresAt: Number(j.expires_at || (j.client_secret && j.client_secret.expires_at) || 0), model: m };
 }
-
-// ---------------------------------------------------------------- GPT-Live
 
 /** One person to OpenAI's abuse checks, never their id itself. */
 function safetyId(user) {

@@ -11,7 +11,6 @@
  * Wiring (server.js / builtins.js / privacy.js) needs only what is here:
  *
  *   app.use("/v1", platform.v1);                          // key-authenticated API
- *   app.use("/platform", appAuth, platform.manage);       // the main app manages apps
  *   app.get("/developers", platform.docs);                // the developer docs
  *   app.use("/console", platform.consoleRouter);           // the web console API
  *   app.get("/console", platform.consolePage);             // the web console
@@ -22,7 +21,7 @@
  *   auth.js       the key gate, scopes, the per-key limiter
  *   assistant.js  a turn of the user's assistant with the app's tools
  *   voice.js      realtime voice sessions, tool relay, transcripts
- *   routes.js     /v1          manage.js   /platform
+ *   routes.js     /v1          manage.js   /console/api
  *   tools.js      connected_apps — the main assistant reads the apps' activity
  */
 const fs = require("fs");
@@ -35,7 +34,7 @@ const consoleWeb = require("./console");
 const manage = require("./manage");
 
 // The web developer console (console.js): its own sign-in, its own narrow
-// token, the same management API as the app.
+// token, and the only mount of the management API (manage.js).
 const consoleRouter = express.Router();
 consoleRouter.use("/auth", consoleWeb.auth);
 consoleRouter.use("/api", consoleWeb.consoleAuth, manage);

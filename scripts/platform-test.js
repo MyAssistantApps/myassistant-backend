@@ -4,7 +4,7 @@
  * Boots the REAL server (real auth, routes, registry, Postgres) with every
  * outbound call answered locally and the model scripted, and pins:
  *   (a) connecting an app from the main app: the key is shown once, only
- *       its hash is kept, an appfn key cannot manage apps;
+ *       its hash is kept, an app key cannot manage apps;
  *   (b) the key gate: missing / malformed / revoked keys, a paused app, a
  *       paused account; scopes read on every request;
  *   (c) records and activity: validation, upsert, another app's data is
@@ -39,15 +39,14 @@ process.env.DATA_DIR = path.join(TMP, "data");
 process.env.MEDIA_DIR = path.join(TMP, "media");
 process.env.MEDIA_BACKEND = "local";
 process.env.LIVE_RECORD_DIR = path.join(TMP, "recordings");
-process.env.LIVE_RECORD = "0";
 process.env.LOG_LEVEL = "error";
 process.env.JWT_SECRET = "platform-" + crypto.randomBytes(16).toString("hex");
 process.env.PUBLIC_BASE_URL = "https://api.example.test";
 process.env.PLATFORM_RATE_PER_MIN = "100000";
 for (const k of [
-  "OPENAI_API_KEY", "GEMINI_MODEL", "GEMINI_LIVE_MODEL", "GEMINI_TTS_MODEL",
+  "OPENAI_API_KEY",
   "AUTH_DISABLED", "ALLOW_APP_KEY", "APP_API_KEY", "METRICS_TOKEN", "PLIVO_AUTH_TOKEN", "PLIVO_AUTH_ID",
-  "BOLNA_API_KEY", "TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "GOOGLE_CSE_KEY", "HEYGEN_API_KEY",
+  "BOLNA_API_KEY", "BRAVE_SEARCH_API_KEY",
   "AI_APPROVAL_SECRET", "SHORTCUTS",
 ]) delete process.env[k];
 const BACKEND = path.resolve(__dirname, "..");
@@ -151,7 +150,11 @@ const CHESS_TOOLS = [{
   async function mkUser(tag) {
     const u = await db.createUser({ email: `platform-${tag}-${stamp}@example.test`, name: `Asha ${tag}` });
     made.push(u.id);
-    return { id: u.id, session: jwt.sign({ uid: u.id }, SECRET, { expiresIn: "1h" }) };
+    return {
+      id: u.id,
+      session: jwt.sign({ uid: u.id }, SECRET, { expiresIn: "1h" }),
+      console: jwt.sign({ uid: u.id, scope: "console" }, SECRET, { algorithm: "HS256", expiresIn: "1h" }),
+    };
   }
   const A = await mkUser("a");
   const B = await mkUser("b");
@@ -159,8 +162,8 @@ const CHESS_TOOLS = [{
   try {
     /* ------------------------------------------------ (a) connecting */
 
-    await atest("scopes catalogue and docs link for the main app", async () => {
-      const r = await api("GET", "/platform/scopes", { token: A.session });
+    await atest("scopes catalogue and docs link for the console", async () => {
+      const r = await api("GET", "/console/api/scopes", { token: A.console });
       ok(r);
       assert.ok(r.json.scopes.find((s) => s.id === "assistant"));
       assert.strictEqual(r.json.docsUrl, "https://api.example.test/developers");
@@ -168,7 +171,7 @@ const CHESS_TOOLS = [{
     });
 
     await atest("connecting an app returns its key once; only a hash is stored", async () => {
-      const r = await api("POST", "/platform/apps", { token: A.session, body: {
+      const r = await api("POST", "/console/api/apps", { token: A.console, body: {
         name: "Chess Arena", description: "A chess board where I play my assistant", keywords: "chess, game, match",
         instructions: "Be a friendly opponent.",
       } });
@@ -183,32 +186,29 @@ const CHESS_TOOLS = [{
       assert.strictEqual(row.prefix, A.key.slice(0, 12));
       assert.notStrictEqual(row.hash, A.key);
       assert.strictEqual(row.hash, crypto.createHash("sha256").update(A.key).digest("hex"));
-      const list = await api("GET", "/platform/apps", { token: A.session });
+      const list = await api("GET", "/console/api/apps", { token: A.console });
       ok(list);
       assert.ok(!list.text.includes(A.key), "the key is never listed again");
       assert.strictEqual(list.json.apps.length, 1);
     });
 
     await atest("a second app of the same name gets its own slug; B sees none of A's", async () => {
-      const r = await api("POST", "/platform/apps", { token: A.session, body: { name: "Chess Arena", scopes: ["data"] } });
+      const r = await api("POST", "/console/api/apps", { token: A.console, body: { name: "Chess Arena", scopes: ["data"] } });
       ok(r, 201);
       assert.strictEqual(r.json.app.slug, "chess-arena-2");
       assert.deepStrictEqual(r.json.app.scopes, ["data"]);
       A.app2 = r.json.app;
       A.key2 = r.json.key;
-      const b = await api("GET", "/platform/apps", { token: B.session });
+      const b = await api("GET", "/console/api/apps", { token: B.console });
       ok(b);
       assert.strictEqual(b.json.apps.length, 0);
-      ok(await api("GET", `/platform/apps/${A.app.id}`, { token: B.session }), 404);
+      ok(await api("GET", `/console/api/apps/${A.app.id}`, { token: B.console }), 404);
     });
 
-    await atest("an assistant-functions key or an app key cannot manage apps", async () => {
-      const appfn = await api("POST", "/appfunctions/token", { token: A.session });
-      ok(appfn);
-      const r = await api("GET", "/platform/apps", { token: appfn.json.token });
-      assert.ok([401, 403].includes(r.status), r.text);
-      const k = await api("GET", "/platform/apps", { key: A.key });
+    await atest("an app key or a phone session cannot manage apps", async () => {
+      const k = await api("GET", "/console/api/apps", { key: A.key });
       assert.strictEqual(k.status, 401, k.text);
+      ok(await api("GET", "/console/api/apps", { token: A.session }), 401);
     });
 
     /* ------------------------------------------------ (b) the gate */
@@ -231,7 +231,7 @@ const CHESS_TOOLS = [{
 
     await atest("scopes are read on every request: unticked → 403, ticked → works at once", async () => {
       code(await api("POST", "/v1/memory", { key: A.key, body: { fact: "Prefers playing chess as black" } }), 403, "missing_scope");
-      const p = await api("PATCH", `/platform/apps/${A.app.id}`, { token: A.session, body: { scopes: [...A.app.scopes, "memory:write", "tools"] } });
+      const p = await api("PATCH", `/console/api/apps/${A.app.id}`, { token: A.console, body: { scopes: [...A.app.scopes, "memory:write", "tools"] } });
       ok(p);
       ok(await api("POST", "/v1/memory", { key: A.key, body: { fact: "Prefers playing chess as black" } }));
       const m = await api("GET", "/v1/memory?q=chess", { key: A.key });
@@ -279,14 +279,14 @@ const CHESS_TOOLS = [{
         type: "match finished", summary: "Lost to the assistant in 41 moves after blundering the queen", data: { result: "loss" } } });
       ok(e, 201);
       assert.strictEqual(e.json.event.type, "match_finished");
-      const feed = await api("GET", `/platform/apps/${A.app.id}/activity`, { token: A.session });
+      const feed = await api("GET", `/console/api/apps/${A.app.id}/activity`, { token: A.console });
       ok(feed);
       assert.strictEqual(feed.json.events[0].summary, "Lost to the assistant in 41 moves after blundering the queen");
-      const apps = await api("GET", "/platform/apps", { token: A.session });
+      const apps = await api("GET", "/console/api/apps", { token: A.console });
       const mine = apps.json.apps.find((x) => x.id === A.app.id);
       assert.ok(mine.lastEvent && /41 moves/.test(mine.lastEvent.summary));
       assert.ok(mine.usage.today.requests > 0, "requests counted");
-      const recs = await api("GET", `/platform/apps/${A.app.id}/records/matches`, { token: A.session });
+      const recs = await api("GET", `/console/api/apps/${A.app.id}/records/matches`, { token: A.console });
       ok(recs);
       assert.strictEqual(recs.json.records.length, 2);
     });
@@ -500,23 +500,23 @@ const CHESS_TOOLS = [{
     });
 
     await atest("pausing the app, revoking a key and removing the app all stop it at once", async () => {
-      ok(await api("PATCH", `/platform/apps/${A.app.id}`, { token: A.session, body: { status: "paused" } }));
+      ok(await api("PATCH", `/console/api/apps/${A.app.id}`, { token: A.console, body: { status: "paused" } }));
       code(await api("GET", "/v1/me", { key: A.key }), 403, "app_paused");
-      ok(await api("PATCH", `/platform/apps/${A.app.id}`, { token: A.session, body: { status: "active" } }));
+      ok(await api("PATCH", `/console/api/apps/${A.app.id}`, { token: A.console, body: { status: "active" } }));
       ok(await api("GET", "/v1/me", { key: A.key }));
 
-      const nk = await api("POST", `/platform/apps/${A.app.id}/keys`, { token: A.session, body: { label: "laptop" } });
+      const nk = await api("POST", `/console/api/apps/${A.app.id}/keys`, { token: A.console, body: { label: "laptop" } });
       ok(nk, 201);
       ok(await api("GET", "/v1/me", { key: nk.json.key }));
-      ok(await api("DELETE", `/platform/apps/${A.app.id}/keys/${nk.json.keyInfo.id}`, { token: A.session }));
+      ok(await api("DELETE", `/console/api/apps/${A.app.id}/keys/${nk.json.keyInfo.id}`, { token: A.console }));
       code(await api("GET", "/v1/me", { key: nk.json.key }), 401, "invalid_key");
-      ok(await api("DELETE", `/platform/apps/${A.app.id}/keys/${nk.json.keyInfo.id}`, { token: B.session }), 404);
+      ok(await api("DELETE", `/console/api/apps/${A.app.id}/keys/${nk.json.keyInfo.id}`, { token: B.console }), 404);
 
       await db.run(`UPDATE users SET status='paused' WHERE id=$1`, [A.id]);
       code(await api("GET", "/v1/me", { key: A.key }), 401, "account_unavailable");
       await db.run(`UPDATE users SET status='active' WHERE id=$1`, [A.id]);
 
-      ok(await api("DELETE", `/platform/apps/${A.app.id}`, { token: A.session }));
+      ok(await api("DELETE", `/console/api/apps/${A.app.id}`, { token: A.console }));
       code(await api("GET", "/v1/me", { key: A.key }), 401, "invalid_key");
       for (const t of ["platform_keys", "platform_records", "platform_events", "platform_conversations", "platform_usage"]) {
         const n = await db.one(`SELECT COUNT(*)::int AS n FROM ${t} WHERE app_id=$1`, [A.app.id]);
@@ -585,19 +585,20 @@ const CHESS_TOOLS = [{
       ok(await api("GET", "/console/auth/me", { token: B.console }));
       ok(await api("GET", "/console/api/apps", { token: B.console }));
       ok(await api("GET", "/chat/urgent-settings", { token: B.console }), 401);
-      ok(await api("GET", "/platform/apps", { token: B.console }), 401);
+      ok(await api("GET", "/platform/apps", { token: B.console }), 404);
+      ok(await api("GET", "/platform/apps", { token: B.session }), 404);
       ok(await api("GET", "/ai/config", { token: B.console }), 401);
       ok(await api("GET", "/console/api/apps", { token: B.session }), 401);
       ok(await api("GET", "/console/api/apps"), 401);
     });
 
-    await atest("an app created in the console appears in the phone app at once, and the phone is told", async () => {
+    await atest("an app created in the console is listed at once, and the phone is told", async () => {
       pushed.length = 0;
       const r = await api("POST", "/console/api/apps", { token: B.console, body: { name: "Quiz Night", keywords: "quiz" } });
       ok(r, 201);
       assert.match(r.json.key, /^mya_/);
-      const phone = await api("GET", "/platform/apps", { token: B.session });
-      assert.ok(phone.json.apps.some((a) => a.name === "Quiz Night"));
+      const listed = await api("GET", "/console/api/apps", { token: B.console });
+      assert.ok(listed.json.apps.some((a) => a.name === "Quiz Night"));
       const told = await waitFor(async () => pushed.find((x) => /Quiz Night Is Connected/.test(x.title)), 3000);
       assert.ok(told, JSON.stringify(pushed));
       assert.strictEqual(await platform.wantsApps(B.id, "what was my quiz score?"), true);
@@ -607,7 +608,7 @@ const CHESS_TOOLS = [{
       assert.strictEqual(u.json.days[29].day, new Date().toISOString().slice(0, 10));
       const other = await api("GET", `/console/api/apps/${r.json.app.id}`, { token: B.console });
       ok(other);
-      ok(await api("GET", `/platform/apps/${r.json.app.id}`, { token: A.session }), 404); // another account
+      ok(await api("GET", `/console/api/apps/${r.json.app.id}`, { token: A.console }), 404); // another account
     });
 
     await atest("account erase covers every platform table", async () => {

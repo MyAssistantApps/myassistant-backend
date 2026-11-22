@@ -55,6 +55,10 @@ function migrate() {
       ALTER TABLE task_outcomes ADD COLUMN IF NOT EXISTS extra JSONB NOT NULL DEFAULT '{}'::jsonb;
       CREATE INDEX IF NOT EXISTS idx_outcomes_user ON task_outcomes(user_id, id DESC);
       CREATE INDEX IF NOT EXISTS idx_outcomes_time ON task_outcomes(created_at DESC);
+      -- Every Bolna / video-render webhook looks its row up by external_id
+      -- (findByExternal); without this each one scanned the whole table.
+      CREATE INDEX IF NOT EXISTS idx_outcomes_external
+        ON task_outcomes(external_id, id DESC) WHERE external_id <> '';
     `).catch((e) => {
       console.error("task_outcomes migration failed:", e.message);
       migrated = null;

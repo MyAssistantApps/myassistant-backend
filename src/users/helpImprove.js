@@ -100,7 +100,7 @@ async function effective(userId) {
   return s.helpImprove === null ? policy() === "on" : s.helpImprove;
 }
 
-/** May a recording be made for them now? Used by the recorder. */
+/** May a recording be made for them now? Used by live/turnAudio.js. */
 async function allowsReview(userId) {
   try {
     return await effective(userId);
@@ -166,8 +166,6 @@ async function applyOptOut(userId) {
   const uid = Number(userId);
   const out = { recordings: 0, turns: 0, feedback: 0 };
   try {
-    const recorder = require("../live/recorder");
-    await recorder.dropOpen(uid).catch(() => 0);
     out.recordings = await deleteRecordings(uid);
   } catch (e) {
     console.warn(`help improve: recordings for ${uid} —`, e.message);

@@ -1,0 +1,20 @@
+# Weekly dependency updates as pull requests into hardening (reviewed and
+# merged by the owner like any other change; CI runs the full suite on each).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: hardening
+    schedule: { interval: weekly, day: monday }
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directory: /
+    target-branch: hardening
+    schedule: { interval: monthly }
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: hardening
+    schedule: { interval: monthly }

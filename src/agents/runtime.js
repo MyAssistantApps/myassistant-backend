@@ -33,8 +33,6 @@ registerBuiltins();
 // path and not the other, which is the exact bug the comment in server.js
 // records about registerBuiltins itself.
 require("./taskTools").registerTaskTools();
-// "Talk to your manager" in the live voice (agents/manager.js).
-require("./manager").registerManagerTools(require("../tools/registry"));
 // Tasks inside other apps, step by step on the screen (ai/screenTask.js).
 require("../ai/screenTask").registerScreenTaskTools(require("../tools/registry"));
 
@@ -270,9 +268,9 @@ async function runAgentTurn(userText, ctx = {}, onEvent = () => {}) {
   });
   quality.heard = String(userText || "").slice(0, 120);
   if (state) sessionState.beginTurn(state, { turnId, text: userText, quality: quality.quality });
-  // The phone's own card lines ("[SYSTEM] Signature saved…; it is on the
-  // card now") run no tool, yet what they report is true: filed for the
-  // claim check, so "Done, it's on the card" is not rewritten (2026-09-26).
+  // The phone's own status lines ("[SYSTEM] The call to X has ended") run
+  // no tool, yet what they report is true: filed for the claim check, so
+  // a true reply about them is not rewritten (2026-09-26).
   if (state) {
     for (const tool of claimCheck.appNoteVouches(userText)) sessionState.noteVouched(state, { turnId, tool });
   }
@@ -412,14 +410,7 @@ async function runAgentTurn(userText, ctx = {}, onEvent = () => {}) {
   // reconnected — once per process, and never more than 3 s of this turn.
   if (ctx.userId) {
     await require("../mcp/routes").ensureConnectedWithin(ctx.userId).catch(() => {});
-    // Whether this user's Notion tools are offered (free until configured).
-    await require("../connectors/notion/store").prime(ctx.userId).catch(() => {});
   }
-  // "Add it to my Notion" from someone who has not connected it gets an
-  // honest line — only on the turns that mention Notion.
-  const notionLine = ctx.userId && /\bnotion\b/i.test(userText)
-    ? require("../connectors/notion/tools").notionHintFor(ctx.userId, ctx.appBuild) : "";
-  if (notionLine) ctx.extraSystem = [ctx.extraSystem || "", notionLine].filter(Boolean).join("\n");
   const only = ctx.background
     ? registry
         .list()

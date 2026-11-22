@@ -3,19 +3,18 @@
  * -------------------------------------------------------------------------
  *   clinic_profiles      one row per doctor: clinic name, address, phone,
  *                        consultation fee, registration number,
- *                        qualifications, weekly timings, slot length, and
- *                        whether the phone receptionist may book.
+ *                        qualifications, weekly timings and slot length.
  *   clinic_appointments  the appointment book. Booked from the app, by
- *                        voice, or by the receptionist on a live call.
+ *                        voice, or from the public booking page.
  *
  * The slot engine (freeSlots) is a pure function: timings minus what is
- * already booked, in the DOCTOR's timezone. The receptionist offers only
- * slots it produced, and re-checks the slot is still free at the moment of
- * booking, so two callers can never be given the same 10:15.
+ * already booked, in the DOCTOR's timezone. A booking made with
+ * `requireFreeSlot` re-checks the slot is still free at the moment of
+ * booking, so two bookers can never be given the same 10:15.
  *
  * Self-migrating like practice/store.js — no db.js change needed.
  */
-const { query, one, run } = require("../db");
+const { query, one, run, tx } = require("../db");
 
 const DAY = 24 * 3600 * 1000;
 const DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -48,7 +47,6 @@ function migrate() {
         qualification      TEXT NOT NULL DEFAULT '',
         hours              TEXT NOT NULL DEFAULT '',
         slot_min           INTEGER NOT NULL DEFAULT 15,
-        receptionist_books INTEGER NOT NULL DEFAULT 0,
         updated_at         BIGINT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS clinic_appointments (
@@ -196,7 +194,6 @@ function profileShape(r, userId) {
     qualification: r?.qualification || "",
     hours: r ? parseHours(r.hours) : cleanHours(DEFAULT_HOURS),
     slotMin: Number(r?.slot_min || 15),
-    receptionistBooks: Number(r?.receptionist_books || 0) === 1,
     configured: Boolean(r),
   };
 }
@@ -223,18 +220,16 @@ async function saveProfile(userId, patch = {}) {
     hours: patch.hours !== undefined ? cleanHours(patch.hours) : cur.hours,
     slotMin: patch.slotMin !== undefined
       ? Math.max(5, Math.min(Math.round(Number(patch.slotMin) || 15), 120)) : cur.slotMin,
-    receptionistBooks: patch.receptionistBooks !== undefined ? patch.receptionistBooks === true : cur.receptionistBooks,
   };
   await run(
     `INSERT INTO clinic_profiles
-       (user_id, clinic_name, address, phone, fee, reg_no, qualification, hours, slot_min, receptionist_books, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       (user_id, clinic_name, address, phone, fee, reg_no, qualification, hours, slot_min, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      ON CONFLICT (user_id) DO UPDATE SET
        clinic_name=$2, address=$3, phone=$4, fee=$5, reg_no=$6, qualification=$7,
-       hours=$8, slot_min=$9, receptionist_books=$10, updated_at=$11`,
+       hours=$8, slot_min=$9, updated_at=$10`,
     [userId, next.clinicName, next.address, next.phone, next.fee, next.regNo,
-     next.qualification, JSON.stringify(next.hours), next.slotMin,
-     next.receptionistBooks ? 1 : 0, Date.now()]
+     next.qualification, JSON.stringify(next.hours), next.slotMin, Date.now()]
   );
   return getProfile(userId);
 }
@@ -297,9 +292,9 @@ class SlotTakenError extends Error {
 }
 
 /**
- * Books an appointment. With `requireFreeSlot` (the receptionist path) the
- * time must be one the slot engine would offer RIGHT NOW — re-checked here,
- * not trusted from the conversation.
+ * Books an appointment. With `requireFreeSlot` the time must be one the
+ * slot engine would offer RIGHT NOW — re-checked here, not trusted from
+ * the caller.
  */
 async function createAppointment(userId, a, { requireFreeSlot = false, tzOffsetMin = 330 } = {}) {
   await migrate();
@@ -308,19 +303,79 @@ async function createAppointment(userId, a, { requireFreeSlot = false, tzOffsetM
   const name = clean(a.patientName, 120);
   if (!name) throw new Error("patient name required");
   const p = await getProfile(userId);
-  if (requireFreeSlot) {
-    const free = await slotsFor(userId, localMidnight(starts, tzOffsetMin), { tzOffsetMin });
-    if (!free.includes(starts)) throw new SlotTakenError();
+  // EVERY BOOKING HAS A PATIENT RECORD (owner, 2026-11-21: "all the booked
+  // appointments, and even the patient records should be there"). A booking
+  // made by another person's assistant, the public page or by voice names a
+  // patient but no record; the record is found by phone (or exact name) or
+  // made, so the appointment opens that patient's file and documents.
+  let made = null;
+  if (!a.clientId) {
+    const r = await ensurePatient(userId, name, a.patientPhone, { withCreated: true }).catch(() => null);
+    if (r && r.id) { a = { ...a, clientId: r.id }; if (r.created) made = r.id; }
   }
+  // Bookings for one professional are serialised: the free-slot check and
+  // the insert used to be separate round trips, so two concurrent bookings
+  // could both see 10:15 free and both be told they were booked. The lock
+  // is per professional and held only until the insert commits.
+  try {
+    return await tx(async (c) => {
+      await c.query("SELECT pg_advisory_xact_lock(hashtext('clinic_slot'), $1)", [Number(userId)]);
+      if (requireFreeSlot) {
+        const free = await slotsFor(userId, localMidnight(starts, tzOffsetMin), { tzOffsetMin });
+        if (!free.includes(starts)) throw new SlotTakenError();
+      }
+      return insertAppointment(c, userId, a, p, starts, name);
+    });
+  } catch (e) {
+    // A record made just for this booking must not outlive a failed booking.
+    if (made) await require("../clients/store").deleteClient(userId, made).catch(() => {});
+    throw e;
+  }
+}
+
+/** Last 10 digits: "+91 98450 12345" and "098450-12345" are one number. */
+const tenDigits = (s) => String(s || "").replace(/\D/g, "").slice(-10);
+
+/**
+ * The patient's record id for a booking: an existing record with the same
+ * phone (else the same name and no phone), or a new "patient" record.
+ */
+async function ensurePatient(userId, name, phone, { withCreated = false } = {}) {
+  const clients = require("../clients/store");
+  const out = (id, created) => (withCreated ? { id, created } : id);
+  // Only case files the Clients screen can open: never a people-memory row
+  // ("Ravi is my friend", kind 'other') or an archived record.
+  const CASE = "kind IN ('patient','client','student','customer') AND archived = 0";
+  const digits = tenDigits(phone);
+  if (digits.length === 10) {
+    const byPhone = await one(
+      `SELECT id FROM clients WHERE user_id = $1 AND ${CASE}
+         AND right(regexp_replace(phone, '\\D', '', 'g'), 10) = $2
+       ORDER BY updated_at DESC LIMIT 1`, [userId, digits]);
+    if (byPhone) return out(Number(byPhone.id), false);
+  }
+  const byName = await one(
+    `SELECT id FROM clients WHERE user_id = $1 AND ${CASE} AND lower(name) = lower($2)
+       AND (phone = '' OR $3 = '')
+     ORDER BY updated_at DESC LIMIT 1`, [userId, name, digits]);
+  if (byName) return out(Number(byName.id), false);
+  // A doctor's booking makes a patient; anyone else's a client.
+  const u = await one("SELECT persona FROM users WHERE id = $1", [userId]).catch(() => null);
+  const kind = !u || u.persona === "doctor" ? "patient" : "client";
+  const made = await clients.createClient(userId, { name, kind, phone: phone || "" });
+  return made ? out(Number(made.id), true) : null;
+}
+
+async function insertAppointment(c, userId, a, p, starts, name) {
   const now = Date.now();
-  const row = await one(
+  const { rows: [row] } = await c.query(
     `INSERT INTO clinic_appointments
        (user_id, client_id, patient_name, patient_phone, starts_at, duration_min, reason,
         status, source, remind_patient, created_at, updated_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,'booked',$8,$9,$10,$10) RETURNING *`,
     [userId, a.clientId ? Number(a.clientId) : null, name, clean(a.patientPhone, 40), starts,
      Math.max(5, Math.min(Number(a.durationMin) || p.slotMin, 240)), clean(a.reason, 200),
-     ["app", "voice", "receptionist", "web"].includes(a.source) ? a.source : "app",
+     ["app", "voice", "web", "assistant"].includes(a.source) ? a.source : "app",
      a.remindPatient === false ? 0 : 1, now]
   );
   return row;
@@ -370,9 +425,13 @@ async function appointmentsNeedingReminder(now = Date.now()) {
   );
 }
 
+/** Claims the one reminder call. False when another sweep already did. */
 async function markReminded(id) {
   await migrate();
-  await run("UPDATE clinic_appointments SET reminded_at = $1 WHERE id = $2", [Date.now(), Number(id)]);
+  const n = await run(
+    "UPDATE clinic_appointments SET reminded_at = $1 WHERE id = $2 AND reminded_at = 0",
+    [Date.now(), Number(id)]);
+  return n > 0;
 }
 
 module.exports = {
@@ -380,7 +439,7 @@ module.exports = {
   cleanHours, parseHours, describeHours, toMin,
   localMidnight, freeSlots, slotsFor, nextFreeSlots,
   getProfile, saveProfile,
-  apptShape, listAppointments, createAppointment, getAppointment, updateAppointment,
+  apptShape, listAppointments, createAppointment, getAppointment, updateAppointment, ensurePatient,
   appointmentsNeedingReminder, markReminded,
   SlotTakenError, ACTIVE,
 };

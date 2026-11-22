@@ -74,46 +74,13 @@ const INTEGRATIONS = {
   },
   image_edit: {
     label: "an image-editing model",
-    // Any ONE of these is enough, which `anyEnv` expresses and `env` cannot.
-    anyEnv: ["OPENAI_API_KEY", "FASHN_API_KEY"],
+    env: ["OPENAI_API_KEY"],
     why: "editing a photo needs an image model that accepts a photo as input",
   },
   youtube: {
     label: "YouTube Data API",
     env: ["YOUTUBE_API_KEY"],
     why: "searching YouTube needs the Data API configured",
-  },
-  // Notion (2026-09-27): the deployment has a public connection…
-  notion_app: {
-    label: "Notion connection",
-    env: ["NOTION_CLIENT_ID", "NOTION_CLIENT_SECRET"],
-    why: "Notion is not set up on this server",
-  },
-  // …and this user linked their workspace. readySync answers from the
-  // cache store.prime() fills before declarations: a miss is "no", so the
-  // tools are hidden rather than offered to everyone. Execution re-reads.
-  notion: {
-    label: "their Notion",
-    perUser: true,
-    readySync(userId) {
-      return require("../connectors/notion/store").isConnectedSync(userId);
-    },
-    async readyAsync(userId) {
-      if (!userId) return false;
-      try {
-        const c = await require("../connectors/notion/store").load(userId);
-        return Boolean(c && c.secrets && c.row.status === "connected");
-      } catch (_) {
-        return false;
-      }
-    },
-    why: "their Notion is not connected",
-    fix: "offer to open Connected apps",
-  },
-  avatar: {
-    label: "a talking-avatar provider",
-    anyEnv: ["HEYGEN_API_KEY", "BEY_API_KEY", "SIMLI_FACE_ID", "TAVUS_API_KEY"],
-    why: "a video avatar needs a provider configured",
   },
 };
 

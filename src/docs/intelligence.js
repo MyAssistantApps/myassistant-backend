@@ -215,7 +215,7 @@ async function findDocuments(userId, q, { person = null, limit = 5 } = {}) {
     }
   }
 
-  const ranked = docs
+  const rankedAll = docs
     .map((d) => {
       let hit = best.get(String(d.id));
       // NOT CHUNKED YET — its document.index job is still queued (a file
@@ -251,8 +251,8 @@ async function findDocuments(userId, q, { person = null, limit = 5 } = {}) {
     // passport", not the nearest unrelated file. Listing everything a
     // person has is list_person_documents' job, not find_document's.
     .filter((d) => d.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    .sort((a, b) => b.score - a.score);
+  const ranked = keepWhatWasAsked(rankedAll, docs, words).slice(0, limit);
 
   // The ranked rows are shaped for the model. The phone's cards and
   // gallery need the full client shape — without mime a found PDF or deck
@@ -263,6 +263,60 @@ async function findDocuments(userId, q, { person = null, limit = 5 } = {}) {
     snippet: r.snippet,
   }));
   return { scope: scopeLabel, found: ranked.length > 0, documents: ranked, cards };
+}
+
+/**
+ * "SHOW MY AADHAAR CARD" SHOWS THE AADHAAR CARD (owner, 2026-11-21).
+ *
+ * Semantic scores are never zero, so every saved ID card scored above the
+ * cut and "show my Aadhaar card" popped up the Aadhaar card AND both PAN
+ * cards. Two rules now:
+ *  1. The distinctive words of the ask (not "my", "card", "document"…)
+ *     must appear in the document — its title, category, summary,
+ *     filename or text — spelt loosely, so "adhar", "aadhar" and "Aadhaar"
+ *     are one word. A document matching none of them is not what was
+ *     asked for, however close its embedding.
+ *  2. Among what is left, only those close to the best match stay.
+ * An ask made only of generic words ("my documents") keeps the old
+ * ranking.
+ */
+const LOOSE_GENERIC = new Set([...GENERIC_DOC_WORDS, "card", "cards", "copy", "copies",
+  "open", "pull", "please", "can", "you", "want", "need", "find", "display", "send", "share"]);
+// Loose spelling: lower case, doubled letters and vowel runs collapsed,
+// "h" after a consonant dropped ("aadhaar" → "adar", "adhar" → "adar").
+function loose(s) {
+  return String(s || "").toLowerCase()
+    .replace(/([a-z])\1+/g, "$1")
+    .replace(/([^aeiou\s])h/g, "$1")
+    .replace(/[aeiou]+/g, (m) => m[0]);
+}
+function keepWhatWasAsked(ranked, docs, words) {
+  if (!ranked.length) return ranked;
+  const key = words.filter((w) => !LOOSE_GENERIC.has(w) && w.length > 2);
+  let kept = ranked;
+  if (key.length) {
+    const byId = new Map(docs.map((d) => [String(d.id), d]));
+    const keys = [...new Set(key.map(loose))];
+    // How many of the distinctive words each document carries; only the
+    // documents carrying the most stay ("Aadhaar Card — Unique
+    // Identification Authority" asked by its full title must not also
+    // bring a PAN card whose text happens to say "authority").
+    const hits = new Map(ranked.map((r) => {
+      const d = byId.get(String(r.id)) || {};
+      const hay = loose(`${d.title} ${d.category} ${d.summary} ${d.filename} ${String(d.full_text || "").slice(0, 20000)}`);
+      return [r.id, keys.filter((k) => hay.includes(k)).length];
+    }));
+    const most = Math.max(0, ...hits.values());
+    kept = most > 0 ? ranked.filter((r) => hits.get(r.id) === most) : [];
+    // Nothing literally matched: only a very strong semantic match (an
+    // OCR-poor scan, a synonym) is offered, and only one. Asked for a
+    // passport that is not there, the honest answer is "no passport", not
+    // the PAN card that happens to be nearest.
+    if (!kept.length) kept = ranked.filter((r) => r.score >= 0.8).slice(0, 1);
+    if (!kept.length) return kept;
+  }
+  const top = kept[0].score;
+  return kept.filter((r) => r.score >= top * 0.75);
 }
 
 /**
@@ -306,6 +360,8 @@ async function associate(userId, documentId, { person = null, caseTitle = null }
 }
 
 module.exports = {
+  _keepWhatWasAsked: keepWhatWasAsked,
+  _loose: loose,
   migrate,
   chunkText,
   indexDocument,

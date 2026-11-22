@@ -4,9 +4,9 @@ Five people work on this code and share ONE Claude account, so a session
 cannot tell who is driving it. These rules keep us from overwriting each
 other's work. They apply to people and to Claude alike.
 
-## Branches: only the owner pushes `hardening`
+## Branches: only the owner pushes `production`
 
-`hardening` is protected on GitHub: **only dhanuvagman006 can push to it**
+`production` is protected on GitHub: **only dhanuvagman006 can push to it**
 (no force-push, no delete). Everyone else works on their own branch and
 opens a pull request; the owner reviews and merges.
 
@@ -23,16 +23,16 @@ Each teammate has ONE branch of their own, in both repos, that only they
 Work only on your own branch. It builds nothing, deploys nothing and sends
 nothing to testers, so you cannot break the app for anyone else there.
 
-1. Switch to your branch and bring in the latest `hardening`:
-   `git checkout <you> && git pull --rebase origin <you> && git pull --rebase origin hardening`
+1. Switch to your branch and bring in the latest `production`:
+   `git checkout <you> && git pull --rebase origin <you> && git pull --rebase origin production`
 2. Make your change. Commit small, clear commits.
 3. Run the checks (below). Do not push code that fails them.
 4. Before **every** push, bring in the latest again:
-   `git pull --rebase origin hardening`, resolve conflicts, re-run the checks.
-5. Push: `git push origin <you>`. Never push to `hardening` or
-   `hardening-test` — GitHub refuses it ("protected branch").
-6. When it works, open a pull request into `hardening`:
-   `gh pr create --base hardening --head <you> --fill` — say what changed
+   `git pull --rebase origin production`, resolve conflicts, re-run the checks.
+5. Push: `git push origin <you>`. Never push to `production` —
+   GitHub refuses it ("protected branch").
+6. When it works, open a pull request into `production`:
+   `gh pr create --base production --head <you> --fill` — say what changed
    and how you tested it. The owner reviews and merges it.
 7. **Never force-push** a branch someone else also works on, and never
    rewrite commits already on GitHub. The `.githooks/pre-push` hook refuses
@@ -41,7 +41,7 @@ nothing to testers, so you cannot break the app for anyone else there.
 8. Check `git config user.name` is YOUR name on your machine, so the
    history shows who did what (the shared Claude account does not).
 
-Claude: never push to `hardening` or `hardening-test` unless the person at
+Claude: never push to `production` unless the person at
 the keyboard is the owner and asked for it. Otherwise ask who is at the
 keyboard, work on THEIR branch from the table above, push it, and open a PR.
 Never push to another teammate's branch, never merge a PR, and never change
@@ -49,11 +49,11 @@ branch protection, collaborators, secrets or workflows for a teammate.
 
 ## Pushing deploys
 
-Every merge or push to `hardening` here **deploys the backend to production**
-(`.github/workflows/deploy.yml` → `/opt/myassistant/deploy.sh` on
-`backend.envisionsit.in`) — one more reason it goes through the owner's
-review. The script backs up the database, rebuilds the Docker image, checks
-`/health` and rolls back on any failure. Branches do not deploy. Details:
+Every merge or push to `production` here **deploys the backend to production**
+(the deploy job in `.github/workflows/ci.yml` → `/opt/myassistant/deploy.sh`
+on `backend.envisionsit.in`) — one more reason it goes through the owner's
+review. The script backs up the database, swaps in the image CI built and
+tested, checks `/health/ready` and rolls back on any failure. Branches do not deploy. Details:
 `deploy/docker-vps/README.md`.
 
 ## Secrets — both repos are PUBLIC
@@ -68,7 +68,7 @@ it must be rotated, not just deleted.
 - `npm run test:manifest` (every test script points at a real file)
 - `node scripts/manager-test.js` when touching `src/agents/manager.js` or tools
 - `npm run test:production` — the server with production's own settings
-  (`deploy/vps/production.flags`). It snapshots what the phone receives
+  (`deploy/docker-vps/production.flags`). It snapshots what the phone receives
   from `/ai/config`; if you changed that on purpose, run
   `UPDATE_SNAPSHOT=1 npm run test:production` and commit the diff. If you
   change the server's `.env`, change `production.flags` in the same PR.
@@ -81,7 +81,7 @@ it must be rotated, not just deleted.
 
 ## Setup
 
-`./setup.sh` (see SETUP.md) resets both repos to `origin/hardening` (commit
+`./setup.sh` (see SETUP.md) resets both repos to `origin/production` (commit
 your branch's work first — uncommitted changes are backed up, then
 discarded), writes
 the secrets from Bitwarden and runs the backend and the app.
@@ -101,8 +101,8 @@ product's). The product is **MyAssistant**.
 |---|---|
 | Backend URL | `https://backend.envisionsit.in` (the app's default) |
 | Server | `189.72.146.77`, Docker Compose in `/opt/myassistant/` (backend, postgres 16, caddy) |
-| Deploy | push to `hardening` → GitHub → `deploy.sh` (backup, build, health, rollback) |
-| Settings | the server's `/opt/myassistant/.env`, mirrored without secrets in `deploy/vps/production.flags` |
+| Deploy | push to `production` → CI (`ci.yml`) → `deploy.sh` (backup, swap image, health, rollback) |
+| Settings | the server's `/opt/myassistant/.env`, mirrored without secrets in `deploy/docker-vps/production.flags` |
 | Admin panel | `/admin-panel` — sign in with the server's `ADMIN_KEY` |
 | Old server | `myassistant.wishme.today` — retired, not deployed to, its data was not migrated |
 
@@ -136,7 +136,7 @@ not install over existing ones.
 - **AI**: text goes through the OpenAI router `src/services/ai/router.js`
   (`generateReply(messages, {system, model, json, schema})`); voice is OpenAI
   Realtime; outbound calls are Bolna (`src/agents/agentCall.js`); inbound
-  calls are Plivo (`src/inbound/receptionist.js`). Do not add other AI
+  calls are Bolna too (`src/agents/inboundCalls.js`). Do not add other AI
   SDKs to the app — named Claude models are for development only.
 - **Voice tools** live in `src/tools/builtins.js` (`registry.register`).
 - The app sends its location as `X-Geo-Lat` / `X-Geo-Lng` and timezone as
@@ -145,7 +145,7 @@ not install over existing ones.
 ### Professional workspaces (doctor / advocate / business)
 
 - `users.persona` is chosen at sign-up (`src/users/persona.js`:
-  `requirePersona`, `proKindFor`). Each profession sees only its own tools;
+  `requirePersona`). Each profession sees only its own tools;
   the server enforces it (403), the app just hides screens.
 - `/clinic` (`src/clinic/`) is shared by all three, with `only(...)` gates per
   profession: profile & timings, slot engine, appointments, follow-ups,
@@ -178,10 +178,7 @@ adb reverse tcp:3998 tcp:3998
 
 - Before a public release, review production's `.env` with
   `npm run test:production` — it prints warnings for unsafe settings.
-- Missing on production: `SERPAPI_KEY` (web search / places),
+- Missing on production: `SERPAPI_KEY` (flight search and fare watch),
   `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET`
   (payment links).
-- The Notion integration is still named "Hari Assistant" in Notion itself;
-  rename it there, then update the text in `src/connectors/notion/tools.js`
-  and the app's `connected_apps_screen.dart`.
 - `e2e-g5`'s forget_memory test is occasionally flaky; rerun before chasing it.

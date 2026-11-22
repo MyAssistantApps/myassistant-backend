@@ -137,37 +137,13 @@ test("the mocked book_appointment_via_call tool is gone", () => {
   require("../src/tools/builtins").registerBuiltins();
   assert.strictEqual(registry.get("book_appointment_via_call"), null,
     "the tool that faked phone calls must not be registered");
-  assert.ok(registry.get("book_by_calling_business"), "its real replacement must exist");
+  assert.strictEqual(registry.get("book_by_calling_business"), null,
+    "booking by phone was never reachable and is not registered");
 });
 
-test("booking by phone is high risk, so it cannot run without approval", () => {
-  const registry = require("../src/tools/registry");
-  const t = registry.get("book_by_calling_business");
-  assert.strictEqual(t.risk, "high");
-  assert.ok(typeof t.confirmSummary === "function");
-  const summary = t.confirmSummary({ business_name: "Dr Rao", kind: "appointment", when: "Friday 4pm", purpose: "a check-up" });
-  assert.ok(summary.includes("Dr Rao") && summary.includes("Friday"), summary);
-});
+section("resolving a business");
 
-test("booking by phone refuses honestly when telephony is unconfigured", async () => {
-  const registry = require("../src/tools/registry");
-  const saved = { b: process.env.BOLNA_API_KEY, r: process.env.RETELL_API_KEY };
-  delete process.env.BOLNA_API_KEY;
-  delete process.env.RETELL_API_KEY;
-  const res = await registry.execute(
-    "book_by_calling_business",
-    { business_name: "Some Clinic", kind: "appointment" },
-    { userId: 1, approved: true }
-  );
-  if (saved.b) process.env.BOLNA_API_KEY = saved.b;
-  if (saved.r) process.env.RETELL_API_KEY = saved.r;
-  assert.strictEqual(res.ok, false, "must not report success without telephony");
-  assert.ok(/not configured|isn't configured/i.test(res.error), res.error);
-});
-
-section("calling a business Hari looked up");
-
-test("a result must actually match the name before we dial it", () => {
+test("a result must actually match the name before we use it", () => {
   const { nameMatches } = require("../src/fulfillment/service");
   assert.ok(nameMatches("Apollo Clinic", "Apollo Clinic Indiranagar"));
   assert.ok(nameMatches("Dr Rao", "Dr Rao Dental Care"));
@@ -177,62 +153,6 @@ test("a result must actually match the name before we dial it", () => {
   assert.ok(!nameMatches("Toothsome Dental", "Bright Smile Dental"));
   // Nothing distinctive to verify → no match, so Hari asks instead.
   assert.ok(!nameMatches("the clinic", "Some Clinic"));
-});
-
-test("the number is resolved BEFORE the confirmation, and pinned into args", async () => {
-  const registry = require("../src/tools/registry");
-  const service = require("../src/fulfillment/service");
-  const agentCall = require("../src/agents/agentCall");
-
-  const realResolve = service.resolveBusiness;
-  const realEnabled = agentCall.enabled;
-  service.resolveBusiness = async () => ({
-    name: "Apollo Clinic Indiranagar",
-    phone: "+918012345678",
-    address: "100ft Road, Indiranagar",
-  });
-  agentCall.enabled = () => true;
-  try {
-    const res = await registry.execute(
-      "book_by_calling_business",
-      { business_name: "Apollo Clinic", kind: "appointment", when: "Friday 4pm" },
-      { userId: 1, lat: 12.97, lng: 77.59 }
-    );
-    assert.strictEqual(res.needsConfirmation, true, "must ask before dialling");
-    // The user has to be able to see WHO is about to be called.
-    assert.ok(res.summary.includes("+918012345678"), res.summary);
-    assert.ok(res.summary.includes("100ft Road"), res.summary);
-    // Pinned, so the approved business and the called business are the same.
-    assert.strictEqual(res.args.phone, "+918012345678");
-    assert.strictEqual(res.args.business_name, "Apollo Clinic Indiranagar");
-  } finally {
-    service.resolveBusiness = realResolve;
-    agentCall.enabled = realEnabled;
-  }
-});
-
-test("no listed number means no confirmation card, just the truth", async () => {
-  const registry = require("../src/tools/registry");
-  const service = require("../src/fulfillment/service");
-  const agentCall = require("../src/agents/agentCall");
-
-  const realResolve = service.resolveBusiness;
-  const realEnabled = agentCall.enabled;
-  service.resolveBusiness = async () => null;
-  agentCall.enabled = () => true;
-  try {
-    const res = await registry.execute(
-      "book_by_calling_business",
-      { business_name: "Nowhere Clinic", kind: "appointment" },
-      { userId: 1, lat: 12.97, lng: 77.59 }
-    );
-    assert.strictEqual(res.ok, false);
-    assert.ok(!res.needsConfirmation, "must not ask to approve a call it cannot place");
-    assert.ok(/couldn't find a listed phone number/i.test(res.error), res.error);
-  } finally {
-    service.resolveBusiness = realResolve;
-    agentCall.enabled = realEnabled;
-  }
 });
 
 section("whatsapp");
@@ -467,7 +387,7 @@ test("one user's news history does not affect another's", () => {
 
 test("every tool named in a claim family actually exists", () => {
   const registry = require("../src/tools/registry");
-  require("../src/agents/runtime"); // registers the runtime's own tools (do_in_app, hand_to_manager)
+  require("../src/agents/runtime"); // registers the runtime's own tools (do_in_app)
   const { FAMILIES } = require("../src/agents/claimCheck");
   const missing = [];
   for (const f of FAMILIES) {
@@ -503,7 +423,7 @@ test("every device action belongs to some claim family, or is listed as exempt",
   // the first version of it let enable_usage_tracking through.
   const EXEMPT = new Set([
     // Mode switches — the model does not narrate these as "opening".
-    "translator_mode", "start_interpreter_mode", "stop_interpreter_mode",
+    "translator_mode",
     // Reads the screen rather than opening anything.
     "look_at_screenshot",
     // Reads the call log rather than opening anything; its only sentence
@@ -587,11 +507,16 @@ test("every screen open_app_screen offers is one the app can actually build", as
 
 test("asking for a male voice actually changes the voice, not just the label", () => {
   // gender and voice are separate columns and the live path reads `voice`.
-  // Setting only gender left it speaking with Kore while claiming otherwise.
+  // Setting only gender left it speaking in a female voice while claiming otherwise.
   const src = require("fs").readFileSync(__dirname + "/../src/users/context.js", "utf8");
   assert.match(src, /VOICE_FOR_GENDER/, "gender must map to a voice");
-  assert.match(src, /female:\s*"Kore"/, "female voice must be one the picker offers");
-  assert.match(src, /male:\s*"Charon"/, "male voice must be one the picker offers");
+  const lv = require("../src/ai/liveVoices");
+  const female = (src.match(/female:\s*"([a-z]+)"/) || [])[1];
+  const male = (src.match(/\bmale:\s*"([a-z]+)"/) || [])[1];
+  for (const [g, id] of [["female", female], ["male", male]]) {
+    const v = lv.byId(id);
+    assert.ok(v && v.gender === g, `the ${g} default must be a ${g} voice proxy.voiceFor accepts (got ${id})`);
+  }
   // An explicit voice must still win over the gender default.
   assert.match(src, /if \(!voice && VOICE_FOR_GENDER\[g\]\)/,
     "a voice the user chose explicitly must not be overwritten by a gender change");

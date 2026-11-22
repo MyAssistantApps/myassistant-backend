@@ -259,6 +259,25 @@ router.get("/appointments", async (req, res) => {
   }
 });
 
+/**
+ * GET /clinic/appointments/upcoming?days=30 — every appointment still to
+ * happen, from the start of today, whoever booked it (the professional, by
+ * voice, the public page, or another person's assistant). Each carries its
+ * patient record id.
+ */
+router.get("/appointments/upcoming", async (req, res) => {
+  const uid = uidOf(req);
+  const tz = tzOf(req);
+  try {
+    const days = Math.max(1, Math.min(Number(req.query.days) || 30, 120));
+    const from = dayStartOf(undefined, tz);
+    const rows = await clinicStore.listAppointments(uid, { from, to: from + days * DAY, includeClosed: false, limit: 300 });
+    res.json({ from, days, appointments: rows.map(clinicStore.apptShape) });
+  } catch (e) {
+    res.status(500).json({ error: "could not load appointments" });
+  }
+});
+
 router.get("/slots", async (req, res) => {
   const uid = uidOf(req);
   const tz = tzOf(req);
@@ -301,6 +320,8 @@ router.patch("/appointments/:id", async (req, res) => {
     const row = await clinicStore.updateAppointment(uid, req.params.id, req.body || {});
     if (!row) return res.status(404).json({ error: "appointment not found" });
     audit.record(uid, "clinic.appointment.updated", `appointment #${row.id} → ${row.status}`);
+    // Booked through a contact's assistant: the caller hears about it.
+    require("../connect/bookings").onClinicChange(uid, row).catch((e) => console.warn("[connect] booking follow:", e.message));
     res.json({ appointment: clinicStore.apptShape(row) });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -702,7 +723,15 @@ router.post("/invoices/:id/paid", only("business", "advocate"), async (req, res)
   const row = await pro.getInvoiceRow(uid, req.params.id).catch(() => null);
   if (!row || row.kind !== "invoice") return res.status(404).json({ error: "invoice not found" });
   if (row.status === "paid") return res.json({ invoice: pro.invoiceShape(row) });
-  const fresh = await pro.setInvoiceFields(uid, row.id, { status: "paid" });
+  // The claim is the conditional update: a double tap (or the payment
+  // webhook at the same moment) records the payment once, not twice
+  // (audit 2026-11-21).
+  const claimed = await one(
+    `UPDATE pro_invoices SET status = 'paid', updated_at = $3
+      WHERE id = $1 AND user_id = $2 AND status <> 'paid' RETURNING id`,
+    [row.id, uid, Date.now()]).catch(() => null);
+  const fresh = await pro.getInvoiceRow(uid, row.id);
+  if (!claimed) return res.json({ invoice: pro.invoiceShape(fresh || row) });
   if (row.client_id) {
     await practice.addLedger(uid, { clientId: row.client_id, amount: pro.toRupees(row.total_paise), kind: "paid", note: `${row.number} paid` }).catch(() => {});
   }

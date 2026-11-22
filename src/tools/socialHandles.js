@@ -181,16 +181,14 @@ async function resolve(name, platform, ctx = {}) {
   };
 
   for (const r of res.data) {
-    // PROFILE URLs — how Brave, Tavily and Google CSE return it.
+    // PROFILE URLs — the result and source links.
     for (const text of [r.url, r.snippet, r.title]) {
       if (!text) continue;
       for (const m of String(text).matchAll(new RegExp(rx.source, "gi"))) offer(m[1]);
     }
-    // @HANDLES IN PROSE — how GEMINI GROUNDING returns it, which is the
-    // provider actually in use here. Its result URLs are
-    // vertexaisearch redirects, so nothing matches the profile pattern;
-    // the answer text, however, says "...profile is @virat.kohli". Reading
-    // only URLs found nothing for anybody, famous or not.
+    // @HANDLES IN PROSE — a written answer often names the handle
+    // ("...profile is @virat.kohli") while its links are not profile
+    // pages, so reading only URLs can find nothing.
     const prose = `${r.snippet || ""} ${r.title || ""}`;
     for (const m of prose.matchAll(/@([A-Za-z0-9._]{2,30})\b/g)) {
       offer(m[1]);

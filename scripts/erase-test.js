@@ -52,7 +52,6 @@ const path = require("path");
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "erase-test-"));
 process.env.DATA_DIR = path.join(TMP, "data");
 process.env.LIVE_RECORD_DIR = path.join(TMP, "recordings");
-process.env.LIVE_RECORD = "1";
 const FILES = path.join(TMP, "data", "files");
 const RECS = path.join(TMP, "recordings");
 const OUTSIDE = path.join(TMP, "outside");
@@ -112,10 +111,10 @@ async function ensureEveryTable() {
     "actions/store", "agents/tasks", "live/recorder", "memory/recent",
     "outcomes/store", "practice/store", "records/store", "routes/contacts",
     "routes/finance", "routes/usage", "services/email", "services/pendingPush",
-    "studio/store", "tools/searchCache", "posters/store", "shortcuts/store",
+    "studio/store", "tools/searchCache", "shortcuts/store",
     "shopping/store", "kitchen/store", "platform/store", "platform/console",
-    "memory/episodes", "services/pnv", "clinic/store", "pro/store", "listings/store", "services/callCode",
-    "ondc/store", "routes/go", "tools/flights",
+    "memory/episodes", "services/pnv", "clinic/store", "pro/store", "listings/store", "workspace/store", "connect/urgent", "connect/bookings", "rides/service", "orders/service", "accounts/service", "services/callCode",
+    "routes/go", "jyotish/store",
   ]) {
     await require("../src/" + m).migrate();
   }
@@ -172,6 +171,66 @@ const LEGACY_TABLES = {
   did_briefings: `user_id INTEGER NOT NULL, day TEXT NOT NULL, talk_id TEXT,
     status TEXT NOT NULL DEFAULT 'creating', result_url TEXT, script TEXT,
     created_at BIGINT NOT NULL, PRIMARY KEY (user_id, day)`,
+  // The Plivo receptionist's tables (removed 2026-11-20).
+  inbound_numbers: `phone TEXT PRIMARY KEY, user_id INTEGER NOT NULL, created_at BIGINT NOT NULL`,
+  inbound_settings: `user_id INTEGER PRIMARY KEY, enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    mode TEXT NOT NULL DEFAULT 'screen_unknown', forward_to TEXT, vip TEXT NOT NULL DEFAULT '',
+    availability TEXT NOT NULL DEFAULT '', may_book BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at BIGINT NOT NULL`,
+  inbound_calls: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL, call_id TEXT NOT NULL,
+    from_number TEXT NOT NULL, caller_name TEXT, known BOOLEAN NOT NULL DEFAULT FALSE,
+    outcome TEXT NOT NULL DEFAULT 'answered', summary TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL DEFAULT '', urgency TEXT NOT NULL DEFAULT 'normal',
+    transcript TEXT NOT NULL DEFAULT '', duration_s INTEGER NOT NULL DEFAULT 0,
+    seen BOOLEAN NOT NULL DEFAULT FALSE, created_at BIGINT NOT NULL`,
+  // ONDC ordering, bills by email, Notion and the other connected-app
+  // OAuth providers (removed 2026-11-21).
+  ondc_requests: `message_id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL, user_id INTEGER,
+    action TEXT NOT NULL, bpp_id TEXT, bpp_uri TEXT, payload JSONB NOT NULL, ack TEXT,
+    created_at BIGINT NOT NULL`,
+  ondc_orders: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL, transaction_id TEXT NOT NULL,
+    domain TEXT NOT NULL, bpp_id TEXT NOT NULL, bpp_uri TEXT NOT NULL, provider_id TEXT NOT NULL,
+    provider_name TEXT, items JSONB NOT NULL, quote JSONB, billing JSONB, fulfillment JSONB,
+    order_id TEXT, state TEXT NOT NULL DEFAULT 'cart', payment JSONB, created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL`,
+  mail_addresses: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL, code TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'active', trusted_from JSONB NOT NULL DEFAULT '[]',
+    created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, retired_at BIGINT`,
+  mail_inbound: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL, address_id BIGINT NOT NULL,
+    dedupe_key TEXT NOT NULL, message_id TEXT NOT NULL DEFAULT '', from_addr TEXT NOT NULL DEFAULT '',
+    from_domain TEXT NOT NULL DEFAULT '', auth TEXT NOT NULL DEFAULT 'unverified',
+    subject TEXT NOT NULL DEFAULT '', size INTEGER NOT NULL DEFAULT 0, raw_path TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0,
+    run_after BIGINT NOT NULL DEFAULT 0, lease_until BIGINT NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '', extract JSONB NOT NULL DEFAULT '{}',
+    file_hashes JSONB NOT NULL DEFAULT '[]', document_ids JSONB NOT NULL DEFAULT '[]',
+    reminder_ids JSONB NOT NULL DEFAULT '[]', reminders_done INTEGER NOT NULL DEFAULT 0,
+    skipped_parts JSONB NOT NULL DEFAULT '[]', pushed INTEGER NOT NULL DEFAULT 0,
+    push_kind TEXT NOT NULL DEFAULT '', received_at BIGINT NOT NULL, updated_at BIGINT NOT NULL`,
+  notion_connections: `user_id INTEGER PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '',
+    workspace_name TEXT NOT NULL DEFAULT '', workspace_icon TEXT NOT NULL DEFAULT '',
+    bot_id TEXT NOT NULL DEFAULT '', secrets_enc TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'connected',
+    last_error TEXT NOT NULL DEFAULT '', defaults JSONB NOT NULL DEFAULT '{}',
+    connected_at BIGINT NOT NULL, refreshed_at BIGINT NOT NULL DEFAULT 0,
+    last_used_at BIGINT NOT NULL DEFAULT 0, updated_at BIGINT NOT NULL`,
+  connector_oauth_states: `state_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
+    provider TEXT NOT NULL, created_at BIGINT NOT NULL, expires_at BIGINT NOT NULL`,
+  app_connections: `user_id INTEGER NOT NULL, provider TEXT NOT NULL, account TEXT NOT NULL DEFAULT '',
+    secrets_enc TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'connected', connected_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL, PRIMARY KEY (user_id, provider)`,
+  // Photo cards (writers removed 2026-10-03, store removed 2026-11-21).
+  poster_consent: `user_id INTEGER PRIMARY KEY, version TEXT NOT NULL, accepted_at BIGINT NOT NULL`,
+  poster_photos: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'gallery', width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0, colour TEXT NOT NULL DEFAULT 'keep',
+    status TEXT NOT NULL DEFAULT 'ready', reason TEXT, message TEXT,
+    variants TEXT NOT NULL DEFAULT 'original', orig_ext TEXT NOT NULL DEFAULT 'jpg',
+    created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, last_used_at BIGINT NOT NULL,
+    flattened BOOLEAN NOT NULL DEFAULT false`,
+  posters: `id BIGSERIAL PRIMARY KEY, user_id INTEGER NOT NULL,
+    occasion TEXT NOT NULL DEFAULT 'birthday', spec JSONB NOT NULL,
+    history JSONB NOT NULL DEFAULT '[]'::jsonb, version INTEGER NOT NULL DEFAULT 1,
+    photo_id BIGINT, final_doc_id INTEGER, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL`,
 };
 
 /** Creates the legacy tables this database lacks; returns those it made. */
@@ -230,6 +289,9 @@ async function seedRow(table, userCol, uid, over = {}) {
     if (c.is_generated === "ALWAYS" || c.is_identity === "YES") continue;
     if (n in over) { names.push(n); vals.push(over[n]); continue; }
     if (n === userCol) { names.push(n); vals.push(String(uid)); continue; }
+    // The other party in a two-sided table (a booking's host) is this
+    // user too, so the row is theirs whichever column is checked.
+    if (privacy.USER_COLUMNS.includes(n) && c.is_nullable === "NO") { names.push(n); vals.push(String(uid)); continue; }
     if (c.column_default !== null || c.is_nullable === "YES") continue;
     names.push(n);
     vals.push(filler(c, uid));
@@ -298,8 +360,15 @@ async function optIn(uid) {
 
 async function rowsOf(uid) {
   const out = {};
+  // A table listed under two columns (a booking's caller and host) is one
+  // count: rows where the user is either party.
+  const byTable = new Map();
   for (const [table, col] of await privacy.existingUserTables()) {
-    const r = await db.one(`SELECT count(*)::int AS n FROM ${table} WHERE ${col} = $1`, [String(uid)]);
+    byTable.set(table, [...(byTable.get(table) || []), col]);
+  }
+  for (const [table, list] of byTable) {
+    const where = list.map((c) => `${c} = $1`).join(" OR ");
+    const r = await db.one(`SELECT count(*)::int AS n FROM ${table} WHERE ${where}`, [String(uid)]);
     out[table] = r.n;
   }
   return out;
@@ -431,19 +500,6 @@ const tell = (from, toPhone, message) => db.one(
     // Joined by hand: path.join would fold the ".." away before it is stored.
     [A, `esc-${stamp}`, Date.now(), [RECS, DAY, "..", "..", "outside", "a-escape.m4a"].join(path.sep),
      `abs-${stamp}`, absolute]);
-  // A call A is on right now: its raw audio is being written.
-  const liveSession = `live-${A}-${stamp}`;
-  const handle = recorder.begin(A, liveSession);
-  for (let i = 0; i < 100; i++) {
-    if (await db.one(`SELECT 1 FROM live_recordings WHERE session_id = $1`, [liveSession])) break;
-    await new Promise((r) => setTimeout(r, 20));
-  }
-  await new Promise((r) => setTimeout(r, 30));
-  handle.user(Buffer.alloc(3200));
-  const liveDay = new Date().toISOString().slice(0, 10);
-  const livePcm = path.join(RECS, liveDay, `${liveSession}.user.pcm`);
-  assert.ok(exists(livePcm), "the live call never started recording");
-
   // B as the deletes must leave them: everything, less the two messages
   // B sent to A and C — messages to a deleted account's number go too.
   const bBefore = await rowsOf(B);
@@ -486,14 +542,13 @@ const tell = (from, toPhone, message) => db.one(
     assert.strictEqual(reportA.ok, true);
     assert.strictEqual(reportA.existed, true);
     assert.strictEqual(reportA.rows.users, 1);
-    // The seeded one, the call in progress, and the two with bad paths.
-    assert.strictEqual(reportA.rows.live_recordings, 4);
+    // The seeded one and the two with bad paths.
+    assert.strictEqual(reportA.rows.live_recordings, 3);
     assert.strictEqual(reportA.rows.conversation_turns, 1);
     assert.strictEqual(reportA.rows.email_accounts, 1);
     assert.strictEqual(reportA.files.recordings, 3, "the .m4a and both raw halves");
     assert.strictEqual(reportA.files.documents, 2);
     assert.strictEqual(reportA.revoked.google, "revoked");
-    assert.strictEqual(reportA.revoked.liveRecordings, 1);
     assert.strictEqual(reportA.revoked.mcpConnections, 1);
     assert.strictEqual(reportA.revoked.firebase, "deleted");
     assert.strictEqual(reportA.totalRows,
@@ -510,7 +565,6 @@ const tell = (from, toPhone, message) => db.one(
     for (const ext of [".m4a", ".user.pcm", ".agent.pcm"]) {
       assert.ok(!exists(recStem(A) + ext), `${ext} still on disk`);
     }
-    assert.ok(!exists(livePcm), "the call in progress kept writing");
     const listed = await recorder.list({ limit: 200 });
     assert.ok(!listed.some((r) => Number(r.user_id) === A));
   });
@@ -917,84 +971,6 @@ const tell = (from, toPhone, message) => db.one(
     await privacy.deleteUserEverywhere(F, { reason: "erase-test cleanup" });
   });
   await new Promise((r) => aiServer.close(r));
-
-  await atest("a recording still starting when the delete runs removes itself", async () => {
-    // Its INSERT is held back (a lock on the table) until the delete has
-    // looked for open recordings, so the delete cannot see it: the
-    // recording has to notice by itself.
-    const E = (await db.createUser({ email: `erase-e-${stamp}@example.test`, name: "Erase e" })).id;
-    await optIn(E);
-    const session = `race-${E}-${stamp}`;
-    let release;
-    let locked = false;
-    const held = new Promise((r) => { release = r; });
-    const locker = db.tx(async (c) => {
-      await c.query(`LOCK TABLE live_recordings IN EXCLUSIVE MODE`);
-      locked = true;
-      await held;
-    });
-    const waiting = (pattern) => db.one(
-      `SELECT count(*)::int AS n FROM pg_stat_activity
-        WHERE pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE $1`,
-      [pattern]).then((r) => r.n > 0);
-    const day = path.join(RECS, new Date().toISOString().slice(0, 10));
-    const raw = [".user.pcm", ".agent.pcm"].map((ext) => path.join(day, session + ext));
-    let handle = null;
-    try {
-      await until(() => locked, "lock");
-      handle = recorder.begin(E, session);
-      await until(() => waiting("%INSERT INTO live_recordings%"), "the recording's INSERT waits");
-      assert.ok(raw.every(exists), "the raw halves are open while it starts");
-      const deleting = privacy.deleteUserEverywhere(E, { reason: "race test" });
-      // The delete has passed abortUser once its own transaction queues
-      // behind the same lock.
-      await until(() => waiting("DELETE FROM live_recordings%"), "the delete's transaction waits");
-      release();
-      await locker;
-      const report = await deleting;
-      assert.strictEqual(report.revoked.liveRecordings, 0, "the delete saw it: this is not the race");
-      // Not stopped from here: a real call would keep sending audio. The
-      // recording has to give up on its own, row and raw halves together.
-      await until(() => raw.every((p) => !exists(p)), "still recording a deleted account's call");
-      assert.strictEqual(
-        (await db.one(`SELECT count(*)::int AS n FROM live_recordings WHERE session_id = $1`, [session])).n, 0);
-      assert.ok(!exists(path.join(day, session + ".m4a")));
-    } finally {
-      release();
-      await locker.catch(() => {});
-      if (handle) await handle.stop();
-    }
-  });
-
-  await atest("Bills by email: addresses, received mail, raw files and email documents all go", async () => {
-    process.env.MAILIN_ENABLED = "1";
-    process.env.MAILIN_DOMAIN = "mailin.test";
-    const address = require("../src/mailin/address");
-    const ingest = require("../src/mailin/ingest");
-    const M = (await db.createUser({ email: `erase-m-${stamp}@example.test`, name: "Erase m" })).id;
-    try {
-      await address.turnOn(M);
-      await address.rotate(M); // one retired, one active
-      await address.trust(M, "me@example.test");
-      const live = address.toClient(await address.getForUser(M)).address;
-      const raw = Buffer.from(`From: me@example.test\r\nMessage-ID: <erase-${stamp}@example.test>\r\n\r\nqueued, never processed\r\n`);
-      const q = await ingest.ingestInbound(raw, live, { transport: "test" });
-      assert.ok(q.ok);
-      const rawPath = (await db.one(`SELECT raw_path FROM mail_inbound WHERE id=$1`, [q.id])).raw_path;
-      assert.ok(exists(rawPath));
-      await require("../src/docs/store").createDocument(M, { buffer: Buffer.from("%PDF-1.4 bill"), filename: "bill.pdf",
-        mime: "application/pdf", source: { kind: "email", ref: `${q.id}:0`, label: "bescom.test", verified: true } });
-      await privacy.deleteUserEverywhere(M, { reason: "test" });
-      for (const t of ["mail_addresses", "mail_inbound", "documents"]) {
-        assert.strictEqual((await db.one(`SELECT count(*)::int AS n FROM ${t} WHERE user_id = $1`, [M])).n, 0, t);
-      }
-      assert.ok(!exists(path.join(FILES, String(M))), "files/<uid> and its mailin/ folder are gone");
-      assert.strictEqual((await ingest.ingestInbound(raw, live, {})).code, "unknown");
-    } finally {
-      delete process.env.MAILIN_ENABLED;
-      delete process.env.MAILIN_DOMAIN;
-    }
-  });
 
   // Tidy up after ourselves.
   server.close();

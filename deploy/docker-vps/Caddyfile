@@ -1,6 +1,39 @@
+# Production reverse proxy — /opt/myassistant/Caddyfile.
+# Caddy gets and renews the TLS certificates. deploy/docker-vps/README.md
+# says how to apply a change (it is not part of the code deploy).
+
 backend.envisionsit.in {
-	reverse_proxy backend:3000
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	# Prometheus scrapes the backend inside the Docker network; the public
+	# never reaches /metrics, token or not.
+	@metrics path /metrics /metrics/*
+	respond @metrics 404
+
+	# Grafana (monitoring/compose.monitoring.yml), behind its own login.
+	handle /grafana* {
+		reverse_proxy grafana:3000
+	}
+	handle {
+		reverse_proxy backend:3000
+	}
 }
+
+# The WishMe app shares this VPS (its own compose project); unchanged.
+189-72-146-77.sslip.io {
+	reverse_proxy wishme-api-1:3000
+}
+
+# Plain HTTP: only /health answers (load-balancer style probes); everything
+# else goes to HTTPS, so passwords, tokens and the admin key never travel
+# in clear. 308 keeps a POST a POST.
 :80 {
-	reverse_proxy backend:3000
+	handle /health {
+		reverse_proxy backend:3000
+	}
+	handle {
+		redir https://backend.envisionsit.in{uri} 308
+	}
 }

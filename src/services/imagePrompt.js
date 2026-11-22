@@ -107,8 +107,8 @@ async function enhancePrompt(words, { purpose = "photo", style = "", shape = "",
         }),
       }],
       {
-        system: SYSTEM, json: true, model, modelEnv: "IMAGE_PROMPT_MODEL",
-        timeoutMs: timeoutMs(), noRetry: true, thinking: "MINIMAL",
+        system: SYSTEM, json: true, model,
+        timeoutMs: timeoutMs(), noRetry: true,
       }
     );
     const p = parseReply(reply);

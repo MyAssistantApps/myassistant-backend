@@ -193,6 +193,9 @@ async function applyWebhook(event) {
     `UPDATE payment_requests
         SET status=$2, paid_at=CASE WHEN $2='paid' THEN $3 ELSE paid_at END, updated_at=$3
       WHERE provider_id=$1 AND status <> $2
+        -- "paid" is final: a late or replayed expired/cancelled event must
+        -- not turn it back, and a later "paid" retry must not notify twice.
+        AND (status <> 'paid' OR $2 = 'paid')
       RETURNING *`,
     [providerId, status, Date.now()]
   ).catch(() => null);

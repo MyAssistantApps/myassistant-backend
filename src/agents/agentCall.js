@@ -14,13 +14,13 @@
  */
 
 const crypto = require("crypto");
-const { generateReply } = require("../services/ai/router");
 const { DEFAULT_TONE } = require("./callAgentConfig");
 
 function cfg() {
   return {
     base: (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, ""),
     dailyLimit: Number(process.env.AGENT_CALL_DAILY_LIMIT || 20),
+    systemDailyLimit: Number(process.env.AGENT_CALL_SYSTEM_DAILY_LIMIT || 150),
     bolnaKey: process.env.BOLNA_API_KEY || "",
     bolnaFrom: process.env.BOLNA_FROM_NUMBER || "",
     bolnaAgent: process.env.BOLNA_AGENT_ID || "",
@@ -85,6 +85,65 @@ function dailyCount(userId) {
   return dayCounts.get(`${userId}:${new Date().toISOString().slice(0, 10)}`) || 0;
 }
 
+/**
+ * THE DAILY LIMIT SURVIVES RESTARTS AND PARALLEL REQUESTS (audit
+ * 2026-11-21). The count lived only in memory, so every deploy reset it,
+ * and the check ran before an await while the bump ran after, so ten
+ * requests at once all passed. Now the day's count is seeded from the
+ * calls already filed today (task_outcomes), and the check and the bump
+ * happen together with no await between them. A refused call gives its
+ * slot back (refundDaily).
+ */
+async function reserveDaily(key0, limit, userId) {
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `${key0}:${day}`;
+  if (!dayCounts.has(key)) {
+    let filed = 0;
+    // Only the user's own allowance is seeded from what was filed today;
+    // the scheduled-reminder allowance starts from memory.
+    if (!String(key0).startsWith("sys:")) {
+      try {
+        const r = await require("../db").one(
+          `SELECT COUNT(*)::int AS n FROM task_outcomes
+            WHERE user_id = $1 AND kind = 'agent_call' AND created_at >= $2 AND status <> 'failed'`,
+          [userId, Date.parse(`${day}T00:00:00Z`)]);
+        filed = Number(r?.n) || 0;
+      } catch { /* table not there yet: nothing filed today */ }
+    }
+    for (const k of dayCounts.keys()) if (!k.endsWith(day)) dayCounts.delete(k);
+    if (!dayCounts.has(key)) dayCounts.set(key, filed);
+  }
+  const n = dayCounts.get(key);
+  if (n >= limit) return false;
+  dayCounts.set(key, n + 1);
+  return true;
+}
+function refundDaily(key0) {
+  const key = `${key0}:${new Date().toISOString().slice(0, 10)}`;
+  const n = dayCounts.get(key) || 0;
+  if (n > 0) dayCounts.set(key, n - 1);
+}
+
+/**
+ * WHERE A CALL MAY GO (audit 2026-11-21): Indian numbers only by default.
+ * normalizeNumber accepted any "+<digits>", so a scripted account could
+ * ring international or premium-rate numbers on our telephony bill.
+ * AGENT_CALL_ALLOWED_PREFIXES (comma list, e.g. "+91,+971") widens it.
+ */
+function allowedDestination(e164) {
+  const prefixes = String(process.env.AGENT_CALL_ALLOWED_PREFIXES || "+91")
+    .split(",").map((x) => x.trim()).filter(Boolean);
+  if (!prefixes.some((p) => e164.startsWith(p))) return false;
+  // +91: ten digits after the code; the 1900 premium range and the
+  // 1800/1860 service numbers are refused.
+  if (e164.startsWith("+91")) {
+    const rest = e164.slice(3);
+    if (!/^\d{10}$/.test(rest)) return false;
+    if (/^(1800|1860|1900)/.test(rest)) return false;
+  }
+  return /^\+\d{8,15}$/.test(e164);
+}
+
 // ---------------- TASK MODE ----------------
 
 // "ask / find out / when / what time" => two-way; otherwise a one-way notice.
@@ -93,46 +152,6 @@ const ASK_RX =
 
 function detectMode(task) {
   return ASK_RX.test(String(task || "")) ? "ask" : "inform";
-}
-
-/** Preview-only: the opening line the agent would say (LLM round-trip —
- *  live calls never pay it; the hosted agent speaks from its own prompt). */
-async function buildScript({ userName, contactName, task, lang }) {
-  const mode = detectMode(task);
-  const who = userName ? userName : "the caller";
-  const sys =
-    "You write a SHORT phone script for an AI assistant calling someone ON " +
-    "BEHALF OF a user. You speak to the CONTACT, not the user. Warm, brief, " +
-    "natural. Identify yourself in one clause as calling on " +
-    `${who}'s behalf. ` +
-    (mode === "ask"
-      ? "ASK the contact the user's question. "
-      : "INFORM the contact; do not ask a question. ") +
-    "Reply with STRICT JSON only, no markdown: " +
-    '{"speech":"<the main thing you say>","closing":"<a short sign-off>"}. ' +
-    "Keep speech to 1-2 sentences. Use ONLY the language of code " +
-    `"${(lang || "en").slice(0, 2)}" (fallback to simple English). ` +
-    "Never invent details the user did not give.";
-  const user =
-    `User's name: ${who}. Contact's name: ${contactName}. ` +
-    `What the user asked me to do: "${task}".`;
-  try {
-    const { reply } = await generateReply([{ role: "user", content: user }], { system: sys });
-    const parsed = JSON.parse(stripFences(reply));
-    const speech = String(parsed.speech || "").trim();
-    if (speech) return { mode, speech };
-  } catch (_) {}
-  return {
-    mode,
-    speech:
-      mode === "ask"
-        ? `Hello, I'm calling on behalf of ${who}. ${task}`
-        : `Hello, I'm calling on behalf of ${who} with a message. ${task}`,
-  };
-}
-
-function stripFences(s) {
-  return String(s || "").replace(/```json/gi, "").replace(/```/g, "").trim();
 }
 
 // ---------------- BOLNA ----------------
@@ -953,11 +972,6 @@ async function closeStale({ olderThanMs = STALE_MS } = {}) {
 
 // ---------------- PUBLIC API ----------------
 
-async function preview({ userName, contactName, task, lang }) {
-  const script = await buildScript({ userName, contactName, task, lang });
-  return { opening: script.speech, allowed: true, reason: null, mode: script.mode };
-}
-
 /**
  * Place an agent call. Returns { id } (202). Throws { code:"unavailable" }
  * when telephony isn't configured, { code:"quota" } over the daily limit,
@@ -965,11 +979,17 @@ async function preview({ userName, contactName, task, lang }) {
  * the calling service refused — `message` is a plain sentence, never the
  * service's reply (see noteProviderFailure).
  */
-async function start({ userId, userName, toNumber, contactName, task, lang, selfCall, retryTimes, retryGapMinutes, tone, gender, live }) {
+async function start({ userId, userName, toNumber, contactName, task, lang, selfCall, retryTimes, retryGapMinutes, tone, gender, live, system }) {
   if (!enabled()) throw { code: "unavailable" };
   const to = normalizeNumber(toNumber);
-  if (!to) throw { code: "bad_number" };
-  if (userId && dailyCount(userId) >= cfg().dailyLimit) throw { code: "quota" };
+  if (!to || !allowedDestination(to)) throw { code: "bad_number" };
+  // Scheduled reminders the professional set up (appointment, recall,
+  // hearing) have their own, larger allowance: a busy clinic sees more
+  // than 20 patients a day, and a reminder dropped for the quota was
+  // never retried (audit 2026-11-21).
+  const quotaKey = system ? `sys:${userId}` : userId;
+  const limit = system ? cfg().systemDailyLimit : cfg().dailyLimit;
+  if (userId && !(await reserveDaily(quotaKey, limit, userId))) throw { code: "quota" };
 
   const rec = {
     id: crypto.randomBytes(12).toString("hex"),
@@ -1045,8 +1065,8 @@ async function start({ userId, userName, toNumber, contactName, task, lang, self
 
   try {
     rec.providerRef = await placeByProvider(rec);
-    if (userId) bumpDaily(userId);
   } catch (e) {
+    if (userId) refundDaily(quotaKey);
     const reason = noteProviderFailure(e);
     rec.state = "failed";
     rec.result = `I couldn't start the call to ${contactName} just now — the calling service ` +
@@ -1071,7 +1091,7 @@ async function start({ userId, userName, toNumber, contactName, task, lang, self
 }
 
 /** Poll status. `answer` is the RAW transcript — callers that act on the
- *  reply (the meeting negotiator) need the words, not a summary. */
+ *  reply need the words, not a summary. */
 function status(id) {
   const rec = calls.get(id);
   if (!rec) return null;
@@ -1156,7 +1176,6 @@ module.exports = {
   provider,
   bolnaWebhook,
   stopBolna,
-  preview,
   start,
   status,
   get,
@@ -1169,6 +1188,8 @@ module.exports = {
   // For tests: the failure bookkeeping, and a way to clear it.
   _trouble: trouble,
   redactNumbers,
+  normalizeNumber,
+  allowedDestination,
   // For tests: how a call addresses the person it rings.
   _addressFor: addressFor,
   _resetTrouble() {

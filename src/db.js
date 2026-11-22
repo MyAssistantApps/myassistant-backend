@@ -3,8 +3,8 @@
  *
  * Why Postgres (was better-sqlite3): SQLite allows exactly ONE writer
  * process, which pinned the Deployment to a single replica. Postgres
- * supports many concurrent writers → the k8s HPA can finally scale the
- * backend horizontally.
+ * supports many concurrent writers, so the database no longer limits the
+ * backend to one process.
  *
  * Env: DATABASE_URL, e.g. postgres://user:pass@host:5432/myassistant
  *
@@ -19,10 +19,24 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
+// Bounded waits. Without connectionTimeoutMillis a request that finds the
+// pool exhausted (a slow query storm, a stuck transaction) queues forever
+// and the phone just spins; with it, it fails in seconds and the error
+// handler answers. idle_in_transaction_session_timeout makes Postgres end
+// a session that opened a transaction and then stalled (a bug that forgot
+// COMMIT, a hung await between statements), releasing its row locks
+// instead of blocking every writer behind it. statement_timeout is opt-in
+// (PG_STATEMENT_TIMEOUT_MS): boot migrations and embedding backfills may
+// legitimately run long.
+const stmtTimeout = Number(process.env.PG_STATEMENT_TIMEOUT_MS) || 0;
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: Number(process.env.PG_POOL_SIZE || 10),
   idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: Number(process.env.PG_CONNECT_TIMEOUT_MS) || 10_000,
+  idle_in_transaction_session_timeout: Number(process.env.PG_IDLE_TX_TIMEOUT_MS) || 60_000,
+  ...(stmtTimeout > 0 ? { statement_timeout: stmtTimeout } : {}),
+  application_name: "myassistant-backend",
 });
 
 pool.on("error", (e) => console.error("pg pool error:", e.message));
@@ -90,10 +104,8 @@ async function init() {
     -- Unix seconds; a session token issued before it is refused
     -- (middleware/auth.js verifySession). 0 = nothing revoked.
     ALTER TABLE users ADD COLUMN IF NOT EXISTS sessions_valid_after BIGINT NOT NULL DEFAULT 0;
-    -- The generation of the user's assistant-functions keys (scope "appfn",
-    -- src/appfunctions): a key carries the value it was issued under, and
-    -- DELETE /appfunctions/token adds one, so every earlier key stops
-    -- working at once. Dies with the users row on erase.
+    -- Retired and unused: the generation counter of the removed
+    -- assistant-functions keys. Kept so existing databases need no change.
     ALTER TABLE users ADD COLUMN IF NOT EXISTS appfn_epoch INTEGER NOT NULL DEFAULT 0;
     -- Minutes east of UTC, from the X-TZ-Offset header the app sends on
     -- every request (middleware/auth.js). users.timezone is a free-text
@@ -144,6 +156,11 @@ async function init() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS geo_label TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS geo_at BIGINT NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS idx_users_nearby ON users (profession_shared, geo_lat, geo_lng);
+    -- Social sign-in looks users up by (provider, provider_sub) on every
+    -- Google/Apple login (findByProvider); this was a full-table scan.
+    -- Not UNIQUE: existing data may already hold a duplicate, and a unique
+    -- index that fails to build would stop the server booting.
+    CREATE INDEX IF NOT EXISTS idx_users_provider_sub ON users (provider_sub) WHERE provider_sub IS NOT NULL;
 
     -- Partial: only real numbers compete for uniqueness, so any number of
     -- accounts may sit at NULL while none may share a number.
@@ -232,7 +249,7 @@ async function init() {
     --
     -- Every task records HOW it was executed, because the three paths carry
     -- very different promises and the user must never be misled (§28):
-    --   path='call'     Hari phoned the business herself (Plivo). call_id
+    --   path='call'     the assistant phoned the business (legacy rows). call_id
     --                   points at the live agent-call record; outcome holds
     --                   what the business actually said.
     --   path='handoff'  Hari prepared the order and deep-linked the provider
@@ -278,7 +295,7 @@ async function init() {
 
     -- /assistant call-and-inform: when the opening message was rendered
     -- with the user's enrolled/cloned voice (ElevenLabs), this holds the
-    -- public mp3 URL that Plivo <Play>s instead of carrier TTS.
+    -- public mp3 URL played instead of carrier TTS (legacy).
     CREATE TABLE IF NOT EXISTS kv (
       k TEXT PRIMARY KEY,
       v TEXT NOT NULL
@@ -387,10 +404,9 @@ async function init() {
     -- database (new environment, disaster restore) failed to boot.
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS
       understanding TEXT NOT NULL DEFAULT '';
-    -- Bills by email (mailin/): a document that came from an outside
-    -- sender. source 'email', source_ref '<mail_inbound.id>:<part>' (a
-    -- retry reuses its document), source_label the From DOMAIN, and
-    -- source_verified 1 when the sender's signature checked out.
+    -- Where a document came from when the user did not upload it: source
+    -- (e.g. 'email'), source_ref (unique per user when set), source_label
+    -- and source_verified. docs/store.js reads them.
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_ref TEXT NOT NULL DEFAULT '';
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_label TEXT NOT NULL DEFAULT '';
@@ -453,10 +469,6 @@ async function init() {
   // hari_reviewable() function every admin view filters with.
   await require("./users/helpImprove").migrate((sql) => pool.query(sql));
 
-  // Connected apps: Notion (tokens encrypted like the MCP secrets).
-  await require("./connectors/notion/store").migrate((sql) => pool.query(sql));
-  await require("./connectors/apps").migrate((sql) => pool.query(sql));
-
   // Document intelligence: chunk + embedding store for semantic retrieval.
   await require("./docs/intelligence").migrate((sql) => pool.query(sql));
 
@@ -469,10 +481,6 @@ async function init() {
   // Reference knowledge packs (law, govt, money, health, travel). Public,
   // not tenant-scoped — see knowledge/schema.js.
   await require("./knowledge/schema").migrate((sql) => pool.query(sql));
-
-  // Inbound calling: the numbers Hari answers, per-user screening rules,
-  // and the call log she files.
-  await require("./inbound/schema").migrate((sql) => pool.query(sql));
 
   // Commitments the user makes ("I'll send it by Friday"), tracked to done.
   await require("./commitments/service").migrate((sql) => pool.query(sql));
@@ -499,18 +507,12 @@ async function init() {
   // the owner makes from it by hand (2026-09-26).
   await require("./videonotes/store").migrate((sql) => pool.query(sql));
 
-  // Bills by email: the private address and the emails it received.
-  await require("./mailin/store").migrate((sql) => pool.query(sql));
   // Mobile recharge: the network (and Vi circle) of each number they recharge.
   await require("./recharge/numbers").migrate((sql) => pool.query(sql));
   // Self-checks from the phones (routes/diagnostics.js).
   await require("./routes/diagnostics").migrate((sql) => pool.query(sql));
   // The spend meter: what every paid call cost, per user (admin dashboard).
   await require("./ops/spend").migrate((sql) => pool.query(sql));
-
-  // Live avatar persistence: per-user personas (the brain hookup),
-  // session records, and the rolling recent-conversation window.
-
 
   // SERIAL ids come back from pg as integers; BIGINT columns come back as
   // strings by default — parse them so Date-math keeps working.
@@ -557,16 +559,10 @@ async function setGender(userId, gender) {
   return findById(userId);
 }
 
-async function setBirthday(userId, birthday) {
-  const b = typeof birthday === "string" && birthday.trim() ? birthday.trim().slice(0, 20) : null;
-  await run("UPDATE users SET birthday = $1 WHERE id = $2", [b, Number(userId)]);
-  return findById(userId);
-}
-
 /** Find-or-create for social sign-in. Links by provider sub first, then email.
  *  Returns { user, created } — `created` marks a brand-new account so the
  *  app can run the sign-up interview exactly once. */
-async function upsertSocialUser({ provider, sub, email, emailVerified = false, name }) {
+async function upsertSocialUser({ provider, sub, email, emailVerified = false, name }, _retried = false) {
   let user = await findByProvider(provider, sub);
   if (user) {
     if (name && !user.name) {
@@ -605,10 +601,20 @@ async function upsertSocialUser({ provider, sub, email, emailVerified = false, n
       return { user: await findById(existing.id), created: false };
     }
   }
-  return {
-    user: await createUser({ email: verifiedEmail, name, provider, providerSub: sub }),
-    created: true,
-  };
+  try {
+    return {
+      user: await createUser({ email: verifiedEmail, name, provider, providerSub: sub }),
+      created: true,
+    };
+  } catch (e) {
+    // Two first sign-ins at once (the app retrying a slow request): the
+    // loser hits users.email UNIQUE. The winner's row is the account —
+    // answer with it instead of a 500.
+    if (e && e.code === "23505" && !_retried) {
+      return upsertSocialUser({ provider, sub, email, emailVerified, name }, true);
+    }
+    throw e;
+  }
 }
 
 /** Shape sent to clients — never includes password_hash. */
@@ -631,11 +637,13 @@ function publicUser(u) {
     // after sign-in already knows which workspaces to show.
     persona: u.persona || "",
     specialty: u.specialty || "",
+    // Their own words ("Chartered Accountant"), shown on the Home banner.
+    profession: u.profession || "",
   };
 }
 
 module.exports = {
   pool, query, one, run, tx, init, close,
   findByEmail, findById, upsertSocialUser, createUser, publicUser,
-  cleanGender, setGender, setBirthday,
+  cleanGender, setGender,
 };

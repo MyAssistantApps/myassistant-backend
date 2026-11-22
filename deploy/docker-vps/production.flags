@@ -1,0 +1,47 @@
+# THE SETTINGS PRODUCTION RUNS WITH (the VPS's .env), WITHOUT SECRETS.
+#
+# scripts/production-config-test.js runs the server with exactly these, so
+# CI tests the combination users actually get (2026-11-01: the voice picker
+# offered GPT-Live voices while production ran without GPT-Live, and nobody
+# noticed until the owner did).
+#
+# KEY=<secret> means "set on the server, value never stored here"; the
+# test fills it with a dummy. Change this file in the same PR as the .env.
+NODE_ENV=production
+LOG_LEVEL=info
+AGENT_CALL_DAILY_LIMIT=20
+PORT=3000
+DATA_DIR=/app/data
+PUBLIC_BASE_URL=https://backend.envisionsit.in
+ALLOW_APP_KEY=false
+AUTH_DISABLED=false
+# On for demos only. MUST be false before a public release (anyone could
+# sign in as any phone number). The test prints a warning while it is on.
+ALLOW_DEV_PHONE_VERIFY=true
+ADMIN_KEY=<secret>
+APP_API_KEY=<secret>
+DATABASE_URL=<secret>
+GOOGLE_WEB_CLIENT_ID=<secret>
+JWT_SECRET=<secret>
+OPENAI_API_KEY=<secret>
+# Photo edits (Style Studio try-ons): the edits endpoint rejects
+# gpt-image-1 on this account (2026-11-03).
+OPENAI_IMAGE_EDIT_MODEL=gpt-image-1.5
+GPT_LIVE=off
+BOLNA_API_KEY=<secret>
+BOLNA_FROM_NUMBER=+917965860041
+BOLNA_AGENT_ID=5f68c977-d156-41f9-ab97-a505c34f346b
+BOLNA_AGENT_ID_MALE=cb752bce-9896-44ff-9442-3f54f7b22955
+# Security hardening (2026-11-15) — not set on the server, so the code
+# defaults apply: SPEND_DAILY_USD_GLOBAL=40, SPEND_DAILY_USD_USER=3,
+# REALTIME_DAILY_SESSIONS_USER=150, LOGIN_MAX_FAILS=10. Set them in the
+# server's .env (and here) to change. DEV_PHONE_VERIFY_USERS is unset:
+# typed phone claims stay open to every account while the flag above is on.
+# WALLET (2026-11-22, src/wallet): OFF on production until the launch gate.
+# Unset means off; at launch set WALLET_ENABLED=on, first with
+# WALLET_ALLOW_USERS=<team user ids, comma-separated>, then without it.
+# Needs RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET / RAZORPAY_WEBHOOK_SECRET
+# (<secret>, live keys) on the server — not set there yet. Limits and
+# referral amounts have defaults (WALLET_*, REFERRAL_*, BONUS_EXPIRY_DAYS).
+# Runbook: deploy/docker-vps/WALLET.md
+WALLET_ENABLED=off

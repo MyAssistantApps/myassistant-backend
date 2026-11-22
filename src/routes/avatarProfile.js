@@ -10,8 +10,6 @@
  *   DELETE /avatar-profile          → {ok}  every file and the row, gone
  *   POST   /avatar-profile/video    multipart file + duration_ms,
  *                                   script_version → {ok, video}
- *   POST   /avatar-profile/face     multipart file (builds <= 117)
- *   POST   /avatar-profile/voice    multipart file (builds <= 117)
  *
  * The app has called these since 2026-09-04 and none of them existed, so
  * the screen behind "Send messages as you" spun forever. The owner's
@@ -54,12 +52,6 @@ const MIN_MS = 15_000;
 const MAX_MS = 90_000;
 
 const VIDEO_MIME = { "video/mp4": ".mp4", "video/quicktime": ".mov" };
-const FACE_MIME = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/heic": ".heic" };
-const VOICE_MIME = {
-  "audio/mp4": ".m4a", "audio/m4a": ".m4a", "audio/x-m4a": ".m4a", "audio/aac": ".aac",
-  "audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/ogg": ".ogg",
-  "audio/webm": ".webm",
-};
 
 function uid(req, res) {
   const id = Number(req.user?.sub);
@@ -194,7 +186,10 @@ router.put("/prefs", async (req, res) => {
   res.json({ ok: true });
 });
 
-/** "Delete everything": the video, photo, voice sample, kept clips, row. */
+/**
+ * "Delete everything": the video (and any photo or voice sample an old
+ * build stored), kept clips, row.
+ */
 router.delete("/", async (req, res) => {
   const id = uid(req, res);
   if (id === null) return;
@@ -276,48 +271,6 @@ router.post("/video", uploadLimit, requireConsent, receiver(VIDEO_MAX), async (r
     drop(req);
   }
 });
-
-/**
- * The photo and the voice sample builds <= 117 still send. Stored like
- * the video, under the same identity/<uid>/ prefix, so Delete everything
- * and the account eraser find them too.
- */
-function legacyUpload(kind, types, maxBytes) {
-  return [uploadLimit, requireConsent, receiver(maxBytes), async (req, res) => {
-    const id = uid(req, res);
-    if (id === null) return drop(req);
-    const f = req.file;
-    try {
-      if (!f) return res.status(400).json({ error: "a file is required" });
-      const mime = String(f.mimetype || "").toLowerCase();
-      const ext = types[mime] ||
-        (kind === "face" && mime.startsWith("image/") ? ".img" : null) ||
-        (kind === "voice" && mime.startsWith("audio/") ? ".audio" : null);
-      if (!ext) return res.status(400).json({ error: `unsupported file type ${mime}` });
-      const key = `identity/${id}/${kind}-${media.newId()}${ext}`;
-      await media.put(key, { path: f.path });
-      // Refused (403) when consent went, or the row did, mid-upload — and
-      // then this file is deleted rather than left with nothing pointing at it.
-      const prev = await store.setAsset(id, kind, key).catch(async (e) => {
-        await media.delete(key).catch(() => {});
-        throw e;
-      });
-      if (prev && prev !== key && media.isKey(prev)) await media.delete(prev).catch(() => {});
-      audit.record(id, `avatar.${kind}.saved`, `${kind === "face" ? "photo" : "voice sample"} saved`)
-        .catch(() => {});
-      res.json({ ok: true });
-    } catch (e) {
-      if (e.http === 403) return res.status(403).json({ error: "consent_required" });
-      console.error(`avatar-profile ${kind}:`, e.stack || e.message);
-      res.status(500).json({ error: "that could not be saved — try again" });
-    } finally {
-      drop(req);
-    }
-  }];
-}
-
-router.post("/face", ...legacyUpload("face", FACE_MIME, 18 * MB));
-router.post("/voice", ...legacyUpload("voice", VOICE_MIME, 20 * MB));
 
 module.exports = router;
 module.exports.MIN_MS = MIN_MS;

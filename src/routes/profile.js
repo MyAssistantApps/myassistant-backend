@@ -1,17 +1,13 @@
 /**
- * PROFILE — the onboarding survey's landing point.
+ * PROFILE — the signed-in user's profile and assistant settings.
  *
- * POST /profile/survey  { name, location, gender, preferences: [..] }
- *
- * Two destinations, one call:
- *  1. users table — name + gender (gender drives the opposite-gender
- *     avatar; name personalizes every reply).
- *  2. agent_memories — location and preferences become importance-3
- *     memories, so EVERY agent (voice loop, chat, the D-ID face) knows
- *     the user from minute one, exactly like facts learned in
- *     conversation. No separate "profile lookup" code path to maintain.
- *
- * GET /profile — the profile as the app sees it (user + memories).
+ * GET    /profile                 user + remembered facts
+ * GET    /profile/full            profile incl. assistant identity (Settings)
+ * PUT    /profile/details         structured onboarding fields
+ * POST   /profile/profession/resolve  free-text profession -> workspace
+ * PUT    /profile/assistant       assistant name / gender / voice / style
+ * GET|POST|DELETE /profile/instructions   standing rules
+ * GET|DELETE      /profile/memories       remembered facts
  */
 const router = require("express").Router();
 const db = require("../db");
@@ -21,55 +17,6 @@ function uidOf(req) {
   const id = Number(req.user?.sub);
   return Number.isInteger(id) && id > 0 ? id : null;
 }
-
-router.post("/survey", async (req, res) => {
-  const uid = uidOf(req);
-  if (!uid) return res.status(401).json({ error: "sign in required" });
-
-  const { name, location, gender, birthday, preferences } = req.body || {};
-  const cleanName = typeof name === "string" ? name.trim().slice(0, 80) : "";
-  const cleanLoc =
-    typeof location === "string" ? location.trim().slice(0, 120) : "";
-  const cleanBirthday =
-    typeof birthday === "string" ? birthday.trim().slice(0, 20) : "";
-  const prefs = Array.isArray(preferences)
-    ? preferences
-        .filter((p) => typeof p === "string" && p.trim())
-        .map((p) => p.trim().slice(0, 60))
-        .slice(0, 12)
-    : [];
-
-  try {
-    if (cleanName) {
-      await db.run("UPDATE users SET name = $1 WHERE id = $2", [cleanName, uid]);
-    }
-    if (gender !== undefined) {
-      await db.setGender(uid, gender);
-    }
-    if (cleanBirthday) {
-      await db.setBirthday(uid, cleanBirthday);
-      await memory.saveMemory(uid, `User's birthday is ${cleanBirthday}`, 3);
-    }
-    if (cleanName) {
-      await memory.saveMemory(uid, `User's name is ${cleanName}`, 3);
-    }
-    if (cleanLoc) {
-      await memory.saveMemory(uid, `User lives in ${cleanLoc}`, 3);
-    }
-    if (prefs.length) {
-      await memory.saveMemory(
-        uid,
-        `User's interests: ${prefs.join(", ")}`,
-        2
-      );
-    }
-    const user = await db.findById(uid);
-    res.json({ ok: true, user: db.publicUser(user) });
-  } catch (e) {
-    console.error("survey save failed:", e.message);
-    res.status(500).json({ error: "could not save profile" });
-  }
-});
 
 router.get("/", async (req, res) => {
   const uid = uidOf(req);
@@ -112,11 +59,14 @@ router.put("/details", async (req, res) => {
   res.json(p);
 });
 
-// CONVERSATIONAL onboarding: free text/speech in, structured fields out.
-router.post("/conversational", async (req, res) => {
+// "What do you do?" in the user's own words → the workspace it maps to.
+// Read-only: the app shows the answer and saves it with PUT /details.
+router.post("/profession/resolve", async (req, res) => {
   const uid = uidOf2(req);
   if (!uid) return res.status(401).json({ error: "sign in" });
-  const out = await userCtx.extractProfile(uid, req.body?.text);
+  const text = String(req.body?.text ?? "");
+  if (!text.trim()) return res.status(400).json({ error: "text required" });
+  const out = await require("../users/professionResolve").resolveProfession(text);
   res.json(out);
 });
 

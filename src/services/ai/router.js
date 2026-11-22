@@ -36,8 +36,6 @@ function envModel(name, fallback) {
 
 const chatModel = () => openai.models.chat();
 const fallbackModel = () => openai.models.fallback();
-/** Kept for callers that once branched on the model family; nothing is Gemini now. */
-const isGemini3 = () => false;
 
 function isTransient(e) {
   const msg = String((e && e.message) || "");
@@ -64,8 +62,7 @@ async function withRetry(run, { model, noRetry = false } = {}) {
 
 /**
  * generateReply(messages, opts) — opts: system, extraSystem, model, json,
- * schema, timeoutMs, noRetry, temperature, maxTokens. (`thinking`,
- * `mediaResolution` and `modelEnv` were Gemini knobs and are ignored.)
+ * schema, timeoutMs, noRetry, temperature, maxTokens.
  */
 async function generateReply(messages, opts = {}) {
   const system = opts.system || SYSTEM_PROMPT + (opts.extraSystem || "");
@@ -145,7 +142,6 @@ module.exports = {
   generateWithTools,
   generateWithToolsStream,
   envModel,
-  isGemini3,
   chatModel,
   fallbackModel,
   generateReply,

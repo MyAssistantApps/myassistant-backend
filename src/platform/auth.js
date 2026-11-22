@@ -37,6 +37,13 @@ async function platformAuth(req, res, next) {
     }
     const user = await db.findById(app.userId);
     if (!user || user.status === "paused") return error(res, 401, "account_unavailable", "The account behind this key is not available.");
+    // "Sign out everywhere" (sessions_valid_after, unix seconds) ends app
+    // keys too (2026-11-15): a pre-account-takeover squatter's keys used to
+    // outlive the revocation that ended their sessions (db.js upsertSocialUser).
+    const validAfter = Number(user.sessions_valid_after) || 0;
+    if (validAfter && Math.floor((found.keyCreatedAt || 0) / 1000) < validAfter) {
+      return error(res, 401, "invalid_key", "This API key is not valid or was revoked.");
+    }
     req.user = { sub: String(user.id), email: user.email, name: user.name };
     req.auth = { scope: "platform", tzOffsetMin: user.tz_offset_min ?? null };
     req.platform = { app, keyId: found.keyId, user };

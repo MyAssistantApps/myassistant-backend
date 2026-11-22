@@ -11,7 +11,7 @@
  * Gating is unchanged — availability, build and permissions decide
  * (registry.declarations) before the cap is applied.
  */
-// 36 (was 32, 2026-09-30): room for meeting prep, posters and pictures.
+// 36 (was 32, 2026-09-30): room for meeting prep and pictures.
 // Measured with a 30k-char prompt and 32 tools: setup 1.8 s, first audio
 // 1.5 s after a tool call — the size of this list barely moves either.
 // 40 (2026-09-30): room for remember_address and show_address.
@@ -21,11 +21,12 @@ const LIVE_MAX = 40;
 // joins, after these, while there is room.
 const LIVE_ORDER = [
   "stay_silent", "end_conversation",
-  // "Talk to your manager" (agents/manager.js): the switch, and the way back.
-  "hand_to_manager", "hand_back_to_assistant", "read_webpage", "do_in_app",
+  "read_webpage", "do_in_app",
   "web_search", "get_weather", "find_places_nearby", "get_current_location",
   "create_reminder", "list_reminders", "schedule_task", "set_alarm", "set_timer",
   "place_phone_call", "phone_calls", "send_agent_message", "send_whatsapp_message",
+  // "Connect me to Alan's assistant" (2026-11-21): opens the call screen.
+  "connect_to_assistant",
   "list_calendar_events", "create_calendar_event",
   // The wow tools (2026-09-30). "What's my day" stays daily_brief below:
   // Live speaks the brief itself in its own voice, faster than the

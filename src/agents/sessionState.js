@@ -215,7 +215,7 @@ function noteSuppressed(state, { turnId, tool, args }) {
 
 /**
  * What the app's own [SYSTEM] line says just happened on the phone
- * (claimCheck.appNoteVouches): "the signature is on the card now". The
+ * (claimCheck.appNoteVouches): "the call to X has ended". The
  * claim checker may count it for the reply to that line. Session only,
  * never the durable ledger — nothing ran on the server.
  */

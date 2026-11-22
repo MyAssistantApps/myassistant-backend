@@ -196,14 +196,25 @@ proRouter.post("/requests/:id/accept", async (req, res) => {
     if (!Number.isFinite(startsAt) || startsAt < Date.now() - 3600_000) {
       return res.status(400).json({ error: "Please select a time for the appointment." });
     }
-    const appt = await clinicStore.createAppointment(uid, {
-      patientName: r.name,
-      patientPhone: r.phone,
-      startsAt,
-      reason: [r.preferred && `Asked for: ${r.preferred}`, r.message].filter(Boolean).join(" — ").slice(0, 200),
-      source: "web",
-      remindPatient: req.body?.remindPatient !== false,
-    });
+    // Claim first: two taps (or two devices) used to both pass the
+    // status check above and book two appointments for one request.
+    if (!(await store.claimRequest(uid, r.id, "accepted"))) {
+      return res.status(409).json({ error: "This request has already been handled." });
+    }
+    let appt;
+    try {
+      appt = await clinicStore.createAppointment(uid, {
+        patientName: r.name,
+        patientPhone: r.phone,
+        startsAt,
+        reason: [r.preferred && `Asked for: ${r.preferred}`, r.message].filter(Boolean).join(" — ").slice(0, 200),
+        source: "web",
+        remindPatient: req.body?.remindPatient !== false,
+      });
+    } catch (e) {
+      await store.setRequestStatus(uid, r.id, "new").catch(() => {}); // let them try again
+      throw e;
+    }
     const updated = await store.setRequestStatus(uid, r.id, "accepted", Number(appt.id));
     audit.record(uid, "listing.request.accepted", `request #${r.id} → appointment #${appt.id}`);
     res.json({ request: updated, appointment: clinicStore.apptShape(appt) });

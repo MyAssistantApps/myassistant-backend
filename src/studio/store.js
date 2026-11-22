@@ -204,14 +204,6 @@ async function getLook(userId, id) {
   return (await one("SELECT * FROM studio_looks WHERE id = $1 AND user_id = $2", [id, userId])) || null;
 }
 
-async function favorite(userId, id, on) {
-  await migrate();
-  await run("UPDATE studio_looks SET favorite = $1 WHERE id = $2 AND user_id = $3", [
-    on ? 1 : 0, id, userId,
-  ]);
-  return true;
-}
-
 async function deleteLook(userId, id) {
   await migrate();
   const row = await getLook(userId, id);
@@ -314,7 +306,7 @@ function toClientLook(r) {
 module.exports = {
   migrate,
   addPhoto, listPhotos, getPhoto, deletePhoto, setDefaultModel, defaultModel, countPhotos,
-  addLook, listLooks, getLook, deleteLook, favorite,
+  addLook, listLooks, getLook, deleteLook,
   spentToday, dailyCap, overCap,
   setConsent, consentAt, withdrawConsent, CONSENT_VERSION,
   toClientPhoto, toClientLook,

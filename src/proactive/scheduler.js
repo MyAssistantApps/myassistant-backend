@@ -108,12 +108,29 @@ function lowerFirst(s) {
  * to the users who can actually benefit rather than to the whole table.
  */
 async function briefableUsers() {
-  return query(
+  return everyUser(
     `SELECT u.id, u.fcm_token
        FROM users u JOIN google_tokens g ON g.user_id = u.id
-      WHERE u.fcm_token IS NOT NULL AND u.fcm_token <> ''
-      LIMIT 200`
-  ).catch(() => []);
+      WHERE u.fcm_token IS NOT NULL AND u.fcm_token <> ''`, "u.id"
+  ).catch((e) => { console.warn("brief sweep: user scan failed —", e.message); return []; });
+}
+
+/**
+ * EVERY matching user, a page at a time (keyset on id). The sweeps used a
+ * bare LIMIT 200/500 with no ORDER BY, so past that many users with a
+ * push token the rest silently never got a morning brief, a date reminder
+ * or a meeting brief — and which ones were left out changed from tick to
+ * tick. `sql` is a SELECT with a WHERE clause and no ORDER BY/LIMIT.
+ */
+async function everyUser(sql, idCol = "id", page = 500) {
+  const out = [];
+  let after = 0;
+  for (;;) {
+    const rows = await query(`${sql} AND ${idCol} > $1 ORDER BY ${idCol} LIMIT $2`, [after, page]);
+    out.push(...rows);
+    if (rows.length < page) return out;
+    after = Number(rows[rows.length - 1].id);
+  }
 }
 
 async function alreadyBriefed(userId, eventId) {
@@ -301,10 +318,10 @@ function quietMorningLine() {
 async function sweepMorningBriefs() {
   if (process.env.MORNING_BRIEF === "off") return 0;
 
-  const users = await query(
+  const users = await everyUser(
     `SELECT id, name, fcm_token, timezone, tz_offset_min, brief_hour, brief_push FROM users
-      WHERE fcm_token IS NOT NULL AND fcm_token <> '' LIMIT 500`
-  ).catch(() => []);
+      WHERE fcm_token IS NOT NULL AND fcm_token <> ''`
+  ).catch((e) => { console.warn("morning brief sweep: user scan failed —", e.message); return []; });
   if (!users.length) return 0;
 
   const { buildBrief } = require("../services/brief");
@@ -379,10 +396,10 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 async function sweepPersonDates() {
-  const users = await query(
+  const users = await everyUser(
     `SELECT id, fcm_token, timezone, tz_offset_min FROM users
-      WHERE fcm_token IS NOT NULL AND fcm_token <> '' LIMIT 500`
-  ).catch(() => []);
+      WHERE fcm_token IS NOT NULL AND fcm_token <> ''`
+  ).catch((e) => { console.warn("date reminder sweep: user scan failed —", e.message); return []; });
   let sent = 0;
 
   for (const u of users) {
@@ -478,6 +495,7 @@ async function sweepPatientRecalls() {
         contactName: r.client_name,
         task,
         lang: null,
+        system: true,
       });
       // The Calls row is agentCall.start()'s; a second one here was never
       // settled and stayed "in progress" beside it.
@@ -529,7 +547,9 @@ async function sweepAppointmentReminders() {
     return;
   }
   for (const a of due) {
-    await clinic.markReminded(a.id); // one attempt, ever
+    // One attempt, ever: the conditional stamp is the claim, so a second
+    // sweep (another replica, an overlapping tick) never rings twice.
+    if (!(await clinic.markReminded(a.id))) continue;
     try {
       const first = String(a.doctor_name || "").split(" ")[0] || null;
       const whenTxt = new Date(Number(a.starts_at)).toLocaleString("en-IN", {
@@ -541,6 +561,7 @@ async function sweepAppointmentReminders() {
         userName: first,
         toNumber: a.patient_phone,
         contactName: a.patient_name,
+        system: true,
         task:
           `Remind them of their appointment with Dr. ${first || "the doctor"} on ${whenTxt}` +
           `${a.reason ? ` (${a.reason})` : ""}. Ask whether they will be able to come. ` +
@@ -571,7 +592,7 @@ async function sweepHearingReminders() {
     return;
   }
   for (const h of due) {
-    await pro.markHearingReminded(h.id); // one attempt, ever
+    if (!(await pro.markHearingReminded(h.id))) continue; // one attempt, ever (claimed)
     try {
       const first = String(h.advocate_name || "").split(" ")[0] || null;
       const whenTxt = new Date(Number(h.at)).toLocaleString("en-IN", {
@@ -583,6 +604,7 @@ async function sweepHearingReminders() {
         userName: first,
         toNumber: h.client_phone,
         contactName: h.client_name,
+        system: true,
         task:
           `Remind them that their case "${h.case_title}" has a hearing${h.court ? ` at ${h.court}` : ""} on ${whenTxt}` +
           `${h.purpose ? ` (${h.purpose})` : ""}. Their advocate asks them to be on time and to bring any ` +
@@ -648,7 +670,9 @@ function start() {
   timer = setInterval(() => {
     if (running) return;
     running = true;
-    sweep()
+    // One replica sweeps per tick (infra/leader.js): two would nudge,
+    // brief and ring every user twice.
+    require("../infra/leader").exclusive("proactive.sweep", sweep)
       .catch((e) => console.error("proactive sweep failed:", e.message))
       .finally(() => { running = false; });
   }, SWEEP_MS);
@@ -664,7 +688,7 @@ function stop() {
 module.exports = {
   start, stop, sweep,
   sweepCommitments, sweepPatientRecalls, sweepMeetings, sweepFares, sweepMorningBriefs,
-  sweepPersonDates, sweepMomentum,
+  sweepPersonDates, sweepMomentum, everyUser,
   buildBrief, morningBody,
   inQuietHours, localHour,
 };

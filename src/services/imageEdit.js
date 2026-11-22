@@ -221,28 +221,6 @@ async function resampleTo(buffer, longEdge) {
   return out || buffer;
 }
 
-/* ------------------------------------------------------------------ */
-/* PROVIDER 1 — Gemini image models (multi-image edit)                 */
-/*                                                                     */
-/* TWO WIRE FORMATS, ON PURPOSE. Google's current documentation for    */
-/* the image models describes a new endpoint —                          */
-/*   POST /v1beta/interactions  { model, input:[...], response_format } */
-/* — while the rest of this codebase (and every working Gemini call in  */
-/* it) uses the classic                                                 */
-/*   POST /v1beta/models/{id}:generateContent { contents:[{parts}] }.   */
-/* Which of the two serves image OUTPUT today could not be established  */
-/* from the documentation, and getting it wrong means the feature never  */
-/* works at all. So both are implemented, the first success is          */
-/* remembered for the life of the process, and the log says which one   */
-/* answered. This costs one wasted round-trip once, ever.               */
-/*                                                                     */
-/* The MODEL IDS matter just as much: gemini-3-pro-image-preview and    */
-/* gemini-3.1-flash-image-preview were retired in June 2026, and        */
-/* gemini-2.5-flash-image shuts down on 2 October 2026, so none of the  */
-/* three is a safe default. The list below is the current non-preview   */
-/* line, overridable by env so a rename never needs a redeploy.         */
-/* ------------------------------------------------------------------ */
-
 /** gpt-image-1's canvas for a named shape. */
 const SIZES = {
   portrait: { width: 1024, height: 1536 },
@@ -255,101 +233,21 @@ function sizeFor(aspect) {
   return SIZES[String(aspect || "")] || SIZES.portrait;
 }
 
-function harvestImage(json) {
-  const seen = new Set();
-  const stack = [json];
-  while (stack.length) {
-    const n = stack.pop();
-    if (!n || typeof n !== "object" || seen.has(n)) continue;
-    seen.add(n);
-    if (Array.isArray(n)) { for (const v of n) stack.push(v); continue; }
-
-    const data = n.data ?? n.bytesBase64Encoded ?? n.b64_json ?? n.imageBytes;
-    const mime = n.mimeType || n.mime_type || n.contentType || n.content_type;
-    // A base64 image is long; short `data` fields are ids and flags.
-    if (typeof data === "string" && data.length > 2000 && (!mime || /^image\//.test(mime))) {
-      try {
-        const buffer = Buffer.from(data, "base64");
-        if (buffer.length > 2048) return { buffer, mime: mime || "image/png" };
-      } catch (_) {}
-    }
-    for (const k of Object.keys(n)) stack.push(n[k]);
-  }
-  return null;
-}
-
-/** Any text the model returned instead of an image — usually a refusal. */
-function harvestText(json) {
-  const out = [];
-  const seen = new Set();
-  const stack = [json];
-  while (stack.length) {
-    const n = stack.pop();
-    if (!n || typeof n !== "object" || seen.has(n)) continue;
-    seen.add(n);
-    if (Array.isArray(n)) { for (const v of n) stack.push(v); continue; }
-    if (typeof n.text === "string" && n.text.trim()) out.push(n.text.trim());
-    for (const k of Object.keys(n)) stack.push(n[k]);
-  }
-  return out.join(" ").slice(0, 220);
-}
-
-function interactionsBody(model, instruction, images, aspect, hiQuality) {
-  return {
-    model,
-    input: [
-      { type: "text", text: instruction },
-      ...images.map((im) => ({
-        type: "image",
-        mime_type: im.mime || "image/jpeg",
-        data: im.buffer.toString("base64"),
-      })),
-    ],
-    response_format: {
-      type: "image",
-      aspect_ratio: geminiAspect(aspect),
-      image_size: hiQuality ? "2K" : "1K",
-    },
-  };
-}
-
-function generateContentBody(instruction, images, aspect, hiQuality, withConfig) {
-  const body = {
-    contents: [{
-      parts: [
-        { text: instruction },
-        ...images.map((im) => ({
-          inlineData: {
-            mimeType: im.mime || "image/jpeg",
-            data: im.buffer.toString("base64"),
-          },
-        })),
-      ],
-    }],
-  };
-  if (withConfig) {
-    body.generationConfig = {
-      responseModalities: ["IMAGE"],
-      imageConfig: {
-        aspectRatio: geminiAspect(aspect),
-        ...(hiQuality ? { imageSize: "2K" } : {}),
-      },
-    };
-  }
-  return body;
-}
-
 /**
  * OpenAI gpt-image-1 edits (2026-10-02): the photo goes in, the changed
  * photo comes out, the person stays the person. A 429 is quota: noted so
  * editImage reports "switched off" honestly, and the inbox is told.
  */
-async function tryOpenAI({ instruction, images, aspect, notes, exact }) {
+async function tryOpenAI({ instruction, images, aspect, notes, exact, quality, inputFidelity }) {
   const openai = require("./ai/openai");
   if (!openai.ready()) { notes.push("openai: no key"); return null; }
   const size = exact?.width && exact?.height ? exact : sizeFor(aspect);
   try {
-    const out = await openai.imageEdit(instruction, images, { width: size.width, height: size.height });
+    const out = await openai.imageEdit(instruction, images, {
+      width: size.width, height: size.height,
+      ...(quality ? { quality } : {}),
+      ...(inputFidelity ? { inputFidelity } : {}),
+    });
     return { ...out, provider: `openai:${openai.models.image()}` };
   } catch (e) {
     if (e.status === 429) {
@@ -368,15 +266,6 @@ const CHAIN = [
   { name: "openai", when: () => true, run: tryOpenAI, ready: () => require("./ai/openai").ready() },
 ];
 
-/** Registered at load time by the optional-provider modules below, so a
- *  deployment with no extra keys carries no extra code paths. */
-function register(provider) {
-  // Ordered: a purpose-built try-on model beats a general editor at
-  // try-on, so anything declaring a priority under 0 goes in front.
-  if ((provider.priority || 0) < 0) CHAIN.unshift(provider);
-  else CHAIN.push(provider);
-}
-
 class NoProviderError extends Error {
   constructor(notes) {
     super(
@@ -386,8 +275,7 @@ class NoProviderError extends Error {
       // that would have changed nothing.
       "Image editing is not configured on this server. " +
       "Style Studio needs an image model that accepts a photo as input — " +
-      "set OPENAI_API_KEY (gpt-image-1 edits), or FASHN_API_KEY, or the " +
-      "Vertex virtual try-on credentials (VERTEX_PROJECT_ID + VERTEX_SA_JSON)."
+      "set OPENAI_API_KEY (gpt-image-1 edits)."
     );
     this.code = "no_provider";
     this.notes = notes;
@@ -402,14 +290,15 @@ class NoProviderError extends Error {
  * @param {Array}    o.images       [{buffer, mime}] — person first, then refs
  * @param {string}   o.aspect       'portrait' | 'landscape' | 'square' | 'auto'
  * @param {object}   o.exact        {width, height} to force afterwards
- * @param {boolean}  o.vto          garment try-on: prefer a dedicated model
  * @param {boolean}  o.hiQuality    ask for the larger/costlier output
  * @param {number}   o.minLongEdge  resample up to this if the result is small
+ * @param {string}   [o.quality]       'low' | 'medium' | 'high' (default: OPENAI_IMAGE_QUALITY)
+ * @param {string}   [o.inputFidelity] 'high' keeps the face closest to the photo
  * @returns {Promise<{buffer, mime, provider, ms, width, height, notes}>}
  */
 async function editImage({
   instruction, images, aspect = "portrait", exact = null,
-  vto = false, hiQuality = true, minLongEdge = 0,
+  hiQuality = true, minLongEdge = 0, quality = "", inputFidelity = "",
 }) {
   if (!instruction || !images?.length) throw new Error("instruction and at least one image are required");
   const started = Date.now();
@@ -422,9 +311,9 @@ async function editImage({
 
   let result = null;
   for (const p of CHAIN) {
-    if (p.when && !p.when({ vto, images: prepared })) continue;
+    if (p.when && !p.when({ images: prepared })) continue;
     try {
-      result = await p.run({ instruction, images: prepared, aspect, notes, vto, hiQuality, exact });
+      result = await p.run({ instruction, images: prepared, aspect, notes, hiQuality, exact, quality, inputFidelity });
     } catch (e) {
       notes.push(`${p.name}: threw ${e.message}`);
       result = null;
@@ -479,26 +368,19 @@ async function editImage({
 function configured() {
   const out = [];
   for (const p of CHAIN) {
-    // Gemini counts as ready only when the account can pay for its image
-    // model and it is not cooling down after a quota error — otherwise
-    // the app offered "Make it" and the server said no (2026-10-01).
+    // A provider is ready only when it has a key and is not cooling down
+    // after a quota error — otherwise the app offered "Make it" and the
+    // server said no (2026-10-01).
     const ready = p.ready ? p.ready() : false;
-    out.push({ name: p.name, ready, vtoOnly: !!p.vtoOnly });
+    out.push({ name: p.name, ready });
   }
   return out;
 }
 
 module.exports = {
-  editImage, configured, register,
+  editImage, configured,
   normalizeInput, fitExact, resampleTo, transform, imageSize, haveFfmpeg,
   imageKind, decodePlan, MAX_DECODE_PIXELS,
   NoProviderError,
-  // Exported for the regression tests: the response shape these two walk
-  // is the one fact about this integration the documentation would not
-  // pin down, so it is the one that must be tested rather than trusted.
-  harvestImage, harvestText, SIZES, sizeFor,
+  SIZES, sizeFor,
 };
-
-// Optional keyed providers register themselves. Each module is a no-op
-// without its key, so this is safe on a deployment that has none.
-require("./imageEditProviders").install(register);

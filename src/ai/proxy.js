@@ -13,13 +13,6 @@
  */
 const openai = require("../services/ai/openai");
 
-const TTS_VOICES = {
-  // The names the app's pickers still show → the nearest OpenAI voice.
-  Fola: "shimmer", Kore: "sage", Aoede: "nova", Puck: "echo", Charon: "onyx", Fenrir: "ash",
-  Sulafat: "shimmer", Callirrhoe: "shimmer", Achernar: "nova", Vindemiatrix: "sage", Achird: "verse",
-  Zephyr: "alloy", Leda: "shimmer", Orus: "onyx", Autonoe: "nova", Enceladus: "ash",
-};
-
 /**
  * The voice when nobody picked one. A pick from Settings (the ten classic
  * voices, ai/liveVoices.js CLASSIC_VOICES) is used everywhere she speaks:
@@ -232,4 +225,4 @@ function servedModels() {
   };
 }
 
-module.exports = { generate, voiceFor, voiceOf, splitTone, servedModels, TTS_VOICES, REALTIME_VOICES, DEFAULT_VOICE, chunk, cleanText, tagFilter };
+module.exports = { generate, voiceFor, voiceOf, splitTone, servedModels, REALTIME_VOICES, DEFAULT_VOICE, chunk, cleanText, tagFilter };

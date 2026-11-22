@@ -43,12 +43,9 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
 
 const configRoute = require("./routes/config");
 const chatRoute = require("./routes/chat");
-const regionRoute = require("./routes/region");
-// The app's old model routes answer 426 "update the app" (src/ai/gone.js).
-const { gone } = require("./ai/gone");
 const authRoute = require("./routes/auth");
 const db = require("./db");
-const { appAuth, appFnAuth } = require("./middleware/auth");
+const { appAuth } = require("./middleware/auth");
 
 // Safety guard: never boot in production with auth switched off.
 // This is what actually stops AUTH_DISABLED=true from leaking into prod.
@@ -65,9 +62,11 @@ const observability = require("./infra/observability");
 app.use(observability.requestId());
 app.set("trust proxy", 1);
 app.use(helmet());
+// Provider bodies, SQL and stack traces never reach a client (infra/safeErrors.js).
+app.use(require("./infra/safeErrors").middleware());
 
 // CORS — native mobile apps don't enforce it, but web-origin callers do:
-// any future web client, the avatar WebView page, and local dev tools.
+// any future web client and local dev tools.
 // Permissive-by-default is safe here because real protection is the auth
 // layer (JWT / app key), not the origin.
 app.use((req, res, next) => {
@@ -107,6 +106,10 @@ app.use(
     includePath: true,
     metricsPath: "/metrics",
     promClient: { collectDefaultMetrics: {} },
+    // Unmatched paths are not counted (2026-11-15, security hardening):
+    // every distinct word-like URL became a new, never-expiring series, so
+    // a loop of GET /<random> grew the heap until the container died.
+    bypass: { onFinish: (_req, res) => res.statusCode === 404 },
     // Collapse ids so metrics stay low-cardinality.
     normalizePath: [
       ["^/docs/\\d+.*", "/docs/#id"],
@@ -116,7 +119,8 @@ app.use(
       ["^/admin-panel/api/video-notes/\\d+.*", "/admin-panel/api/video-notes/#id"],
       ["^/shortcuts/runs/\\d+.*", "/shortcuts/runs/#id"],
       ["^/shortcuts/\\d+.*", "/shortcuts/#id"],
-      ["^/mailin/messages/\\d+.*", "/mailin/messages/#id"],
+      ["^/p/[^/]+", "/p/#slug"],
+      ["^/(agent-call/bolna)/.*", "/$1/#hook"],
     ],
   })
 );
@@ -133,9 +137,7 @@ const globalJson = express.json({
     // against undefined and rejected every legitimate webhook. Only the
     // payment webhook path needs it, so nothing else pays the memory.
     verify: (req, _res, buf) => {
-      if (req.originalUrl && (req.originalUrl.startsWith("/payments/webhook") ||
-          req.originalUrl.startsWith("/ondc/"))) {
-        // ONDC signs the raw bytes of every callback too (src/ondc/crypto.js).
+      if (req.originalUrl && req.originalUrl.startsWith("/payments/webhook")) {
         req.rawBody = buf;
       }
     },
@@ -153,21 +155,27 @@ app.use(require("./ops/spend").bind());
 // 60 was close enough that a fast talker hit 429s and the app silently
 // dropped to the robotic on-device voice. 240 keeps abuse out without
 // throttling real use.
-app.use(rateLimit({
-  windowMs: 60_000, max: 240, standardHeaders: true,
-  // ONDC's network answers one search with a reply per store, from a few
-  // gateway addresses: those callbacks are signed and checked instead.
-  skip: (req) => req.path.startsWith("/ondc/"),
-}));
+app.use(rateLimit({ windowMs: 60_000, max: 240, standardHeaders: true }));
 
-app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
-// ONDC (2026-11-04): the network's callbacks (public, signed) and the
-// domain verification page ONDC fetches from our root.
-{
-  const ondc = require("./routes/ondc");
-  app.get("/ondc-site-verification.html", ondc.siteVerification);
-  app.use("/ondc", ondc.router);
-}
+// version: the git sha baked into the image (Dockerfile GIT_SHA), so the
+// pipeline can prove production runs the commit it just tested.
+app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now(), version: process.env.GIT_SHA || "dev" }));
+// App gauges for Prometheus (pg pool, job queue, AI spend) — infra/metrics.js.
+try { require("./infra/metrics").install(); } catch (e) { console.warn("metrics: install failed —", e.message); }
+// READINESS: /health stays a pure liveness check (the process answers);
+// /health/ready also proves the database answers within 2 s, so a deploy
+// gate or load balancer can tell "up" from "up but cannot serve".
+app.get("/health/ready", async (_req, res) => {
+  try {
+    await Promise.race([
+      require("./db").one("SELECT 1 AS ok"),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("db timeout")), 2000).unref()),
+    ]);
+    res.json({ ok: true, db: true, ts: Date.now() });
+  } catch (_) {
+    res.status(503).json({ ok: false, db: false, ts: Date.now() });
+  }
+});
 
 // Public within the app: remote config (no secrets inside it)
 app.use("/config", configRoute);
@@ -176,9 +184,15 @@ app.use("/config", configRoute);
 app.use("/app", require("./routes/appUpdate").router);
 
 // Sign-up/sign-in — extra-tight limit to slow brute-force attempts
+// Only the credential routes count: /auth/me runs on every launch and
+// Indian carriers put many phones behind one address (CGNAT), so counting
+// it locked real users out at peak hours (product audit 2026-11-21).
 app.use(
   "/auth",
-  rateLimit({ windowMs: 15 * 60_000, max: 20, standardHeaders: true }),
+  rateLimit({
+    windowMs: 15 * 60_000, max: 20, standardHeaders: true,
+    skip: (req) => req.path === "/me" || req.path === "/logout-all",
+  }),
   authRoute
 );
 
@@ -249,16 +263,6 @@ app.use("/agent-call", appAuth, perUserLimit, agentCall.router);
 // Every call now uses the one agent defined in agents/callAgentConfig.js,
 // so a change to how it speaks reaches every user at once.)
 
-// INBOUND CALLING — Hari answers the user's own number: screens callers,
-// forwards the ones who matter, takes a message from the rest.
-// Plivo's webhooks are PUBLIC (it cannot send our app key) and so must be
-// mounted before appAuth; the follow-up hooks carry a per-call token in the
-// path. Number assignment is an ADMIN action, guarded by ADMIN_KEY.
-const inbound = require("./inbound/routes");
-app.use("/inbound/plivo", inbound.webhooks);
-app.use("/inbound/admin", rateLimit({ windowMs: 600_000, max: 10, standardHeaders: true }), inbound.adminRouter);
-app.use("/inbound", appAuth, inbound.router);
-
 // Chat requires the app key so strangers can't burn your AI credits.
 // Order: authenticate → per-user throttle → plan allowance → handler.
 //
@@ -270,22 +274,14 @@ app.use("/inbound", appAuth, inbound.router);
 // on one mount runs the middleware once and keeps the order (groups are
 // matched first; chat.js registers /thread/:phone, never a bare /:phone,
 // so nothing was ever at risk of being shadowed either way).
-// The assistant's own chat turns (POST /chat, /chat/stream, /chat/greeting)
-// are the app's model now: an old build that asks is told to update. The
-// human chat below (threads, send, groups) is unchanged.
-app.post("/chat", gone);
-app.all(["/chat/stream", "/chat/greeting"], gone);
 app.use("/chat", appAuth, perUserLimit, require("./routes/chatGroups"), chatRoute);
 
 // THE ASSISTANT (2026-09-29) — the app runs its models itself (Gemini Nano
 // on the phone, Gemini through Firebase AI Logic); this server is its tool
 // server and memory: context, tools, approvals and the record (src/ai/).
 app.use("/ai", appAuth, aiLimit, require("./ai/routes"));
-// The voice loop that came before it (session, SSE stream, audio and text
-// turns, confirmations) is gone: old builds are told to update.
-app.use("/assistant", gone);
 
-// Onboarding survey + profile view (feeds users table + agent memory).
+// Profile, onboarding details, assistant identity, rules, memories.
 app.use("/profile", appAuth, require("./routes/profile"));
 // Self-checks from the phones, for the admin panel (routes/diagnostics.js).
 app.use("/diagnostics", appAuth, perUserLimit, require("./routes/diagnostics").router);
@@ -294,29 +290,11 @@ app.use("/phone", appAuth, require("./routes/phone"));
 app.use("/calls", appAuth, ...paidUploadLimit, require("./routes/calls").router);
 app.use("/contacts", appAuth, require("./routes/contacts"));
 
-// Phase 1 / ADR-004 — the user-visible audit trail of assistant actions.
-app.use("/actions", appAuth, require("./routes/actions"));
-
 // Privacy dashboard (F2): full data export + permanent account deletion.
 app.use("/privacy", appAuth, require("./routes/privacy"));
 
 // Google account link: Gmail + Calendar (read-only).
 app.use("/google", appAuth, require("./google/routes"));
-
-// CONNECTED APPS — Notion. The OAuth callback is public (Notion sends the
-// browser there; the single-use state names the user) and rate-limited;
-// the rest is behind the app's auth. Inert until NOTION_CLIENT_ID/SECRET.
-{
-  const notion = require("./connectors/notion/routes");
-  app.use("/connect/notion",
-    rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true }), notion.publicRouter);
-  app.use("/connections", appAuth, notion.appRouter);
-  // Other connected apps (2026-10-04): standard OAuth 2, after Notion's routes.
-  const apps = require("./connectors/apps");
-  app.use("/connect/app",
-    rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true }), apps.publicRouter);
-  app.use("/connections", appAuth, apps.appRouter);
-}
 
 
 // PAYMENTS — collection requests. Razorpay's webhook is PUBLIC (it cannot
@@ -352,29 +330,29 @@ app.use("/commitments", appAuth, require("./routes/commitments"));
 // MOMENTUM — Today's 3, habits, focus and the streak (momentum/routes.js).
 app.use("/momentum", appAuth, require("./momentum/routes"));
 app.use("/messages", appAuth, require("./routes/messages"));
+// Help & Feedback and the Pro early-access list (feedback/routes.js).
+app.use("/feedback", appAuth, perUserLimit, require("./feedback/routes"));
+// A cab booked by voice: its status for the Home strip, and Cancel.
+app.use("/rides", appAuth, perUserLimit, require("./rides/routes"));
+// Orders placed by voice (food, groceries, medicines, parcels).
+app.use("/orders", appAuth, perUserLimit, require("./orders/routes"));
+// Link your Uber / Swiggy account (accounts/service.js): the sign-in
+// start and status are signed in; the company's redirect back is public.
+app.use("/accounts", appAuth, perUserLimit, require("./accounts/routes").accounts);
+app.use("/link", rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true }), require("./accounts/routes").link);
 app.use("/usage", appAuth, require("./routes/usage").router);
 app.use("/finance", appAuth, require("./routes/finance").router);
 
 // TODAY BRIEF — one aggregate fetch for the home dashboard (agenda,
 // promises, unread agent messages, circle, weather, headlines).
 app.use("/brief", appAuth, require("./routes/brief"));
-// FLIGHTS PAGE (2026-11-04): the flight list the app draws.
-app.use("/travel", appAuth, require("./routes/travel"));
-// IN-APP SHOPPING over ONDC (2026-11-04).
-app.use("/shop", appAuth, require("./routes/shop"));
 // EVERYDAY SERVICES (2026-11-04): partner links with our affiliate tracking.
 app.use("/go", appAuth, require("./routes/go"));
-// PROFESSIONAL ASSISTANTS' "TODAY" (2026-11-03) — the Doctor's / Advocate's /
-// Business page: AI summary, numbers and what needs the user now.
-app.use("/pro", appAuth, require("./routes/pro"));
 // NEWS CARDS (2026-09-25) — Hub → News reads its deck from here.
 app.use("/news", appAuth, require("./routes/news"));
-// Multi-step plans the assistant has committed to: what is running,
-// what it is waiting on, and the phone's receipts for dispatched steps.
+// The home-screen widget's fire-and-forget job (POST /tasks/quick).
 app.use("/tasks", appAuth, require("./routes/tasks"));
 app.use("/email", appAuth, require("./routes/email"));
-// Bills by email: the private address and what arrived (off unless MAILIN_ENABLED=1).
-app.use("/mailin", appAuth, require("./mailin/routes").router);
 
 // ADMIN — read-only ops stats behind a static key (set ADMIN_KEY).
 // The X-Admin-Key routes: 10 tries per 10 minutes per IP (security
@@ -386,23 +364,8 @@ const adminKeyLimit = rateLimit({ windowMs: 600_000, max: 10, standardHeaders: t
 app.use("/admin/wallet", rateLimit({ windowMs: 600_000, max: 60, standardHeaders: true }), require("./wallet/admin"));
 app.use("/admin", adminKeyLimit, require("./routes/admin"));
 
-// Live data for the Today screen (weather card, headlines, astrology).
+// Home's weather card and the Calendar extras.
 const wxTool = require("./services/tools/weather");
-const newsTool = require("./services/tools/news");
-const astroTool = require("./services/tools/astrology");
-app.get("/tools/weather", appAuth, async (req, res) => {
-  try {
-    const w = await wxTool.getWeather({
-      lat: parseFloat(req.query.lat),
-      lng: parseFloat(req.query.lng),
-      city: req.query.city,
-    });
-    if (!w) return res.status(400).json({ error: "lat/lng or city required" });
-    res.json(w);
-  } catch (e) {
-    res.status(502).json({ error: "weather unavailable" });
-  }
-});
 // Home's weather card (2026-09-30): now, 24 hours and the week, named by
 // the area the phone is in. Location from the query or the X-Geo headers
 // every app request carries; the name is looked up once a day per ~1 km
@@ -452,46 +415,6 @@ app.get("/tools/weather/forecast", appAuth, async (req, res) => {
 app.get("/tools/calendar/extras", appAuth, (req, res) =>
   require("./services/tools/calendarExtras").handler(req, res)
 );
-app.get("/tools/news", appAuth, async (req, res) => {
-  try {
-    res.json({
-      headlines: await newsTool.getHeadlines({
-        topic: req.query.topic,
-        max: Math.min(Number(req.query.max) || 6, 30),
-      }),
-    });
-  } catch (e) {
-    res.status(502).json({ error: "news unavailable" });
-  }
-});
-app.get("/tools/astrology", appAuth, async (req, res) => {
-  try {
-    const uid = Number(req.user?.sub);
-    let birthday = req.query.birthday;
-    let name = "Friend";
-    if (uid) {
-      const u = await db.findById(uid);
-      if (u) {
-        if (!birthday && u.birthday) birthday = u.birthday;
-        if (u.name) name = u.name;
-      }
-    }
-    const reading = await astroTool.getAstrologyReading({
-      birthday,
-      name,
-      lat: parseFloat(req.query.lat),
-      lng: parseFloat(req.query.lng),
-    });
-    res.json(reading);
-  } catch (e) {
-    res.status(502).json({ error: "astrology unavailable" });
-  }
-});
-
-// Speech in, speech out and "what is this" with the camera are the app's
-// own now (on-device recognition, Gemini TTS and Nano/cloud vision through
-// Firebase AI Logic). Old builds are told to update.
-app.use(["/stt", "/tts", "/vision"], gone);
 
 // Group B+ — SAVED documents: hospital reports, receipts… Hari remembers
 // them and pulls them back up from a voice request (see routes/docs.js).
@@ -517,43 +440,29 @@ app.use("/studio", appAuth, perUserLimit, require("./routes/studio"));
 // for everyone. The pictures are public (Image.network sends no header).
 const quoteCards = require("./routes/quoteCards");
 app.use("/quote-cards/img", quoteCards.images);
-// Before the signed-in mount, which would otherwise answer it with 401.
-app.use("/quote-cards/public", posterLimit, quoteCards.publicRouter);
 app.use("/quote-cards", appAuth, posterLimit, quoteCards.router);
 // NOTIFICATIONS (2026-10-19): the phone asks what to do with each new
 // notification — reply, inform, remember or nothing (src/notify/triage.js).
 app.use("/notify", appAuth, perUserLimit, require("./routes/notify"));
-// BORN TODAY (2026-10-19) — Home's birthday card: well-known Indians born
-// on this date, from Wikidata, fetched once a day for everyone.
-app.use("/birthdays", appAuth, posterLimit, require("./routes/birthdays"));
 // SHORTCUTS — "office mode": one word, several things (routes/shortcuts.js).
 app.use("/shortcuts", appAuth, shortcutLimit, require("./routes/shortcuts"));
-// THE SHOPPING LIST and THE KITCHEN (2026-09-29) — one list for anything
-// to buy; pantry, recipes and the week plan (src/shopping, src/kitchen).
-// Each has its own per-user bucket, so a list screen never starves a turn.
+// THE SHOPPING LIST (2026-09-29) — one list for anything to buy
+// (src/shopping). Its own per-user bucket, so a list screen never starves
+// a turn.
 const shopping = require("./shopping");
-const kitchen = require("./kitchen");
 app.use("/shopping", appAuth, shopping.limiter, shopping.router);
-app.use("/kitchen", appAuth, kitchen.limiter, kitchen.router);
-
-// ASSISTANT FUNCTIONS (2026-09-29) — Android AppFunctions: Gemini and other
-// system agents add to the list, set reminders, plan Today's 3 and log a
-// habit without the app open (src/appfunctions). The phone's background
-// service holds a narrow "appfn" key: minted and revoked here by a normal
-// session only, accepted on /appfunctions alone — appAuth refuses it on
-// every other route. Its own per-user bucket, 60 a minute.
-const appfunctions = require("./appfunctions");
-app.use("/appfunctions/token", appAuth, appfunctions.limiter, appfunctions.tokenRouter);
-app.use("/appfunctions", appFnAuth, appfunctions.limiter, appfunctions.router);
+// JYOTISH (2026-11-22) — the Vedic horoscope card at the bottom of Home:
+// chat onboarding, a local sidereal chart, readings from its data (src/jyotish).
+const jyotish = require("./jyotish");
+app.use("/jyotish", appAuth, jyotish.limiter, jyotish.router);
 
 // CONNECTED APPS — THE MY ASSISTANT API (2026-10-14, src/platform). The
 // apps a user builds reach THEIR assistant with an app key (mya_…): /v1 is
-// the key-authenticated API (its own per-key limiter), /platform is where
-// the main app connects apps and makes or revokes keys (a signed-in
-// session only), /developers the documentation.
+// the key-authenticated API (its own per-key limiter), /developers the
+// documentation. Apps are connected and keys made or revoked in the web
+// developer console (/console/api).
 const platform = require("./platform");
 app.use("/v1", platform.v1);
-app.use("/platform", appAuth, perUserLimit, platform.manage);
 app.get("/developers", platform.docs);
 // The web developer console (src/platform/console.js): sign in with a code
 // pushed to the phone, manage connected apps from a laptop.
@@ -566,7 +475,16 @@ app.use("/console", platform.consoleRouter);
 app.use("/clients", appAuth, require("./routes/clients"));
 // CLINIC — the doctor's workspace (today, follow-ups, dues). Doctors only:
 // the router itself enforces persona === 'doctor' after appAuth.
-app.use("/clinic", appAuth, require("./clinic/routes"));
+// Per-user buckets (audit 2026-11-21): transcription, drafting and the
+// running-late calls each cost money; only writes count, so browsing the
+// day's appointments never does.
+app.use("/clinic", appAuth, paidUploadLimit, require("./clinic/routes"));
+// WORKSPACE — the dashboard for every profession without a Pro workspace
+// (engineers, teachers, CAs, students…): packs, routines, the day plan.
+app.use("/workspace", appAuth, require("./workspace/routes"));
+// CONNECT — talk live to a contact's own assistant (their name, voice and
+// photo): messages, urgent alerts, free/busy and appointments.
+app.use("/connect", appAuth, perUserLimit, require("./connect/routes"));
 
 // TASK OUTCOMES — what the assistant was asked to do and what REALLY
 // happened (call connected / failed and why…). Written by the device and by
@@ -574,14 +492,8 @@ app.use("/clinic", appAuth, require("./clinic/routes"));
 // admin panel. See routes/outcomes.js and outcomes/store.js.
 app.use("/outcomes", appAuth, require("./routes/outcomes"));
 
-// Group C — nearby places search (ratings, distance, call & directions).
-app.use("/places", appAuth, require("./routes/places"));
-
 // ---------------- STOCKS API ----------------
 app.use("/stocks", appAuth, require("./routes/stocks"));
-
-// ---------------- ADMIN ANALYTICS ----------------
-app.use("/analytics", appAuth, require("./routes/analytics"));
 
 // ---------------- ADMIN WEB DASHBOARD ----------------
 // Note: no appAuth here because this is for the web browser
@@ -598,9 +510,6 @@ app.use("/legal", require("./routes/legal"));
   app.use("/listing", appAuth, listings.proRouter);
   app.use("/listings", appAuth, listings.searchRouter);
 }
-
-// Regional language from the caller's IP (no app permissions needed)
-app.use("/region", regionRoute);
 
 // MCP servers are per-user configuration, so the route sits behind the
 // same auth as the rest of the API.
@@ -634,13 +543,6 @@ require("./agents/runtime");
   );
 }
 
-// Avatar routes stay under /live (the app's avatar screen). The Live
-// speech-to-speech socket and its probe are gone (the app runs its models
-// itself): GET /live and a plain request to /live/ws say "update the app",
-// and so does the /live/ws upgrade (attached after listen, src/ai/gone.js).
-app.use("/live/avatar", appAuth, require("./avatar/routes").router());
-app.all(["/live", "/live/ws"], gone);
-
 // Agent-level metrics (tool latency, job counts, agent turns). Mounted at
 // /metrics/agent because /metrics already serves Prometheus process
 // metrics — two handlers on one path would silently shadow each other.
@@ -662,6 +564,10 @@ app.use((err, _req, res, _next) => {
     return res.status(400).json({ error: "invalid JSON body" });
   }
   if (res.headersSent) return; // a stream already started — nothing to add
+  // The spend circuit-breaker (ops/budget.js) said no.
+  if (err.code === "budget_exceeded") {
+    return res.status(402).json({ error: err.message, code: err.code });
+  }
   // Body/upload problems carry their own 4xx status (413 too large, 400
   // aborted). Pass it through with a kind sentence instead of a bare 500.
   const status = err.code === "LIMIT_FILE_SIZE" ? 413 : Number(err.status || err.statusCode);
@@ -680,7 +586,7 @@ app.use((err, _req, res, _next) => {
 const port = process.env.PORT || 3000;
 // Postgres: create the schema BEFORE accepting any request — a request
 // racing table creation would 500. Boot fails loudly if the DB is down,
-// which is exactly what Kubernetes needs to restart/backoff the pod.
+// which is exactly what Docker's restart policy needs to retry the container.
 require("./db")
   .init()
   // CALL NOTES — before the listener, so a fresh upload is never caught
@@ -751,12 +657,6 @@ require("./db")
       console.error("  job worker failed to start:", e.message);
     }
 
-    // Bills by email: the SMTP receiver and its worker, only when switched
-    // on. A failure is logged and never blocks HTTP; GET /mailin then says
-    // available:false and the app hides the feature.
-    require("./mailin/service").startReceiver().catch((e) =>
-      console.error("  mailin: receiver failed to start:", e.message));
-
     const server = app.listen(port, () => {
       console.log(`MYASSISTANT backend on :${port} (postgres ready)`);
       // Every voice's sample and opening, made ahead so no tap waits.
@@ -806,16 +706,15 @@ require("./db")
         );
       }
     });
-    // The /live/ws upgrade an old build still tries answers 426.
-    require("./ai/gone").attachUpgrade(server);
+    // Caddy keeps upstream connections open longer than Node's 5 s
+    // default; a request on a socket Node had just closed came back 502.
+    server.keepAliveTimeout = 65_000;
+    server.headersTimeout = 66_000;
 
-    // Call recordings are pruned after every session, but a server that
-    // sat idle over a weekend still holds expired ones. Sweep at boot and
-    // once a day, so nothing depends on someone making a call.
+    // Turn recordings past their retention are swept at boot and once a
+    // day, so nothing depends on someone using the app.
     // The same daily pass drops video-note clips kept past their 30 days
-    // (videonotes/service.js sweep); the recipient's copy stays. And the
-    // photo cards' working photos and drafts untouched for 30 days
-    // (posters/service.js sweep): the finished card is in his documents.
+    // (videonotes/service.js sweep); the recipient's copy stays.
     {
       const rec = require("./live/recorder");
       const sweep = () => Promise.all([
@@ -823,58 +722,36 @@ require("./db")
           console.warn("recordings: prune failed —", e.message)),
         require("./videonotes/service").sweep().catch((e) =>
           console.warn("video notes: sweep failed —", e.message)),
-        require("./posters/service").sweep().catch((e) =>
-          console.warn("posters: sweep failed —", e.message)),
         // "Help improve" off: no stray recording survives a day, and their
         // turns stay within the private window (users/helpImprove.js).
         require("./users/helpImprove").sweep().catch((e) =>
           console.warn("help improve: sweep failed —", e.message)),
-        require("./connectors/notion/store").sweepStates().catch((e) =>
-          console.warn("notion: state sweep failed —", e.message)),
-        require("./mailin/service").sweep().catch((e) =>
-          console.warn("mailin: sweep failed —", e.message)),
       ]);
       setTimeout(sweep, 30_000).unref?.();
       setInterval(sweep, 24 * 3600_000).unref?.();
-      console.log(
-        `  recordings: ${rec.ENABLED ? `on, kept ${rec.KEEP_DAYS} days` : "off (LIVE_RECORD=0)"}`
-      );
+      console.log(`  recordings: per-turn, kept ${rec.KEEP_DAYS} days`);
     }
 
-    const avatarSessions = require("./avatar/session");
-    console.log(
-      `  avatar: ${
-        !avatarSessions.configured()
-          ? "disabled — missing HEYGEN_API_KEY"
-          : `heygen ${require("./avatar/heygen").avatarId()}${
-              require("./avatar/heygen").sandbox() ? " (SANDBOX — free, ~1 min sessions)" : ""
-            }`
-      }`
-    );
-
-    // A restart must not strand a live avatar room: nothing else would
-    // ever delete it, and BEY keeps billing an empty room until its own
-    // timeout. Deploys send SIGTERM, Ctrl-C sends SIGINT.
+    // Wind down cleanly on a restart. Deploys send SIGTERM, Ctrl-C sends
+    // SIGINT.
     let shuttingDown = false;
     for (const sig of ["SIGTERM", "SIGINT"]) {
       process.on(sig, async () => {
         if (shuttingDown) return;
         shuttingDown = true;
-        try { await avatarSessions.stopAll(); } catch (_) {}
-        // server.close() does not close WebSockets, so a live call's
-        // recording would otherwise be abandoned as raw PCM on every
-        // deploy. Bounded, because the exit timer below is not.
-        try {
+        // Stop taking background work first: no new job claimed, no sweep
+        // started, while the rest winds down.
+        try { require("./infra/jobs").stop(); } catch (_) {}
+        try { require("./proactive/scheduler").stop(); } catch (_) {}
+        server.close(async () => {
+          // Return the pool's connections cleanly rather than cutting them.
           await Promise.race([
-            Promise.all([
-              require("./live/recorder").stopAll(),
-              require("./mailin/service").stopReceiver().catch(() => {}),
-            ]),
-            new Promise((r) => setTimeout(r, 4000).unref?.()),
+            require("./db").close().catch(() => {}),
+            new Promise((r) => setTimeout(r, 2000).unref?.()),
           ]);
-        } catch (_) {}
-        server.close(() => process.exit(0));
-        // Don't let a hung socket hold the paid room open indefinitely.
+          process.exit(0);
+        });
+        // Don't let a hung socket hold the process open indefinitely.
         setTimeout(() => process.exit(0), 5000).unref();
       });
     }

@@ -1,25 +1,11 @@
 /**
- * ADMIN — read-only operational stats for the owner's dashboard/curl.
- * Guarded by a static ADMIN_KEY (X-Admin-Key header); disabled entirely
- * when the env var is unset. Never returns user content — counts only.
+ * ADMIN — the owner's X-Admin-Key endpoints (APK publishing). Guarded by a
+ * static ADMIN_KEY; every request without the right key gets a plain 404,
+ * and the router is disabled entirely when the env var is unset.
  */
 const router = require("express").Router();
-const crypto = require("crypto");
 
-router.use((req, res, next) => {
-  const key = process.env.ADMIN_KEY || "";
-  const got = req.get("X-Admin-Key") || "";
-  const ok =
-    key.length >= 16 &&
-    got.length === key.length &&
-    crypto.timingSafeEqual(Buffer.from(got), Buffer.from(key));
-  if (!ok) return res.status(404).json({ error: "not found" }); // don't advertise
-  next();
-});
-
-router.get("/stats", async (_req, res) => {
-  res.json({ ts: Date.now() });
-});
+router.use(require("../middleware/adminKey").requireAdminKey);
 
 // ---- APK publishing (self-hosted update channel, see routes/appUpdate.js) ----
 // Usage:
@@ -27,7 +13,7 @@ router.get("/stats", async (_req, res) => {
 //     -F apk=@build/app/outputs/flutter-apk/app-release.apk \
 //     -F versionCode=2 -F versionName=1.0.1 \
 //     -F changelog="Fixed fingerprint unlock" -F changelog="Faster chat" \
-//     https://api.hariassistant.tech/admin/apk
+//     https://backend.envisionsit.in/admin/apk
 const multer = require("multer");
 const os = require("os");
 const appUpdate = require("./appUpdate");

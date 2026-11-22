@@ -88,6 +88,8 @@ router.post("/read", async (req, res) => {
       [ids, phone]
     )
     .catch(() => {});
+  // Reading an urgent message is seeing it: its alerts stop.
+  await require("../connect/urgent").ack(Number(req.user?.sub), { messageIds: ids }).catch(() => {});
   res.json({ ok: true });
 });
 

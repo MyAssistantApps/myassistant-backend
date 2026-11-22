@@ -20,6 +20,10 @@ let running = false;
 
 const POLL_MS = Number(process.env.JOB_POLL_MS) || 2000;
 const MAX_ATTEMPTS = 3;
+const JOB_TIMEOUT_MS = Number(process.env.JOB_TIMEOUT_MS) || 10 * 60_000;
+// Finished jobs are kept this long for diagnosis, then deleted: document
+// jobs carry the full extracted text, and the table only ever grew.
+const JOB_RETAIN_MS = Number(process.env.JOB_RETAIN_MS) || 7 * 86_400_000;
 
 async function migrate(exec) {
   await exec(`
@@ -38,6 +42,8 @@ async function migrate(exec) {
     CREATE INDEX IF NOT EXISTS idx_jobs_claim
       ON jobs(status, run_after) WHERE status = 'pending';
     CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_jobs_running
+      ON jobs(updated_at) WHERE status = 'running';
   `);
 }
 
@@ -90,15 +96,28 @@ async function runOne() {
     return true;
   }
 
+  inFlight.add(Number(job.id));
+  // A DEADLINE PER JOB (audit 2026-11-21). The worker runs jobs one at a
+  // time and the heartbeat kept every in-flight job alive, so a handler
+  // that never returned (a hung socket, a stuck model call) blocked the
+  // queue for good — urgent re-pings included. Past the deadline the job
+  // is failed, not retried (it may already have had side effects, as with
+  // the reaper below), and the worker moves on.
+  let timer = null;
   try {
-    await timed(`job.${job.kind}`, () => handler(job.payload, job), {
-      jobId: Number(job.id),
-    });
+    await Promise.race([
+      timed(`job.${job.kind}`, () => handler(job.payload, job), { jobId: Number(job.id) }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Object.assign(new Error(`timed out after ${JOB_TIMEOUT_MS} ms`), { timedOut: true })), JOB_TIMEOUT_MS);
+        if (timer.unref) timer.unref();
+      }),
+    ]);
     await run(`UPDATE jobs SET status='done', updated_at=$2 WHERE id=$1`, [
       job.id, Date.now(),
     ]);
+    require("./metrics").jobFinished(job.kind, "done");
   } catch (e) {
-    const give_up = job.attempts >= MAX_ATTEMPTS;
+    const give_up = job.attempts >= MAX_ATTEMPTS || Boolean(e?.timedOut);
     // Exponential backoff; a permanently broken job stops retrying rather
     // than spinning forever.
     await run(
@@ -111,10 +130,14 @@ async function runOne() {
         Date.now(),
       ]
     );
+    if (give_up) require("./metrics").jobFinished(job.kind, "failed");
     logger.error("job_failed", {
       id: Number(job.id), kind: job.kind, attempts: job.attempts,
       willRetry: !give_up, error: e.message,
     });
+  } finally {
+    clearTimeout(timer);
+    inFlight.delete(Number(job.id));
   }
   return true;
 }
@@ -126,19 +149,60 @@ async function drain(max = 50) {
   return n;
 }
 
-function start() {
-  if (timer) return;
-  // A rollout mid-job leaves rows stuck in 'running' forever — invisible
-  // to claim(), never retried, never reported. Mark them failed at boot
-  // (single-replica deployment; with replicas this needs a heartbeat).
-  run(
+// LEASES. A claimed job's updated_at is its heartbeat: this process
+// touches every job it is running each HEARTBEAT_MS, and a 'running' row
+// whose heartbeat is older than LEASE_MS belongs to a process that died
+// (restart, rollout, crash). Such rows are failed, not retried: a handler
+// may have had side effects (a call placed, an order sent) before it died,
+// and running it twice is worse than reporting it.
+//
+// This replaced a boot-time "fail every running job" pass, which was only
+// correct with exactly one replica — during a rollout, or with two
+// instances, a starting server failed the jobs the OTHER one was running.
+const HEARTBEAT_MS = Number(process.env.JOB_HEARTBEAT_MS) || 60_000;
+const LEASE_MS = Math.max(Number(process.env.JOB_LEASE_MS) || 3 * 60_000, HEARTBEAT_MS * 2);
+const inFlight = new Set();
+let heartbeat = null;
+
+async function touchInFlight() {
+  if (!inFlight.size) return 0;
+  return run(`UPDATE jobs SET updated_at=$2 WHERE id = ANY($1::bigint[]) AND status='running'`,
+    [[...inFlight], Date.now()]);
+}
+
+/** Fails 'running' jobs whose owner stopped heartbeating. Returns the count. */
+async function reapStale(now = Date.now()) {
+  const n = await run(
     `UPDATE jobs SET status='failed',
             last_error='interrupted by a server restart mid-run',
             updated_at=$1
-      WHERE status='running'`,
-    [Date.now()]
-  ).then((n) => { if (n) logger.warn("jobs_reaped_stranded", { count: n }); })
-   .catch((e) => logger.error("jobs_reap_failed", { error: e.message }));
+      WHERE status='running' AND updated_at < $2`,
+    [now, now - LEASE_MS]
+  );
+  if (n) logger.warn("jobs_reaped_stranded", { count: n });
+  return n;
+}
+
+/** Deletes finished jobs older than JOB_RETAIN_MS. Returns the count. */
+async function prune(now = Date.now()) {
+  return run(`DELETE FROM jobs WHERE status IN ('done','failed') AND updated_at < $1`, [now - JOB_RETAIN_MS]);
+}
+let lastPrune = 0;
+
+function start() {
+  if (timer) return;
+  reapStale().catch((e) => logger.error("jobs_reap_failed", { error: e.message }));
+  heartbeat = setInterval(() => {
+    touchInFlight()
+      .then(() => reapStale())
+      .then(() => {
+        if (Date.now() - lastPrune < 3600_000) return;
+        lastPrune = Date.now();
+        return prune();
+      })
+      .catch((e) => logger.error("jobs_heartbeat_failed", { error: e.message }));
+  }, HEARTBEAT_MS);
+  if (heartbeat.unref) heartbeat.unref();
   timer = setInterval(async () => {
     if (running) return; // never overlap polls
     running = true;
@@ -151,12 +215,14 @@ function start() {
     }
   }, POLL_MS);
   if (timer.unref) timer.unref();
-  logger.info("jobs_started", { pollMs: POLL_MS, handlers: [...HANDLERS.keys()] });
+  logger.info("jobs_started", { pollMs: POLL_MS, leaseMs: LEASE_MS, handlers: [...HANDLERS.keys()] });
 }
 
 function stop() {
   if (timer) clearInterval(timer);
+  if (heartbeat) clearInterval(heartbeat);
   timer = null;
+  heartbeat = null;
 }
 
-module.exports = { migrate, register, enqueue, drain, runOne, start, stop, HANDLERS };
+module.exports = { migrate, register, enqueue, drain, runOne, start, stop, reapStale, prune, HANDLERS, LEASE_MS, JOB_TIMEOUT_MS };

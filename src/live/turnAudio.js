@@ -3,8 +3,7 @@
  * ---------------------------------
  * Since the AI Logic migration the live voice runs phone ↔ Gemini and
  * this server only ever sees the transcript — which is exactly what the
- * recorder's header warns about: every hard voice bug so far looked fine
- * in text. Owner: "I need to hear their conversation between user and
+ * recorder's header warns about: hard voice bugs can look fine in text. Owner: "I need to hear their conversation between user and
  * agent, they are our test users."
  *
  * So the PHONE keeps both halves of a turn — the microphone audio it fed
@@ -21,7 +20,7 @@
  * a reviewer's ear. A WAV needs no ffmpeg and plays in every browser.
  *
  * CONSENT GATE: nothing is written unless helpImprove.allowsReview(uid) —
- * the same rule as the call recorder. The app checks its own copy of the
+ * the same rule as every recording. The app checks its own copy of the
  * switch before uploading; this is the server's own check.
  */
 const fs = require("fs");

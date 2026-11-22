@@ -8,8 +8,6 @@
  *   - turning it OFF: this user's recordings (rows and all three files)
  *     go now, turns are trimmed to 7 days / 100, quietly filed feedback
  *     goes — nobody else's is touched;
- *   - the recorder: nobody undecided or OFF is recorded, a call is dropped
- *     when they switch off, and a late stop is discarded before any merge;
  *   - no retroactive review: only what was said after the latest yes;
  *   - every admin screen that shows words, audio or files hides the rest,
  *     searches included, while counts still count;
@@ -24,7 +22,6 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = process.env.NODE_ENV || "test";
 process.env.ADMIN_KEY = process.env.ADMIN_KEY || "test-admin-key-0123456789";
 process.env.HELP_IMPROVE_DEFAULT = "ask";
-delete process.env.LIVE_RECORD;
 
 const os = require("os");
 const fs = require("fs");
@@ -46,11 +43,6 @@ async function atest(name, fn) {
   catch (e) { console.error(`  FAIL ${name}\n       ${e.stack || e.message}`); process.exitCode = 1; }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function until(fn, what, ms = 3000) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { if (await fn()) return; await sleep(20); }
-  throw new Error(`timed out waiting for ${what}`);
-}
 const touch = (file) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, "x"); return file; };
 const exists = (p) => fs.existsSync(p);
 
@@ -249,16 +241,6 @@ const exists = (p) => fs.existsSync(p);
     void recY;
   });
 
-  await atest("failures: hidden rows are counted but not shown, and never an example", async () => {
-    const r = await (await admin("/failures?hours=24&limit=500")).json();
-    const results = r.rows.map((x) => x.result);
-    assert.ok(results.includes("failed after"));
-    assert.ok(!results.some((x) => /undecidedword|failed before/.test(x)));
-    const g = r.groups.find((x) => x.tool === "web_search" && x.decision === "ran");
-    assert.ok(g && g.n >= 3, "hidden rows are no longer counted");
-    assert.ok(!/undecidedword|before/.test(g.example));
-  });
-
   await atest("the ledger of someone who never said yes is hidden", async () => {
     const r = await (await admin(`/users/${U}/ledger`)).json();
     assert.deepStrictEqual([r.hidden, r.reason], [true, "help_improve_off"]);
@@ -307,57 +289,6 @@ const exists = (p) => fs.existsSync(p);
     assert.strictEqual((await admin(`/documents/${hidden.id}/file`)).status, 403);
     const shown = await docOf(Y, "after");
     assert.strictEqual((await admin(`/documents/${shown.id}/file`)).status, 200);
-  });
-
-  console.log("\nthe recorder");
-
-  await atest("nobody undecided is recorded, and no warning is logged for it", async () => {
-    const warn = console.warn;
-    const warned = [];
-    console.warn = (...a) => warned.push(a.join(" "));
-    try {
-      const h = recorder.begin(U, `live-u-${stamp}`);
-      h.user(Buffer.alloc(3200));
-      await sleep(150);
-      await h.stop();
-    } finally {
-      console.warn = warn;
-    }
-    assert.strictEqual(await db.one(`SELECT 1 FROM live_recordings WHERE session_id = $1`, [`live-u-${stamp}`]), null);
-    const today = path.join(RECS, new Date().toISOString().slice(0, 10));
-    const files = exists(today) ? fs.readdirSync(today).filter((f) => f.includes(`live-u-${stamp}`)) : [];
-    assert.deepStrictEqual(files, []);
-    assert.ok(!warned.some((w) => /recorder/.test(w)), warned.join("\n"));
-  });
-
-  await atest("someone who said yes is recorded; switching off mid-call drops it", async () => {
-    const sid = `live-y-${stamp}`;
-    const h = recorder.begin(Y, sid);
-    await until(async () => db.one(`SELECT 1 FROM live_recordings WHERE session_id = $1`, [sid]), "the row");
-    h.user(Buffer.alloc(64000));
-    const today = path.join(RECS, new Date().toISOString().slice(0, 10));
-    const raw = path.join(today, `${sid}.user.pcm`);
-    await until(() => exists(raw), "raw audio");
-    await put(Y, no);
-    assert.ok(!exists(raw), "the open call's audio survived the switch-off");
-    assert.strictEqual(await db.one(`SELECT 1 FROM live_recordings WHERE session_id = $1`, [sid]), null);
-    await h.stop();
-    assert.ok(!exists(path.join(today, `${sid}.m4a`)));
-    await put(Y, yes);
-  });
-
-  await atest("a stop after the switch went off discards the call before any merge", async () => {
-    const sid = `live-late-${stamp}`;
-    const h = recorder.begin(O, sid);
-    await until(async () => db.one(`SELECT 1 FROM live_recordings WHERE session_id = $1`, [sid]), "the row");
-    h.user(Buffer.alloc(64000));
-    // The switch flipped without dropOpen reaching this call (another pod).
-    await db.run(`UPDATE privacy_prefs SET help_improve = 0 WHERE user_id = $1`, [O]);
-    await h.stop();
-    const today = path.join(RECS, new Date().toISOString().slice(0, 10));
-    for (const ext of [".m4a", ".user.pcm", ".agent.pcm"]) assert.ok(!exists(path.join(today, sid + ext)), ext);
-    assert.strictEqual(await db.one(`SELECT 1 FROM live_recordings WHERE session_id = $1`, [sid]), null);
-    await db.run(`UPDATE privacy_prefs SET help_improve = 1 WHERE user_id = $1`, [O]);
   });
 
   console.log("\nturning it off");
@@ -451,7 +382,6 @@ const exists = (p) => fs.existsSync(p);
       assert.ok(!/not kept as recordings/i.test(html));
       assert.match(html, /Help improve the assistant/);
       assert.match(html, /This setting is off unless you turn it on\./);
-      assert.match(html, /If you connect Notion/);
     } finally {
       s.close();
     }

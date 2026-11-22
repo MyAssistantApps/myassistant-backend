@@ -1,0 +1,7 @@
+# Findings already in the PUBLIC history, reviewed 2026-11-15. A baseline,
+# not an excuse: entries marked ROTATE are real keys that must be revoked at
+# the provider (deleting them from git does not un-leak them). Everything
+# else is a cache-key NAME that the generic rule mistakes for a secret.
+# New findings still fail CI. Add a line here only after the same review.
+# ROTATE: real key, removed from source, still in history (src/services/tools/astrology.js)
+0dec36de0b12c6bb44a3f42779fe219c4319fee6:src/services/tools/astrology.js:generic-api-key:9

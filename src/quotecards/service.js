@@ -187,7 +187,7 @@ async function writeLine(date, used) {
     const model = router.envModel("QUOTE_MODEL", require("../services/ai/openai").models.fast());
     const { reply } = await router.generateReply(
       [{ role: "user", content: JSON.stringify({ date, used: used.slice(-120) }) }],
-      { system: SYSTEM, json: true, model, modelEnv: "QUOTE_MODEL", timeoutMs: 30_000, noRetry: true }
+      { system: SYSTEM, json: true, model, timeoutMs: 30_000, noRetry: true }
     );
     let line = "";
     try {
@@ -291,7 +291,10 @@ function generate(date) {
 /** What the phone shows: the line, and every picture that exists. */
 async function today() {
   const date = indiaDate();
-  let day = readJson(path.join(dayDir(date), "day.json"), null);
+  // Every home screen asks: the day record is read from a short cache
+  // (infra/fileCache.js) instead of disk each time. A miss is not cached
+  // for long — generation writes the file moments later.
+  let day = require("../infra/fileCache").readJson(path.join(dayDir(date), "day.json"), null, 5000);
   if (!day && on()) {
     try {
       day = await ensureDay(date);
@@ -348,8 +351,10 @@ async function prepare() {
 let timer = null;
 function start() {
   if (timer || !on() || process.env.NODE_ENV === "test") return;
-  setTimeout(() => prepare().catch(() => null), 60_000).unref();
-  timer = setInterval(() => prepare().catch(() => null), 30 * 60_000);
+  // One replica generates (infra/leader.js); the rest find it made.
+  const once = () => require("../infra/leader").exclusive("quotecards.prepare", prepare).catch(() => null);
+  setTimeout(once, 60_000).unref();
+  timer = setInterval(once, 30 * 60_000);
   timer.unref();
 }
 

@@ -8,7 +8,7 @@
  *                    waits for a yes, exactly which steps that yes approves
  *
  * Every query is scoped by user_id: another user's id is "not found".
- * Created lazily, like posters/store.js; db.js is not touched. Expiry is
+ * Created lazily, like studio/store.js; db.js is not touched. Expiry is
  * lazy too (there is no timer): a waiting run is expired when it is
  * resumed, and a user's old runs go when they next start one.
  */

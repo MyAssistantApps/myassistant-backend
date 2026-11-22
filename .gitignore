@@ -47,3 +47,6 @@ data/
 Thumbs.db
 firebase-adminsdk.json
 docker-compose.override.yml
+# Monitoring secrets on the server (deploy/docker-vps/monitoring/)
+deploy/docker-vps/monitoring/monitoring.env
+deploy/docker-vps/monitoring/metrics_token

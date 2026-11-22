@@ -2,7 +2,6 @@
  * AGENT-CALL ROUTES
  *
  * App-facing (behind appAuth):
- *   POST /agent-call/preview  { contactName, task, lang? } -> { opening, allowed, reason? }
  *   POST /agent-call          { toNumber, contactName, task, lang? } -> 202 { id }
  *                              503 when telephony not configured, 502 when
  *                              the calling service refused the call — both
@@ -40,31 +39,6 @@ function notConfigured(name) {
 }
 
 const router = express.Router();
-
-router.post("/preview", async (req, res) => {
-  const contactName = String(req.body?.contactName || "").trim();
-  const task = String(req.body?.task || "").trim();
-  const lang = req.body?.lang ? String(req.body.lang) : null;
-  if (!contactName || !task) {
-    return res.status(400).json({ error: "contactName and task required" });
-  }
-  try {
-    const p = await agent.preview({ userName: firstName(req), contactName, task, lang });
-    if (!agent.enabled()) {
-      // Preview still shows what WOULD be said; flag that calling is off.
-      return res.json({
-        opening: p.opening,
-        allowed: false,
-        reason:
-          "Calling on your behalf isn't set up on this server yet, but I can connect you directly.",
-      });
-    }
-    res.json({ opening: p.opening, allowed: p.allowed, reason: p.reason });
-  } catch (e) {
-    console.error("agent-call preview error:", e.message || e);
-    res.status(502).json({ error: "preview failed" });
-  }
-});
 
 router.post("/", async (req, res) => {
   const toNumber = String(req.body?.toNumber || "").trim();

@@ -809,9 +809,6 @@ let analysisReply = () => "{}";
       assert.deepStrictEqual(r.data.events.map((e) => e.title), ["Team standup", "Standup review", "Dentist"]);
       const u2 = await registry.execute("list_calendar_events", {}, { userId: U2 });
       assert.strictEqual(u2.ok, false);
-      const g = await api("GET", "/google/calendar?days=7");
-      assert.strictEqual(g.json.events.length, 3);
-      assert.strictEqual((await api("GET", "/google/calendar", { token: T2 })).status, 409);
     });
 
     await atest("create_calendar_event with an offset lands at that instant, an hour long", async () => {

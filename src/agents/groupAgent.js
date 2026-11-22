@@ -118,8 +118,8 @@ async function factsFor(userId) {
     // query did not follow. Reminders alone answered "yeah he's free
     // saturday" for a user whose Saturday was already spoken for: a
     // promise picked up from a call ("I'll send it Saturday") lands in
-    // `commitments`, never in `reminders`. The receptionist path in
-    // agents/inbound.js has always unioned the two; this matches it.
+    // `commitments`, never in `reminders`. Inbound-call answers union
+    // the two as well; this matches them.
     db
       .query(
         `SELECT text, due_at FROM reminders

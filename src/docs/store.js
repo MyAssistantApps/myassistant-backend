@@ -101,7 +101,7 @@ function guessCategory(note) {
 
 /** Save the file bytes + a metadata row. Returns the new row.
  *  `source` = {kind:'email', ref, label, verified} marks a document that
- *  came from outside (Bills by email); without it the INSERT is as before. */
+ *  came from outside by email; without it the INSERT is as before. */
 async function createDocument(userId, { buffer, filename, mime, note = "", source = null }) {
   if ((await countDocuments(userId)) >= MAX_PER_USER) throw new DocumentLimitError();
   const row = source && source.kind === "email"
@@ -217,7 +217,7 @@ async function deleteDocument(userId, id) {
   // Its search chunks are the document's whole extracted text, and its
   // links tie it to a person or case: all three go together, or a deleted
   // medical report's text stayed on the server and in the data export
-  // (audit, 2026-09-27). Every delete path (clients, studio, posters,
+  // (audit, 2026-09-27). Every delete path (clients, studio,
   // video notes) comes through here. So does its document.index job,
   // whose payload is the same text (kept after it ran, and exported).
   // The row goes FIRST: an index job still running holds it (intelligence

@@ -70,7 +70,7 @@ const REQUIRE_KINDS = new Set([
   "device_capability", // a phone feature the app reported (sms, telephony…)
   "device_feature",    // an opt-in feature the app must say it has (screen_task)
   "app_build",         // a minimum installed app build number
-  "integration",       // a configured third party: google_oauth, razorpay, plivo…
+  "integration",       // a configured third party: google_oauth, razorpay, bolna…
   "platform",          // android | ios | server
 ]);
 

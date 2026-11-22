@@ -1,24 +1,20 @@
 /**
  * THIRD-PARTY INTEGRATION TESTS — `npm run test:integrations`.
  *
- * Meeting negotiation, payment collection, flight search + fare watch, and
- * interpreter mode. No database, no network.
+ * Payment collection and flight search + fare watch. No database, no
+ * network.
  *
  * The assertions concentrate on the branches where a mistake costs the user
- * something real: booking a meeting nobody agreed to, marking an invoice
- * paid without a valid signature, searching the wrong day, or an
- * "interpreter" that answers questions instead of translating them.
+ * something real: marking an invoice paid without a valid signature, or
+ * searching the wrong day.
  */
 process.env.DATABASE_URL =
   process.env.DATABASE_URL || "postgres://test:test@localhost:5432/test";
 
 const assert = require("assert");
-const negotiator = require("../src/scheduling/negotiator");
-const freeslots = require("../src/scheduling/freeslots");
 const payments = require("../src/payments/service");
 const flights = require("../src/tools/flights");
 const fares = require("../src/travel/fares");
-const interpreter = require("../src/interpreter/mode");
 
 let passed = 0;
 function test(name, fn) {
@@ -43,61 +39,6 @@ async function atest(name, fn) {
 }
 
 (async () => {
-  console.log("\nmeeting negotiation");
-
-  const SLOTS = [
-    { startMs: Date.now() + 864e5, endMs: Date.now() + 864e5 + 18e5, label: "tomorrow at 11 am" },
-    { startMs: Date.now() + 2 * 864e5, endMs: Date.now() + 2 * 864e5 + 18e5, label: "Thursday at 3 pm" },
-  ];
-
-  test("the call script offers the real slots and asks them to pick", () => {
-    const task = negotiator.callTask({
-      contactName: "Ravi", purpose: "the pricing review", slots: SLOTS, userName: "Dhanush",
-    });
-    assert.ok(task.includes("tomorrow at 11 am"), task);
-    assert.ok(task.includes("Thursday at 3 pm"), task);
-    assert.ok(/pick one|which of these/i.test(task), task);
-  });
-
-  await atest("an empty reply is never treated as agreement", async () => {
-    const v = await negotiator.interpret("", SLOTS);
-    assert.strictEqual(v.agreed, false);
-    assert.strictEqual(v.slotIndex, null);
-  });
-
-  test("a slot is only booked on a clear acceptance", () => {
-    // The interpret() contract, asserted at the boundary awaitAndBook relies
-    // on: agreed must be false unless a valid slot index came back. A
-    // "maybe" that books a meeting is the worst failure this feature has.
-    for (const v of [
-      { agreed: true, slotIndex: null },
-      { agreed: true, slotIndex: 99 },
-      { agreed: false, slotIndex: 0 },
-    ]) {
-      const wouldBook = v.agreed && Number.isInteger(v.slotIndex) && v.slotIndex < SLOTS.length;
-      assert.ok(!wouldBook, `would have booked on ${JSON.stringify(v)}`);
-    }
-  });
-
-  test("no telephony means no negotiation, stated honestly", async () => {
-    const saved = { b: process.env.BOLNA_API_KEY, r: process.env.RETELL_API_KEY };
-    delete process.env.BOLNA_API_KEY;
-    delete process.env.RETELL_API_KEY;
-    const out = await negotiator.start({
-      userId: 1, contact: { name: "Ravi", phone: "+919876543210" }, slots: SLOTS,
-    });
-    if (saved.b) process.env.BOLNA_API_KEY = saved.b;
-    if (saved.r) process.env.RETELL_API_KEY = saved.r;
-    assert.strictEqual(out.ok, false);
-    assert.strictEqual(out.reason, "telephony");
-  });
-
-  test("slot labels are spoken, never ISO — they are read out on a call", () => {
-    const label = freeslots.describe(Date.now() + 864e5, 330);
-    assert.ok(!/\d{4}-\d{2}-\d{2}|T\d{2}:/.test(label), label);
-    assert.ok(/am|pm/.test(label), label);
-  });
-
   console.log("\npayment collection");
 
   test("unconfigured Razorpay refuses instead of inventing a link", async () => {
@@ -147,26 +88,11 @@ async function atest(name, fn) {
     assert.strictEqual(flights.resolveAirport("somewhere"), null);
   });
 
-  test("the Amadeus host follows the environment", () => {
-    // Test and production are separate hosts AND separate credentials —
-    // pointing live keys at the sandbox returns unbookable inventory.
-    const saved = process.env.AMADEUS_ENV;
-    delete process.env.AMADEUS_ENV;
-    assert.ok(flights.amadeusHost().includes("test.api.amadeus.com"));
-    process.env.AMADEUS_ENV = "production";
-    assert.strictEqual(flights.amadeusHost(), "https://api.amadeus.com");
-    if (saved) process.env.AMADEUS_ENV = saved;
-    else delete process.env.AMADEUS_ENV;
-  });
-
   await atest("an unreadable date is questioned, not silently made tomorrow", async () => {
-    const saved = process.env.AMADEUS_CLIENT_ID;
-    const saved2 = process.env.AMADEUS_CLIENT_SECRET;
-    process.env.AMADEUS_CLIENT_ID = "x";
-    process.env.AMADEUS_CLIENT_SECRET = "y";
+    const saved = process.env.SERPAPI_KEY;
+    process.env.SERPAPI_KEY = "x";
     const out = await flights.search({ from: "BLR", to: "DEL", date: "sometime-ish" });
-    if (saved) process.env.AMADEUS_CLIENT_ID = saved; else delete process.env.AMADEUS_CLIENT_ID;
-    if (saved2) process.env.AMADEUS_CLIENT_SECRET = saved2; else delete process.env.AMADEUS_CLIENT_SECRET;
+    if (saved) process.env.SERPAPI_KEY = saved; else delete process.env.SERPAPI_KEY;
     assert.ok(out.needsArgs, `should ask, got ${JSON.stringify(out)}`);
   });
 
@@ -181,40 +107,14 @@ async function atest(name, fn) {
     assert.strictEqual(fares.cheapest([{ price: "USD 40.00" }]), null);
   });
 
-  console.log("\ninterpreter mode");
-
-  test("language names resolve from codes and from words", () => {
-    assert.strictEqual(interpreter.languageName("ta"), "Tamil");
-    assert.strictEqual(interpreter.languageName("Tamil"), "Tamil");
-    assert.strictEqual(interpreter.languageName("hi"), "Hindi");
-    assert.strictEqual(interpreter.languageName(""), null);
-  });
-
-  test("the instructions forbid answering — the whole failure mode", () => {
-    const i = interpreter.instructions({ a: "English", b: "Tamil" });
-    assert.ok(/NEVER answer a question yourself/i.test(i));
-    assert.ok(/translate the QUESTION/i.test(i));
-    assert.ok(/FIRST PERSON/i.test(i));
-    // Faithfulness matters most exactly where it is tempting to soften.
-    assert.ok(/do not add, omit, soften/i.test(i));
-    assert.ok(i.includes("English") && i.includes("Tamil"));
-  });
-
-  test("both directions are specified, not just one", () => {
-    const i = interpreter.instructions({ a: "English", b: "Tamil" });
-    assert.ok(i.includes("When you hear English"), i);
-    assert.ok(i.includes("When you hear Tamil"), i);
-  });
-
   console.log("\ntool surface");
 
   test("every integration is reachable by voice", () => {
     const registry = require("../src/tools/registry");
     require("../src/tools/builtins").registerBuiltins();
     for (const n of [
-      "arrange_meeting_with", "collect_payment", "check_payments",
+      "collect_payment", "check_payments",
       "search_flights", "watch_flight_fare",
-      "start_interpreter_mode", "stop_interpreter_mode",
     ]) {
       assert.ok(registry.get(n), `missing tool: ${n}`);
     }
@@ -222,14 +122,14 @@ async function atest(name, fn) {
 
   test("actions with real consequences require confirmation", () => {
     const registry = require("../src/tools/registry");
-    // Phoning someone, and asking someone for money, both reach a third
-    // party on the user's behalf. Neither may happen unprompted.
-    for (const n of ["arrange_meeting_with", "collect_payment"]) {
+    // Asking someone for money reaches a third party on the user's behalf.
+    // It may not happen unprompted.
+    for (const n of ["collect_payment"]) {
       assert.strictEqual(registry.get(n).risk, "high", `${n} must be high risk`);
       assert.strictEqual(typeof registry.get(n).confirmSummary, "function", n);
     }
-    // Watching a price and translating do nothing irreversible.
-    for (const n of ["watch_flight_fare", "start_interpreter_mode"]) {
+    // Watching a price does nothing irreversible.
+    for (const n of ["watch_flight_fare"]) {
       assert.strictEqual(registry.get(n).risk, "low", n);
     }
   });

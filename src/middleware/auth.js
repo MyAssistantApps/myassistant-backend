@@ -21,6 +21,7 @@ const { offsetOr } = require("../services/tz");
 // The timezone rides along: background work (quiet hours, the morning
 // brief, commitment nudges) has no request to read it from.
 const buildSeen = new Map(); // uid -> { build, tz, at }
+const BUILD_SEEN_MAX = 50_000;
 function noteAppBuild(uid, req) {
   try {
     const build = Number(req.get("X-App-Build")) || 0;
@@ -28,6 +29,9 @@ function noteAppBuild(uid, req) {
     const now = Date.now();
     const prev = buildSeen.get(uid);
     if (prev && prev.build === build && prev.tz === tz && now - prev.at < 3600_000) return;
+    // Bounded: one entry per active user would otherwise grow for the
+    // life of the process. Dropping the oldest only costs a repeat write.
+    if (!prev && buildSeen.size >= BUILD_SEEN_MAX) buildSeen.delete(buildSeen.keys().next().value);
     buildSeen.set(uid, { build, tz, at: now });
     const db2 = require("../db");
     if (build > 0) {
@@ -56,30 +60,21 @@ function noteAppBuild(uid, req) {
  * is how every outstanding token is revoked at once, e.g. when a password
  * of unproven ownership is removed.
  *
- * TWO KINDS OF TOKEN (2026-09-29). A session token (no scope claim) opens
- * everything. An ASSISTANT-FUNCTIONS key (scope "appfn", src/appfunctions)
- * is what the phone's background AppFunctionService holds so Gemini can
- * add to the list or set a reminder without the app open: it is refused
- * everywhere except /appfunctions/* (allowAppFn), and dies with the
- * user's appfn_epoch — DELETE /appfunctions/token bumps it, and every key
- * issued before stops working at once. Any other scope is not ours.
+ * Only session tokens (no scope claim) are accepted here; a token with
+ * any other scope is refused.
  *
  * @param {string} token
- * @param {{allowAppFn?: boolean}} [opts] only the /appfunctions mount sets it
- * @returns {{user, scope:"session"|"appfn"}|{error:string, status:number}}
+ * @returns {{user, scope:"session"}|{error:string, status:number}}
  */
-const APPFN_SCOPE = "appfn";
-const APPFN_ONLY = "this key only works for assistant functions";
-
-async function verifySession(token, { allowAppFn = false } = {}) {
+async function verifySession(token) {
   let payload;
   try {
-    payload = jwt.verify(String(token || ""), process.env.JWT_SECRET, { algorithms: ["HS256"] });
+    payload = jwt.verify(String(token || ""), require("../infra/jwtKey").sessionKey(), { algorithms: ["HS256"] });
   } catch (_) {
     return { error: "invalid or expired token", status: 401 };
   }
   const scope = payload.scope === undefined ? "session" : payload.scope;
-  if (scope !== "session" && scope !== APPFN_SCOPE) {
+  if (scope !== "session") {
     return { error: "invalid or expired token", status: 401 };
   }
   const user = await db.findById(payload.uid);
@@ -91,24 +86,15 @@ async function verifySession(token, { allowAppFn = false } = {}) {
   if (validAfter && Number(payload.iat || 0) < validAfter) {
     return { error: "signed out — please sign in again", status: 401 };
   }
-  if (scope === APPFN_SCOPE) {
-    if (!allowAppFn) return { error: APPFN_ONLY, status: 403 };
-    // 401, like a revoked session: the phone drops the key and asks the
-    // app for a new one the next time it is opened.
-    if (!Number.isInteger(payload.ep) || payload.ep !== (Number(user.appfn_epoch) || 0)) {
-      return { error: "this assistant key was turned off — open My Assistant to turn it back on", status: 401 };
-    }
-  }
   return { user, scope, payload };
 }
 
 /**
- * The request gate. `appAuth` (every protected route) takes session
- * tokens only; `appFnAuth` (the /appfunctions mount alone) also takes an
- * assistant-functions key. req.auth says which one it was, and carries
- * the user's saved UTC offset for routes that have no header to read.
+ * The request gate for every protected route: session tokens only.
+ * req.auth carries the scope and the user's saved UTC offset for routes
+ * that have no header to read.
  */
-function makeAppAuth({ allowAppFn = false } = {}) {
+function makeAppAuth() {
   return async function appAuth(req, res, next) {
     if (process.env.AUTH_DISABLED === "true") {
       req.user = { sub: "anonymous-dev", email: null, name: "Dev User" };
@@ -117,7 +103,7 @@ function makeAppAuth({ allowAppFn = false } = {}) {
     try {
       const authz = req.get("Authorization") || "";
       if (authz.startsWith("Bearer ")) {
-        const v = await verifySession(authz.slice(7), { allowAppFn });
+        const v = await verifySession(authz.slice(7));
         if (v.error) return res.status(v.status).json({ error: v.error });
         const user = v.user;
         req.user = { sub: String(user.id), email: user.email, name: user.name };
@@ -145,6 +131,5 @@ function makeAppAuth({ allowAppFn = false } = {}) {
 }
 
 const appAuth = makeAppAuth();
-const appFnAuth = makeAppAuth({ allowAppFn: true });
 
-module.exports = { appAuth, appFnAuth, verifySession, APPFN_SCOPE, APPFN_ONLY };
+module.exports = { appAuth, verifySession };

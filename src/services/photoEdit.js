@@ -7,14 +7,14 @@
  * PROVIDERS, per kind of edit:
  *   remove the background → fal birefnet/v2 (FAL_KEY): a real cut-out, a
  *     transparent PNG. Generative editors cannot make transparency, so
- *     without fal the fallback is Gemini on a plain white background, and
- *     the result says it is not transparent.
+ *     without fal the fallback is OpenAI gpt-image on a plain white
+ *     background, and the result says it is not transparent.
  *   everything else → fal qwen-image-edit-2511 (FAL_KEY, ~$0.03), else
- *     Gemini image editing when GEMINI_IMAGE_BILLING allows it.
+ *     OpenAI gpt-image editing.
  *   none available → a friendly reason, never a crash and never a fake.
  *
- * NEVER A DIFFERENT PERSON. The photo cards' rule (posters/tools.js: "no
- * AI changes anyone's face") holds here too: every instruction carries
+ * NEVER A DIFFERENT PERSON. No AI edit changes anyone's face: every
+ * instruction carries
  * IDENTITY_RULE, and a request whose whole point is to change a face or a
  * body — a face swap, "make me fairer", "look younger", "slimmer" — is
  * declined before any model sees the photo.
@@ -73,21 +73,6 @@ function available() {
     transparent: fal.falReady(),
     edit: fal.falReady() || gem,
   };
-}
-
-/** The supported Gemini aspect nearest to the photo's own. */
-function nearestRatio(width, height) {
-  const opts = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9"];
-  if (!width || !height) return "3:4";
-  const r = width / height;
-  let best = opts[0];
-  let d = Infinity;
-  for (const o of opts) {
-    const [a, b] = o.split(":").map(Number);
-    const dd = Math.abs(Math.log(r / (a / b)));
-    if (dd < d) { d = dd; best = o; }
-  }
-  return best;
 }
 
 /* ------------------------------------------------------------------ */
@@ -199,11 +184,7 @@ async function editPhoto({ buffer, mime, instruction }) {
   return { ...final, provider: out.provider, transparent: !!out.transparent, op };
 }
 
-function _reset() {
-  geminiBlockedUntil = 0;
-}
-
 module.exports = {
-  editPhoto, detectOp, wantsIdentityChange, available, nearestRatio, PhotoEditError,
-  IDENTITY_RULE, _reset,
+  editPhoto, detectOp, wantsIdentityChange, available, PhotoEditError,
+  IDENTITY_RULE,
 };

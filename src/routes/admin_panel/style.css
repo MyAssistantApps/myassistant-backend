@@ -314,24 +314,6 @@ svg .seg-fill { fill: currentColor; }
   display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 
-.switch { position: relative; width: 34px; height: 20px; flex-shrink: 0; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.switch .track {
-  position: absolute; inset: 0; border-radius: 999px; background: var(--border-strong);
-  transition: background 0.15s; cursor: pointer;
-}
-.switch .track::after {
-  content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px;
-  border-radius: 50%; background: #fff; transition: left 0.15s;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.25);
-}
-.switch input:checked + .track { background: var(--accent); }
-.switch input:checked + .track::after { left: 17px; }
-.flag-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 2px; border-bottom: 1px solid var(--border); gap: 12px; }
-.flag-row:last-child { border-bottom: 0; }
-.flag-row .name { font-weight: 500; font-size: 13.5px; }
-.flag-row .desc { color: var(--faint); font-size: 12px; }
-
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
   background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 8px;

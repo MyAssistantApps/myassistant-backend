@@ -1,8 +1,6 @@
 /**
  * MEETING ROUTES (all behind appAuth).
  *
- *   POST /meetings                 { transcript, title?, participants?, client_id?, duration_s? }
- *   POST /meetings/audio           multipart audio -> transcribed here, then analysed
  *   POST /meetings/record          a whole recording of any length -> 202 {id};
  *                                  minutes follow in the background + a push
  *   GET  /meetings                 recent meetings with their action items
@@ -10,16 +8,6 @@
  *   GET  /meetings/:id/pdf         the minutes as a shareable PDF
  *   GET  /meetings/prep?id=        "Prepare me" (2026-09-30, prep.js): the next
  *                                  meeting in 24 h (or event id / reminder:<id>)
- *
- * Two entry points on purpose. A phone that already produced a transcript
- * should not pay to transcribe twice; a plain recording still has to work.
- *
- * SIZE: a meeting is long, and speech-to-text has request limits. The audio
- * route accepts a single chunk up to AUDIO_LIMIT and the app is expected to
- * send a long meeting as sequential chunks, appending to the transcript on
- * its side, then POST the assembled text here. That keeps the failure mode
- * visible ("this chunk didn't transcribe") rather than a silent truncation
- * halfway through an hour-long recording.
  */
 const express = require("express");
 const { tzFromReq } = require("../services/tz");
@@ -28,12 +16,6 @@ const meetings = require("./service");
 const ai = require("../services/ai/router");
 // Looked up at call time (not destructured) so tests can stub the model.
 const transcribeAudio = (...a) => ai.transcribeAudio(...a);
-
-const AUDIO_LIMIT = 20 * 1024 * 1024; // 20 MB per chunk
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: AUDIO_LIMIT },
-});
 
 const router = express.Router();
 
@@ -48,87 +30,6 @@ function firstName(req) {
   const n = req.user?.name;
   return n ? String(n).split(" ")[0] : "the user";
 }
-
-/** Analyse a transcript the app already has. */
-router.post("/", async (req, res) => {
-  const u = uid(req);
-  if (!u) return res.status(401).json({ error: "unauthorized" });
-
-  const transcript = String(req.body?.transcript || "").trim();
-  if (transcript.length < 40) {
-    return res.status(400).json({ error: "transcript too short to analyse" });
-  }
-
-  try {
-    const out = await meetings.record(u, {
-      transcript,
-      title: req.body?.title,
-      participants: req.body?.participants,
-      clientId: Number(req.body?.client_id) || null,
-      durationS: Number(req.body?.duration_s) || 0,
-      userName: firstName(req),
-      tzOffsetMin: tz(req),
-    });
-    res.status(201).json(out);
-  } catch (e) {
-    console.error("meeting analyse error:", e.message || e);
-    res.status(502).json({ error: "could not analyse the meeting" });
-  }
-});
-
-/** Transcribe one audio chunk. Returns text; does NOT store a meeting. */
-router.post("/transcribe", upload.single("audio"), async (req, res) => {
-  const u = uid(req);
-  if (!u) return res.status(401).json({ error: "unauthorized" });
-  if (!req.file?.buffer?.length) {
-    return res.status(400).json({ error: "audio file required" });
-  }
-  try {
-    // transcribeAudio returns {text, language}. Calling .trim() on that
-    // object threw, so this endpoint failed on every request.
-    const text = (await transcribeAudio(req.file.buffer, req.file.mimetype,
-      { timeoutMs: 90_000 }))?.text || "";
-    // An empty transcript is reported as empty, never as success with
-    // nothing in it — the app needs to know the chunk failed so it can
-    // retry that chunk rather than lose a slice of the meeting silently.
-    if (!text || !text.trim()) {
-      return res.status(422).json({ error: "no speech detected in this chunk" });
-    }
-    res.json({ text: text.trim() });
-  } catch (e) {
-    console.error("meeting transcribe error:", e.message || e);
-    res.status(502).json({ error: "transcription failed" });
-  }
-});
-
-/** Record a whole short meeting from one audio file. */
-router.post("/audio", upload.single("audio"), async (req, res) => {
-  const u = uid(req);
-  if (!u) return res.status(401).json({ error: "unauthorized" });
-  if (!req.file?.buffer?.length) {
-    return res.status(400).json({ error: "audio file required" });
-  }
-  try {
-    const transcript = (await transcribeAudio(req.file.buffer, req.file.mimetype,
-      { timeoutMs: 90_000 }))?.text || "";
-    if (!transcript || transcript.trim().length < 40) {
-      return res.status(422).json({ error: "couldn't make out enough speech to analyse" });
-    }
-    const out = await meetings.record(u, {
-      transcript: transcript.trim(),
-      title: req.body?.title,
-      participants: req.body?.participants,
-      clientId: Number(req.body?.client_id) || null,
-      durationS: Number(req.body?.duration_s) || 0,
-      userName: firstName(req),
-      tzOffsetMin: tz(req),
-    });
-    res.status(201).json(out);
-  } catch (e) {
-    console.error("meeting audio error:", e.message || e);
-    res.status(502).json({ error: "could not process the recording" });
-  }
-});
 
 /* ------------------------------------------------------------------ *
  * RECORD A WHOLE MEETING — the app's Meeting recorder.
@@ -145,11 +46,17 @@ const os = require("os");
 const path = require("path");
 const { execFile } = require("child_process");
 
+const AUDIO_EXTS = new Set([".m4a", ".mp4", ".aac", ".mp3", ".wav", ".ogg", ".opus", ".amr", ".3gp", ".webm", ".flac"]);
+
 const recUpload = multer({
   storage: multer.diskStorage({
     destination: os.tmpdir(),
     filename: (_req, file, cb) => {
-      const ext = String(file.originalname || "").toLowerCase().match(/\.\w+$/)?.[0] || ".m4a";
+      // Known audio containers only (2026-11-15): ffmpeg reads the input by
+      // its extension, and a playlist (.m3u8, .concat) can make it open
+      // other files or URLs.
+      const found = String(file.originalname || "").toLowerCase().match(/\.\w+$/)?.[0];
+      const ext = AUDIO_EXTS.has(found) ? found : ".m4a";
       cb(null, `meeting-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
     },
   }),
@@ -173,7 +80,7 @@ function splitAudio(file) {
     const ext = path.extname(file) || ".m4a";
     const base = file.slice(0, -ext.length) + "-part";
     execFile("ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-y", "-i", file,
+      "-hide_banner", "-loglevel", "error", "-y", "-protocol_whitelist", "file", "-i", file,
       "-f", "segment", "-segment_time", String(SEGMENT_S),
       "-reset_timestamps", "1", "-c", "copy", `${base}%03d${ext}`,
     ], { timeout: 120_000 }, (err) => {

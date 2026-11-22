@@ -170,44 +170,6 @@ async function runGate(sub, personaValue) {
   });
 
   /* ---------------------------------------------------------------- */
-  console.log("\nreceptionist booking");
-  const rcp = require("../src/inbound/receptionist");
-  const clinicCtx = { canBook: true, tz: 330, slots: [at(10, 0), at(10, 15)] };
-
-  await test("books only a slot number that was offered", () => {
-    const b = rcp.resolveBooking({ book_slot: 2, patient_name: "Asha", reason: "fever" }, clinicCtx);
-    assert.deepStrictEqual(b, { startsAt: at(10, 15), patientName: "Asha", reason: "fever" });
-    assert.strictEqual(rcp.resolveBooking({ book_slot: 3, patient_name: "Asha" }, clinicCtx), null);
-    assert.strictEqual(rcp.resolveBooking({ book_slot: 0, patient_name: "Asha" }, clinicCtx), null);
-  });
-  await test("no patient name → no booking", () => {
-    assert.strictEqual(rcp.resolveBooking({ book_slot: 1, patient_name: " " }, clinicCtx), null);
-  });
-  await test("booking switched off → never books", () => {
-    assert.strictEqual(rcp.resolveBooking({ book_slot: 1, patient_name: "Asha" }, { ...clinicCtx, canBook: false }), null);
-  });
-  await test("slot labels read in IST", () => {
-    assert.strictEqual(rcp.slotLabel(at(17, 30), 330), "Mon 16 Nov, 5:30 pm");
-  });
-  await test("clinic prompt carries the emergency rule and the numbered slots", () => {
-    const rec = {
-      userName: "Rao", assistantName: "Maya", callerName: null, settings: { availability: "", may_book: false },
-      clinic: { ...clinicCtx, clinicName: "Rao Clinic", address: "MG Road", fee: 400, hoursText: "Mon 10am–11am" },
-    };
-    const sys = rcp.systemFor(rec);
-    assert.ok(sys.includes("108"));
-    assert.ok(sys.includes("1) Mon 16 Nov, 10:00 am"));
-    assert.ok(sys.includes("₹400"));
-    assert.ok(sys.includes('"book_slot"'));
-    assert.ok(!sys.includes("may NOT offer"));
-  });
-  await test("a non-doctor line has no clinic block", () => {
-    const sys = rcp.systemFor({ userName: "Ravi", assistantName: "Maya", callerName: null, settings: {}, clinic: null });
-    assert.ok(!sys.includes("CLINIC"));
-    assert.ok(!sys.includes("book_slot"));
-  });
-
-  /* ---------------------------------------------------------------- */
   console.log("\nclinical drafting");
   const ai = require("../src/clinic/ai");
 
@@ -343,7 +305,7 @@ async function runGate(sub, personaValue) {
   });
 
   /* ---------------------------------------------------------------- */
-  console.log("\nadvocates & business: money, prompts, PDFs, drafting");
+  console.log("\nadvocates & business: money, PDFs, drafting");
   const proStore = require("../src/pro/store");
 
   await test("invoice totals: lines, GST, total — in paise, no float drift", () => {
@@ -365,30 +327,6 @@ async function runGate(sub, personaValue) {
   await test("privacy: every new table is exported and erased", () => {
     const names = proStore.USER_TABLES.map(([t]) => t).sort();
     assert.deepStrictEqual(names, ["pro_cases", "pro_hearings", "pro_invoices", "pro_leads"]);
-  });
-
-  const recBase = (persona) => ({
-    userName: "Rao", assistantName: "Maya", callerName: null, settings: { availability: "", may_book: false },
-    clinic: { persona, canBook: true, tz: 330, slots: [Date.UTC(2026, 10, 16, 4, 30)], clinicName: "Rao & Co", address: "MG Road", fee: 2000, hoursText: "Mon 10am–6pm" },
-  });
-  await test("advocate's line: chamber words, no legal advice, 15100, books consultations", () => {
-    const sys = rcp.systemFor(recBase("advocate"));
-    assert.ok(sys.includes("ADVOCATE'S CHAMBER LINE"));
-    assert.ok(sys.includes("Never give legal advice"));
-    assert.ok(sys.includes("15100"));
-    assert.ok(sys.includes("book a consultation"));
-    assert.ok(!sys.includes("108"), "no medical emergency rule on a chamber line");
-  });
-  await test("business line: office words, never commits to deals, books meetings, no fee", () => {
-    const sys = rcp.systemFor(recBase("business"));
-    assert.ok(sys.includes("BUSINESS OWNER'S OFFICE LINE"));
-    assert.ok(sys.includes("Never quote prices"));
-    assert.ok(sys.includes("book a meeting"));
-    assert.ok(!sys.includes("Consultation fee"));
-  });
-  await test("doctor's line is unchanged", () => {
-    const sys = rcp.systemFor(recBase("doctor"));
-    assert.ok(sys.includes("DOCTOR'S CLINIC LINE") && sys.includes("108"));
   });
 
   const { renderInvoice, renderDocument, money } = require("../src/pro/pdf");

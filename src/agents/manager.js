@@ -61,9 +61,8 @@ const SPECIALISTS = {
       "person from memory or contacts before acting; never invent a number or address.",
     cues: /\b(call|ring|dial|phone (him|her|them)|message|msg|text (him|her|them)|sms|whatsapp|e-?mail|mail|inbox|reply|send .+ to|tell \w+|let \w+ know|missed calls?|who called)\b/i,
     tools: ["place_phone_call", "phone_calls", "send_agent_message", "send_whatsapp_message",
-      "email_read", "email_reply", "email_send", "email_recipients", "send_document",
-      "send_video_note", "check_my_calls", "call_recall", "book_by_calling_business",
-      "arrange_meeting_with", "lookup_person", "show_address"],
+      "connect_to_assistant", "email_read", "email_reply", "email_send", "email_recipients", "send_document",
+      "send_video_note", "call_recall", "lookup_person", "show_address"],
   },
   planner: {
     scope: "reminders, calendar, alarms, timers, plans, habits",
@@ -80,18 +79,18 @@ const SPECIALISTS = {
       "complete_commitment", "prepare_meeting", "record_meeting", "recall_meeting", "start_task"],
   },
   info: {
-    scope: "search, news, weather, places, directions, law, travel",
+    scope: "search, news, weather, places, directions, law, travel, Vedic astrology (kundli, readings)",
     label: "Information",
     role: "You are handling INFORMATION: search, news, weather, places, maps, law and travel. " +
       "Use live tools for anything that can change; say where an answer came from.",
     // Not "what is / how / why": every question starts so, and "what is on
     // my shopping list" is no lookup (seen in the app, 2026-10-31).
-    cues: /\b(who was|search|google|look up|news|headlines|weather|rain|temperature|near (me|by)|nearby|directions?|navigate|route to|how far|law|act|section|judg(e)?ment|flight|fare|convert|exchange rate|horoscope|research|pdf of|forecast|cold|jacket|umbrella|sunny)\b/i,
+    cues: /\b(who was|search|google|look up|news|headlines|weather|rain|temperature|near (me|by)|nearby|directions?|navigate|route to|how far|law|act|section|judg(e)?ment|flight|fare|convert|exchange rate|horoscope|kundli|kundali|jyotish|astrolog\w*|rashi|nakshatra|lagna|dasha|sade ?sati|manglik|birth chart|janma|research|pdf of|forecast|cold|jacket|umbrella|sunny)\b/i,
     tools: ["web_search", "deep_research", "read_webpage", "get_news", "show_news",
       "read_news_story", "get_weather", "find_places_nearby", "get_current_location",
       "start_navigation", "consult_knowledge", "indian_law", "indian_case_law", "convert_currency",
       "search_flights", "watch_flight_fare", "show_pictures", "show_search_results",
-      "open_public_pdf", "get_horoscope", "going_out_check"],
+      "open_public_pdf", "get_horoscope", "jyotish_chart", "jyotish_reading", "going_out_check"],
   },
   commerce: {
     scope: "shopping, food, rides, tickets, recharge, payments, money",
@@ -106,6 +105,19 @@ const SPECIALISTS = {
       "list_my_errands", "check_task_outcomes", "add_finance_item", "update_finance_item",
       "remove_finance_item", "get_finance_plan"],
   },
+  // RIDES AND DELIVERIES (2026-11-21): booking, following and cancelling
+  // cabs and orders. Its own small toolkit, so the shopping one does not
+  // grow past the cap and crowd out calls and reminders.
+  deliveries: {
+    scope: "cabs, deliveries, parcels, medicines, order status, OTP",
+    label: "Rides and deliveries",
+    role: "You are handling RIDES AND DELIVERIES: booking cabs, ordering food, groceries and " +
+      "medicines, sending parcels, and saying where they are (driver, OTP, arrival). " +
+      "Book at once when asked; never ask which company.",
+    cues: /\b(cab|taxi|ride|uber|ola|rapido|auto|driver|otp|parcel|courier|porter|deliver\w*|order status|my order|medicines?|tablets?|pharmacy|strips?|syrup|dolo|crocin|paracetamol|d+ ?mg|grocer\w*|milk|eggs|swiggy|instamart|blinkit|zepto)\b/i,
+    tools: ["book_ride", "ride_status", "cancel_ride", "order_food", "order_groceries",
+      "order_medicines", "send_parcel", "order_status", "cancel_order"],
+  },
   creative: {
     scope: "images, video, photo edits, documents, drafts, music",
     label: "Creative",
@@ -113,7 +125,7 @@ const SPECIALISTS = {
       "music. Ask one short question only when the request is too vague to make anything good.",
     cues: /\b(draw|image|picture of|poster|design|generate|create (a|an)|make (a|an|me)|video|edit (my|this|the) photo|background|look like|try (on|a look)|write (a|an|me)|draft|essay|letter|speech|document|pdf|ppt|presentation|spreadsheet|play|song|music|playlist)\b/i,
     tools: ["generate_image", "generate_video", "edit_my_photo", "try_a_look", "create_document",
-      "draft_text", "edit_draft", "present_text", "play_music", "open_video_mode"],
+      "draft_text", "edit_draft", "present_text", "play_music"],
   },
   device: {
     scope: "phone settings, apps, camera, screenshots, shortcuts",
@@ -124,7 +136,7 @@ const SPECIALISTS = {
     tools: ["phone_control", "do_in_app", "open_app", "open_named_app", "open_app_screen", "open_webpage",
       "uninstall_app", "update_app", "set_app_theme", "get_app_usage", "enable_usage_tracking",
       "analyze_camera", "look_at_screenshot", "capture_document", "scan_business_card",
-      "translator_mode", "start_interpreter_mode", "stop_interpreter_mode", "run_shortcut",
+      "translator_mode", "run_shortcut",
       "continue_shortcut", "list_shortcuts", "create_shortcut", "update_shortcut", "delete_shortcut"],
   },
   memory: {
@@ -143,39 +155,19 @@ const SPECIALISTS = {
     label: "Records and documents",
     role: "You are handling RECORDS AND DOCUMENTS: saved files, record books, cases, clients " +
       "and patients. Read totals and dates from the records, never from memory of the chat.",
-    cues: /\b(documents?|files?|receipts?|reports?|notices?|certificates?|expir\w*|renew\w*|records?|accounts?|entry|entries|ledger|total|cases?|hearings?|clients?|patients?|recall visit|dues|notion|papers|pension|passport|aadhaar|pan card|licen[cs]e|insurance|policy)\b/i,
+    cues: /\b(documents?|files?|receipts?|reports?|notices?|certificates?|expir\w*|renew\w*|records?|accounts?|entry|entries|ledger|total|cases?|hearings?|clients?|patients?|recall visit|dues|papers|pension|passport|aadhaar|pan card|licen[cs]e|insurance|policy)\b/i,
     tools: ["search_documents", "find_document", "get_last_document", "list_person_documents",
       "associate_document", "list_expiring_documents", "save_web_document",
       "file_document_under_client", "record_entry", "list_entries", "amend_last_entry",
       "remember_case", "remember_event", "check_patient_dues", "record_patient_payment",
-      "schedule_patient_recall", "complete_patient_recall", "send_patient_document",
-      "bills_email", "notion_search", "notion_read_page", "notion_add", "notion_create_page"],
+      "schedule_patient_recall", "complete_patient_recall", "send_patient_document"],
   },
 };
 const NAMES = Object.keys(SPECIALISTS);
 
-/**
- * THE MANAGER, ON REQUEST (owner, 2026-11-01: "if user says I want to talk
- * to your manager agent the manager agent should pop up ... access to the
- * internet and much more tools ... open any app I asked for and do task").
- * Everything else stays Maya's and invisible; only an explicit ask brings
- * the Manager, who keeps the conversation for follow-ups until they want
- * the assistant back (or MANAGER_MS of quiet). "Your" or "agent" is
- * required: "call the manager at the bank" is a phone call to a person.
- */
-const MANAGER_MS = 5 * 60_000;
-const MANAGER_CAP = 100; // OpenAI takes up to 128 functions
-const ASK_MANAGER = /\b(?:talk|speak|chat|connect|put me through|transfer|call|get|bring|switch|hand|pass|want|need)\b[^.?!]{0,30}?(?:\byour\s+(?:manager|boss|supervisor)\b|\bmanager\s+agent\b)/i;
-const BACK_TO_ASSISTANT = /\b(?:back to (?:maya|the assistant|my assistant|you)|(?:let me |i want to |can i )?(?:talk|speak) to maya|bye,? manager|thanks?,? manager|thank you,? manager|done with (?:the |you,? )?manager|that'?s all,? manager)\b/i;
-const askedManager = (text) => ASK_MANAGER.test(String(text || ""));
-// The Manager's reach: the internet, any app, the phone, then every team's tools.
-const MANAGER_FIRST = ["do_in_app", "web_search", "read_webpage", "open_named_app", "open_app_screen", "phone_control",
-  "show_search_results", "show_pictures"];
-// The live voice's switch; everywhere else the server decides who answers.
-// Offered on a typed turn, the model called both at once and said "passing
-// this to my manager now" instead of answering AS the Manager (review,
-// 2026-11-01).
-const LIVE_ONLY = new Set(["hand_to_manager", "hand_back_to_assistant"]);
+// "Talk to your manager" (a Manager persona that took the conversation
+// over) was removed on 2026-11-22 (owner: "keep only the main personal
+// assistant"). The specialists below stay: they only pick the turn's tools.
 
 // Thanks, greetings, goodbyes: no specialist, and never worth a model call.
 const SMALL_TALK = /^\s*(thanks?|thank you|thanks a lot|ok(ay)?|cool|great|nice|awesome|good (morning|afternoon|evening|night)|hi|hello|hey|bye|goodbye|see you)\b[\w\s.,!?']{0,30}$/i;
@@ -247,17 +239,7 @@ async function decide({ text, owner = true, skip = false, session = null, histor
   };
   if (!enabled() || skip || !owner || !String(text || "").trim()) return { agents: [], via: "skip", ms: 0 };
 
-  // The Manager, asked for or still holding the conversation.
-  const held = session && session.persona && session.persona.id === "manager" &&
-    Date.now() - session.persona.at < MANAGER_MS;
-  if (held && BACK_TO_ASSISTANT.test(text) && !askedManager(text)) {
-    session.persona = null;
-    return { agents: [], via: "handback", handback: true, ms: Date.now() - t0 };
-  }
-  if (askedManager(text) || held) {
-    if (session) session.persona = { id: "manager", at: Date.now() };
-    return { agents: NAMES.slice(), via: "manager", addressed: "manager", ms: Date.now() - t0 };
-  }
+  // A session still marked by the removed Manager persona: cleared.
   if (session && session.persona) session.persona = null;
 
   const prev = session && session.manager && Date.now() - session.manager.at < CARRY_MS
@@ -290,15 +272,8 @@ async function decide({ text, owner = true, skip = false, session = null, histor
  * set, the specialists' toolkits, then the rest of `base` — capped.
  */
 function toolsFor(plan, { base = [], must = [], live = null, cap = 40 } = {}) {
-  if (base.some((n) => LIVE_ONLY.has(n))) base = base.filter((n) => !LIVE_ONLY.has(n));
   if (!plan || !plan.agents.length) return base;
-  const has = (n) => (!live || live.has(n)) && !LIVE_ONLY.has(n);
-  if (plan.addressed === "manager") {
-    // Every team's whole kit, the internet and apps first.
-    const all = NAMES.flatMap((id) => SPECIALISTS[id].tools);
-    const out = [...new Set([...must, ...ESSENTIAL, ...MANAGER_FIRST, ...base, ...all])].filter(has);
-    return out.slice(0, Math.max(cap, MANAGER_CAP));
-  }
+  const has = (n) => !live || live.has(n);
   const packs = plan.agents.map((id) => SPECIALISTS[id].tools.filter(has));
   const picked = new Set(base);
   // The toolkits share the room fairly: first what the word scorer ALSO
@@ -320,11 +295,6 @@ function toolsFor(plan, { base = [], must = [], live = null, cap = 40 } = {}) {
  * tools are already offered).
  */
 function briefFor(plan, { assistant = "the assistant" } = {}) {
-  if (plan && plan.addressed === "manager") return managerBrief(assistant, plan.first);
-  if (plan && plan.handback) {
-    return `They are back with you from your Manager. You are ${assistant} again: say one short, warm line ` +
-      "that you're back, then carry on with whatever they asked.";
-  }
   if (!plan || plan.agents.length < 2) return "";
   const lines = plan.agents.map((id) => `- ${SPECIALISTS[id].role}`);
   lines.push("- This request has several parts: do each part yourself with its own tools, then give " +
@@ -332,72 +302,12 @@ function briefFor(plan, { assistant = "the assistant" } = {}) {
   return "This request needs several kinds of work:\n" + lines.join("\n");
 }
 
-/** THIS TURN's note while the Manager has the conversation. */
-function managerBrief(assistant) {
-  return `[THE MANAGER] The owner asked to talk to your manager. For this conversation you ARE the Manager — ` +
-    `the senior assistant above ${assistant}, who leads her team and can do everything she can, and more. ` +
-    `Speak as the Manager, never as ${assistant}: calm, confident, warm and to the point. Start your first reply ` +
-    `with "Manager here." and not again after that. Never say you are passing anything on — you are the one doing it. You have every tool: the internet (search, and reading a page ` +
-    `in full), opening any app on the phone, the phone's settings, calls, messages, reminders, calendar, documents, ` +
-    `shopping and the rest. Use them to actually get the job done, several in a row when it takes several steps, ` +
-    `and tell them plainly what you did. When the job is done or they ask for ${assistant}, say one short line ` +
-    `handing them back to ${assistant}.`;
-}
-
 /**
- * What the phone is told about agents: nothing, except while the Manager
- * has the conversation (it shows the Manager panel) and on the turn that
- * hands back. The shape stays for installed builds.
+ * What the phone is told about agents: nothing (the shape stays for
+ * installed builds, which read it).
  */
-function controlFor(plan = null) {
-  if (plan && plan.addressed === "manager") {
-    return { via: "manager", agents: [], toolAgent: {}, addressed: { id: "manager", label: "Manager" } };
-  }
-  if (plan && plan.handback) return { via: "handback", agents: [], toolAgent: {} };
+function controlFor() {
   return { via: "maya", agents: [], toolAgent: {} };
 }
 
-/**
- * The live voice fixes its tools when the session opens, so the switch is
- * a tool there: the model calls hand_to_manager when they ask for the
- * Manager, and hand_back_to_assistant when the Manager is done. The phone
- * shows and hides the Manager panel on these calls.
- */
-function registerManagerTools(registry) {
-  if (registry.get("hand_to_manager")) return; // loaded twice (tests reload the runtime)
-  registry.register({
-    name: "hand_to_manager",
-    description:
-      "ONLY when the owner asks to talk to YOUR manager ('I want to talk to your manager', 'connect me to " +
-      "your boss', 'manager agent'). Then speak as the Manager — start with 'Manager here.' — until the job " +
-      "is done. NEVER for calling or messaging a person: 'call the manager at the bank' is place_phone_call.",
-    risk: "low",
-    effects: ["read"],
-    inputSchema: { type: "object", properties: {}, required: [] },
-    async execute() {
-      return { ok: true, agent: "manager", label: "Manager",
-        result: "You are the Manager now: speak as the Manager, use every tool you need, and hand back when done." };
-    },
-  });
-  registry.register({
-    name: "hand_back_to_assistant",
-    description: "The Manager is done, or the owner asked for the assistant back: hand the conversation back.",
-    risk: "low",
-    effects: ["read"],
-    inputSchema: { type: "object", properties: {}, required: [] },
-    async execute() {
-      return { ok: true, agent: "assistant", result: "Handed back: you are the assistant again." };
-    },
-  });
-}
-
-/** For the live prompt: how the switch works there. */
-function managerRule(assistant = "the assistant") {
-  return `YOUR MANAGER: you are ${assistant}. Never mention agents or a team — except this: when the owner asks ` +
-    `to talk to your manager, call hand_to_manager and from then on speak as the Manager ("Manager here."), ` +
-    `a calm, senior, capable voice who gets the job done with every tool you have (search the internet, open any ` +
-    `app, phone settings, messages, reminders and the rest). When the job is done or they ask for ${assistant}, ` +
-    `call hand_back_to_assistant and say one short line as ${assistant} again.`;
-}
-
-module.exports = { decide, toolsFor, briefFor, controlFor, registerManagerTools, managerRule, askedManager, ASK_MANAGER, BACK_TO_ASSISTANT, MANAGER_CAP, byRules, SPECIALISTS, ESSENTIAL, FOLLOW_UP, SMALL_TALK, enabled };
+module.exports = { decide, toolsFor, briefFor, controlFor, byRules, SPECIALISTS, ESSENTIAL, FOLLOW_UP, SMALL_TALK, enabled };

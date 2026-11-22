@@ -16,9 +16,7 @@
  * look is stored tagged `ai-generated` with the model that made it named
  * in its summary, and the app shows that on the image. What is NOT done
  * is stamping pixels: a visible watermark across a face would make the
- * feature pointless and would invalidate an ID photograph outright. The
- * one provider that offers an invisible mark (Vertex's SynthID) is left
- * switched on.
+ * feature pointless and would invalidate an ID photograph outright.
  */
 const fs = require("fs");
 
@@ -34,22 +32,6 @@ async function readDocument(userId, documentId) {
     throw Object.assign(new Error("that photo's file is missing on the server"), { code: "missing_file" });
   }
   return { buffer: fs.readFileSync(row.path), mime: row.mime || "image/jpeg", row };
-}
-
-/** FASHN's garment-region control, inferred from what the user asked for. */
-function garmentCategory(recipe, params) {
-  if (recipe.id !== "outfit") return null;
-  const t = `${params.outfit || ""} ${params.occasion || ""}`.toLowerCase();
-  // Order matters: a one-piece wins over the words it contains ("kurta
-  // set" is not a top), and a bottom wins over a generic top word.
-  // Every noun is written to match its plural — `\btrouser\b` does not
-  // match "trousers", which quietly sent every pair of trousers to "auto".
-  if (/\b(sarees?|saris?|lehengas?|gowns?|dress(es)?|frocks?|jumpsuits?|sherwanis?|anarkalis?|kurta ?sets?|salwar|churidar kurta)\b/.test(t)) return "one-pieces";
-  if (/\b(trousers?|pants?|jeans|chinos?|skirts?|shorts?|churidars?|pyjamas?|pajamas?|dhotis?|palazzos?|leggings?|joggers?)\b/.test(t)) return "bottoms";
-  if (/\b(shirts?|t-?shirts?|tees?|blouses?|tops?|jackets?|blazers?|coats?|kurtas?|sweaters?|sweatshirts?|hoodies?|waistcoats?|bandhgalas?|jumpers?|cardigans?)\b/.test(t)) return "tops";
-  // A two- or three-piece suit replaces the top AND the bottom, which is
-  // not one of the three regions — let the model decide.
-  return "auto";
 }
 
 /**
@@ -106,13 +88,13 @@ async function runRecipe(userId, o = {}) {
     images: hasGarment ? [person, garment] : [person],
     aspect: recipe.aspect === "auto" ? "auto" : recipe.aspect,
     exact,
-    vto: !!recipe.vto && hasGarment,
-    vtoCategory: garmentCategory(recipe, params),
     hiQuality: true,
     // Printable without pretending to have recovered detail: an ID photo
     // is already forced to its exact size above, so this only lifts the
     // looks a user might want on a large screen or on paper.
     minLongEdge: exact ? 0 : 1536,
+    quality: o.quality || "",
+    inputFidelity: o.inputFidelity || "",
   });
 
   // 4 — save the picture before any bookkeeping can fail.
@@ -235,4 +217,4 @@ async function addPhoto(userId, { buffer, mime, role = "model", label = "", make
   });
 }
 
-module.exports = { runRecipe, addPhoto, readDocument, describe, garmentCategory };
+module.exports = { runRecipe, addPhoto, readDocument, describe };

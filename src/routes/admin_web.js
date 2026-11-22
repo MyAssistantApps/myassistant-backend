@@ -116,9 +116,8 @@ router.post("/api/login", (req, res) => {
     return res.status(429).json({ error: "Too many attempts — wait 10 minutes." });
   }
   const got = String(req.body?.key || "");
-  const ok =
-    got.length === key.length &&
-    crypto.timingSafeEqual(Buffer.from(got), Buffer.from(key));
+  // Hash-then-compare: the length check used to leak the key's length.
+  const ok = require("../services/safeCompare").safeEqual(got, key);
   if (!ok) {
     attempts.set(ip, [...(attempts.get(ip) || []), Date.now()]);
     return res.status(401).json({ error: "Wrong admin key." });
@@ -486,7 +485,7 @@ router.get("/api/users/:id", async (req, res) => {
   const reviewable = await helpImprove.effective(id).catch(() => false);
 
   const [assistant, instructions, google, counts, recent] = await Promise.all([
-    sq("SELECT name, gender, voice, style, avatar_id FROM assistant_profiles WHERE user_id=$1", [id]),
+    sq("SELECT name, gender, voice, style FROM assistant_profiles WHERE user_id=$1", [id]),
     sq("SELECT id, instruction FROM user_instructions WHERE user_id=$1 ORDER BY id", [id]),
     sq("SELECT 1 AS ok FROM google_tokens WHERE user_id=$1", [String(id)]),
     Promise.all([
@@ -1084,57 +1083,6 @@ router.get("/api/conversations.csv", async (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Failures — what is going wrong, across everyone                     */
-/*                                                                     */
-/* There was no way to ask "which tools failed today". An operator had  */
-/* to already know which user to open, then read forty turns by eye, so */
-/* a regression in one tool stayed invisible until somebody complained. */
-/* ------------------------------------------------------------------ */
-
-router.get("/api/failures", async (req, res) => {
-  const hours = Math.min(Math.max(parseInt(req.query.hours, 10) || 24, 1), 24 * 14);
-  const out = await require("../actions/store")
-    .failures({
-      sinceMs: Date.now() - hours * 3600_000,
-      limit: Math.min(parseInt(req.query.limit, 10) || 150, 500),
-      tool: String(req.query.tool || "").trim() || undefined,
-      includeRefusals: req.query.refusals !== "0",
-    })
-    .catch((e) => {
-      console.warn("failures read failed:", e.message);
-      return { rows: [], groups: [] };
-    });
-
-  // Names, so a row reads as a person rather than an id.
-  const ids = [...new Set(out.rows.map((r) => r.user_id))].slice(0, 200);
-  const names = new Map();
-  if (ids.length) {
-    const rows = await sq("SELECT id, name FROM users WHERE id = ANY($1)", [ids]).catch(() => []);
-    for (const u of rows) names.set(u.id, u.name);
-  }
-  res.json({
-    hours,
-    groups: out.groups,
-    rows: out.rows.map((r) => ({
-      id: r.id,
-      userId: r.user_id,
-      userName: names.get(r.user_id) || null,
-      tool: r.tool,
-      target: r.resolved_target || r.target || "",
-      decision: r.decision || "ran",
-      ok: Number(r.ok) === 1,
-      intent: r.intent || "",
-      args: r.args || "",
-      result: r.result || r.detail || "",
-      reply: r.reply || "",
-      ms: Number(r.ms) || 0,
-      surface: r.surface || "",
-      at: Number(r.created_at),
-    })),
-  });
-});
-
-/* ------------------------------------------------------------------ */
 /* Action ledger — one turn, end to end                                */
 /*                                                                     */
 /* The panel could show what a user asked and what was answered, and    */
@@ -1703,7 +1651,7 @@ router.post("/api/feedback/:id(\\d+)", async (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Feature flags (live overrides, read by /config)                     */
+/* App update controls (live overrides, read by /config)               */
 /* ------------------------------------------------------------------ */
 
 const configRoute = require("./config");
@@ -1711,9 +1659,6 @@ const configRoute = require("./config");
 router.get("/api/flags", async (_req, res) => {
   const o = await configRoute.overrides();
   res.json({
-    defaults: remoteConfig.features,
-    overrides: o.features || {},
-    announcement: o.announcement !== undefined ? o.announcement : remoteConfig.announcement,
     forceUpdateBelow: o.forceUpdateBelow !== undefined ? o.forceUpdateBelow : remoteConfig.forceUpdateBelow,
     apk: appUpdate.readMeta(),
   });
@@ -1722,15 +1667,6 @@ router.get("/api/flags", async (_req, res) => {
 router.put("/api/flags", async (req, res) => {
   const body = req.body || {};
   const clean = {};
-  if (body.features && typeof body.features === "object") {
-    clean.features = {};
-    for (const k of Object.keys(remoteConfig.features)) {
-      if (typeof body.features[k] === "boolean") clean.features[k] = body.features[k];
-    }
-  }
-  if (body.announcement !== undefined) {
-    clean.announcement = body.announcement ? String(body.announcement) : null;
-  }
   if (body.forceUpdateBelow !== undefined) {
     clean.forceUpdateBelow = parseInt(body.forceUpdateBelow, 10) || 0;
   }
@@ -1834,11 +1770,9 @@ router.get("/api/debug", async (req, res) => {
   const env = (k) => Boolean(process.env[k] && process.env[k].length > 2);
   const integrations = {
     openai: env("OPENAI_API_KEY"),
-    heygen_avatar: env("HEYGEN_API_KEY"),
     razorpay_payments: env("RAZORPAY_KEY_ID"),
     google_places: env("GOOGLE_PLACES_API_KEY"),
     youtube: env("YOUTUBE_API_KEY"),
-    notion: env("NOTION_CLIENT_ID") && env("NOTION_CLIENT_SECRET"),
     google_signin: env("GOOGLE_WEB_CLIENT_ID"),
     dev_phone_typed: String(process.env.ALLOW_DEV_PHONE_VERIFY) === "true",
   };
@@ -1852,12 +1786,6 @@ router.get("/api/debug", async (req, res) => {
       });
       probes.openai = r.ok ? "ok" : `HTTP ${r.status}`;
     } catch (e) { probes.openai = e.message; }
-    // HeyGen: public avatar catalog.
-    try {
-      const heygen = require("../avatar/heygen");
-      const faces = await heygen.listFaces();
-      probes.heygen = faces.length ? `ok (${faces.length} faces)` : "empty catalog";
-    } catch (e) { probes.heygen = e.message; }
   }
 
   res.json({

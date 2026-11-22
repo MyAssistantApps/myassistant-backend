@@ -1,0 +1,92 @@
+# Alert rules. The owner chose dashboards only (2026-11-20): these are not
+# sent anywhere — they show as firing in Grafana (Alerting → Alert rules,
+# data source "Prometheus") and on the Overview dashboard's alert panel.
+# To get notified later, add an Alertmanager or a Grafana contact point.
+groups:
+  - name: myassistant
+    rules:
+      - alert: BackendDown
+        expr: up{job="backend"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: The backend is not answering /metrics.
+
+      - alert: DatabaseDown
+        expr: pg_up == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: Postgres is unreachable from the exporter.
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_request_duration_seconds_count{status_code=~"5.."}[5m]))
+            / clamp_min(sum(rate(http_request_duration_seconds_count[5m])), 0.001) > 0.05
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: More than 5% of API requests are failing with 5xx.
+
+      - alert: SlowRequests
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m]))) > 2
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: p95 API latency is above 2 s.
+
+      - alert: EventLoopLag
+        expr: nodejs_eventloop_lag_p99_seconds{job="backend"} > 0.2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: The Node.js event loop is blocked (p99 lag > 200 ms) — CPU-bound work on the request path.
+
+      - alert: PgPoolExhausted
+        expr: myassistant_pg_pool_waiting > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: Requests are queueing for a database connection.
+
+      - alert: JobsFailing
+        expr: increase(myassistant_jobs_total{status="failed"}[1h]) > 5
+        labels: { severity: warning }
+        annotations:
+          summary: Background jobs are failing.
+
+      - alert: AiSpendHigh
+        expr: myassistant_ai_spend_today_usd > 30
+        labels: { severity: warning }
+        annotations:
+          summary: Today's AI spend is past $30 (the circuit-breaker stops at $40).
+
+      - alert: HostCpuHigh
+        expr: 100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 85
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: Host CPU above 85% for 15 minutes.
+
+      - alert: HostMemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: Less than 10% of host memory available.
+
+      - alert: DiskFilling
+        expr: |
+          node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+            / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} < 0.15
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: Root disk has less than 15% free.
+
+      - alert: ContainerRestarting
+        expr: increase(container_start_time_seconds{name=~".+"}[30m]) > 0 and on(name) (time() - container_start_time_seconds < 1800)
+        labels: { severity: info }
+        annotations:
+          summary: A container restarted in the last 30 minutes.

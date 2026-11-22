@@ -1,8 +1,8 @@
 /**
  * PERSONA — what the user does, picked once at registration.
  * -------------------------------------------------------------------------
- * `users.profession` is free text ("software engineer", filled in by
- * conversational onboarding) and cannot gate anything. `users.persona` is
+ * `users.profession` is free text ("software engineer", set through
+ * PUT /profile/details) and cannot gate anything. `users.persona` is
  * the canonical key the user chose on the "What do you do?" step, and it
  * decides which workspaces the app shows:
  *
@@ -31,15 +31,6 @@ function cleanPersona(v) {
 /** Personas whose work is organised around client/patient case files. */
 function usesCaseFiles(persona) {
   return ["doctor", "advocate", "business", "professional"].includes(persona);
-}
-
-/**
- * The Pro assistant (src/pro/brief.js kinds) a persona may open, or null.
- * The owner's rule (2026-11-13): each profession sees ONLY its own
- * assistant; everyone else sees none.
- */
-function proKindFor(persona) {
-  return persona === "doctor" || persona === "advocate" || persona === "business" ? persona : null;
 }
 
 async function personaOf(userId) {
@@ -76,4 +67,4 @@ function requirePersona(allowed, lookup = personaOf) {
   };
 }
 
-module.exports = { PERSONAS, cleanPersona, usesCaseFiles, proKindFor, personaOf, requirePersona };
+module.exports = { PERSONAS, cleanPersona, usesCaseFiles, personaOf, requirePersona };

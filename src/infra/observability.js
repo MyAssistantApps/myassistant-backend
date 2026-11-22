@@ -86,21 +86,27 @@ const logger = {
  */
 function requestId() {
   return (req, res, next) => {
-    const id = req.headers["x-request-id"] || crypto.randomBytes(8).toString("hex");
+    // A client-chosen id is echoed into every log line: keep it short and
+    // printable, or mint our own.
+    const given = String(req.headers["x-request-id"] || "");
+    const id = /^[\w.:-]{1,64}$/.test(given) ? given : crypto.randomBytes(8).toString("hex");
     req.requestId = String(id);
     res.setHeader("x-request-id", req.requestId);
-    if (req.path === "/health" || req.path === "/metrics") return next();
+    if (req.path === "/health" || req.path === "/health/ready" || req.path === "/metrics") return next();
 
     const t0 = Date.now();
     res.on("finish", () => {
       const ms = Date.now() - t0;
-      observe(`http ${req.method} ${req.route?.path || req.path.split("/")[1] || "/"}`, ms);
+      // Unmatched paths (scanners probing /wp-admin, /.env …) have no
+      // route; keying on their raw first segment grew the latency map by
+      // one entry per junk path, forever.
+      observe(`http ${req.method} ${req.route ? req.route.path : "unmatched"}`, ms);
       count(`http.${res.statusCode >= 500 ? "5xx" : res.statusCode >= 400 ? "4xx" : "ok"}`);
       logger.info("http", {
         rid: req.requestId,
         method: req.method,
-        // Webhook paths carry their secret (Bolna, the tool hook, Plivo's
-        // per-call tokens): logged as ":secret", never the value.
+        // Webhook paths carry their secret (Bolna, the tool hook): logged
+        // as ":secret", never the value.
         path: redactPath(req.path),
         status: res.statusCode,
         ms,
@@ -138,4 +144,4 @@ function redactPath(p) {
     .replace(/\/[A-Fa-f0-9]{32,}(?=\/|$)/g, "/:secret");
 }
 
-module.exports = { logger, requestId, timed, count, observe, snapshot, redact, METRICS };
+module.exports = { logger, requestId, timed, count, observe, snapshot, redact, redactPath, METRICS };

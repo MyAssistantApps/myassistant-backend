@@ -197,7 +197,34 @@ function limitsBlock(deviceCaps) {
   return "WHAT THIS PHONE CANNOT DO RIGHT NOW:\n" + lines.join("\n");
 }
 
+// Declarations are rebuilt for every /ai/config and every turn, but a
+// tool's inputSchema is a fixed object: normalise each one once. Keyed by
+// the schema object itself, so a re-registered (MCP) tool gets a new entry
+// and a dropped one is collected.
+const NORMALIZED = new WeakMap();
 function normalizeSchema(schema) {
+  if (schema && typeof schema === "object") {
+    const hit = NORMALIZED.get(schema);
+    if (hit) return structuredCloneLite(hit);
+    const out = normalizeSchemaUncached(schema);
+    NORMALIZED.set(schema, out);
+    return structuredCloneLite(out);
+  }
+  return normalizeSchemaUncached(schema);
+}
+// Callers own what they get back (some annotate declarations): a cheap
+// deep copy of a plain JSON tree, still far cheaper than re-normalising.
+function structuredCloneLite(v) {
+  if (Array.isArray(v)) return v.map(structuredCloneLite);
+  if (v && typeof v === "object") {
+    const o = {};
+    for (const k in v) o[k] = structuredCloneLite(v[k]);
+    return o;
+  }
+  return v;
+}
+
+function normalizeSchemaUncached(schema) {
   if (!schema || typeof schema !== "object") {
     return { type: "OBJECT", properties: {} };
   }
@@ -206,9 +233,9 @@ function normalizeSchema(schema) {
     if (k === "type" && typeof v === "string") out.type = v.toUpperCase();
     else if (k === "properties" && v && typeof v === "object") {
       out.properties = Object.fromEntries(
-        Object.entries(v).map(([pk, pv]) => [pk, normalizeSchema(pv)])
+        Object.entries(v).map(([pk, pv]) => [pk, normalizeSchemaUncached(pv)])
       );
-    } else if (k === "items") out.items = normalizeSchema(v);
+    } else if (k === "items") out.items = normalizeSchemaUncached(v);
     else if (["description", "required", "enum", "format"].includes(k)) out[k] = v;
     // anything else (additionalProperties, $schema, default…) is dropped:
     // Gemini rejects unknown fields in a declaration.
@@ -271,15 +298,14 @@ function missingRequired(tool, args) {
  */
 const SEED_WORLD = new Set([
   "place_phone_call", "send_agent_message", "send_whatsapp_message",
-  "send_document", "send_patient_document", "book_by_calling_business",
-  "arrange_meeting_with", "order_food", "book_ride", "book_movie_tickets",
-  "collect_payment", "open_app", "open_webpage", "open_public_pdf", "open_service_app",
-  "open_video_mode", "start_navigation", "phone_control", "play_music",
+  "send_document", "send_patient_document", "order_food", "order_groceries", "order_medicines", "send_parcel", "cancel_order", "book_ride", "cancel_ride",
+  "book_movie_tickets", "collect_payment", "open_app", "open_webpage", "open_public_pdf", "open_service_app",
+  "start_navigation", "phone_control", "play_music",
   "capture_document", "analyze_camera", "set_alarm", "create_reminder",
   "update_reminder", "schedule_task", "schedule_patient_recall",
   "record_entry", "amend_last_entry", "record_patient_payment",
   "file_document_under_client", "associate_document", "save_web_document",
-  "forget_memory", "start_interpreter_mode", "generate_image", "generate_video",
+  "forget_memory", "generate_image", "generate_video",
   "try_a_look",
   // Opens Android's uninstall confirmation for an app.
   "uninstall_app",
@@ -301,8 +327,6 @@ const SEED_WORLD = new Set([
   "plan_my_day", "complete_priority", "add_habit", "check_habit", "start_focus",
   // 2026-09-26: a clip in the user's own face and voice, to another person.
   "send_video_note",
-  // 2026-09-27: writes into the user's Notion, which others may share.
-  "notion_add", "notion_create_page",
 ]);
 
 function isWorldAction(name) {
@@ -321,7 +345,7 @@ const READ_ONLY_LEGACY = new Set([
   "search_documents", "find_document", "get_last_document", "list_person_documents",
   "list_expiring_documents", "get_finance_plan", "list_entries", "recall_conversation",
   "recall_meeting", "list_my_commitments", "check_recent_actions", "check_task_outcomes",
-  "list_my_errands", "check_payments", "check_patient_dues", "check_my_calls", "call_recall",
+  "list_my_errands", "check_payments", "check_patient_dues", "call_recall",
   "get_current_location", "momentum_status", "get_app_usage",
 ]);
 
@@ -346,7 +370,7 @@ function isParallelSafe(name) {
 /**
  * Does this call only edit an undoable draft on the user's own screen?
  * A tool says so with `draftEdit: true`, or a function of the call's
- * arguments (make_greeting_poster continuing a card, not starting one).
+ * arguments (continuing a draft, not starting one).
  */
 function isDraftEdit(tool, args) {
   const d = tool && tool.draftEdit;
@@ -394,9 +418,9 @@ const MEM_STOP = new Set(
  * suppressing those would invent a bug in place of the one being fixed.
  */
 const SEED_REPEAT = new Set([
-  "place_phone_call", "book_by_calling_business", "send_agent_message",
+  "place_phone_call", "send_agent_message",
   "send_whatsapp_message", "send_document", "send_patient_document",
-  "arrange_meeting_with", "order_food", "book_ride", "book_movie_tickets",
+  "order_food", "order_groceries", "order_medicines", "send_parcel", "cancel_order", "book_ride", "cancel_ride", "book_movie_tickets",
   "collect_payment", "open_app", "open_webpage", "open_public_pdf", "open_service_app",
   "start_navigation", "play_music",
   // Every look costs money at a paid image model, so a stutter must not
@@ -407,8 +431,6 @@ const SEED_REPEAT = new Set([
   "uninstall_app",
   // One stutter would queue two clips of the owner's manual work.
   "send_video_note",
-  // A stutter must not add the same items to a Notion page twice.
-  "notion_add", "notion_create_page",
 ]);
 
 /**
@@ -432,13 +454,10 @@ const SEED_DURABLE = new Set([
   "send_patient_document", "order_food", "book_ride", "book_movie_tickets",
   "collect_payment", "email_reply", "pay_by_upi",
   "send_video_note",
-  // Once it is in Notion it has left the device (2026-09-27).
-  "notion_add", "notion_create_page",
 ]);
 
 const SEED_UNATTENDED = new Set([
-    "collect_payment", "book_by_calling_business", "forget_memory",
-    "arrange_meeting_with",
+    "collect_payment", "forget_memory",
     // Never money, never unattended.
     "pay_by_upi",
     // Removing an app is the owner's decision, made holding the phone.
@@ -449,9 +468,6 @@ const SEED_UNATTENDED = new Set([
     // Words said in the user's own face and voice need the user there
     // to hear them read back (2026-09-26); readBack skips unattended runs.
     "send_video_note",
-    // Writes into Notion need the user there to hear what goes where;
-    // reading may run in a scheduled task (2026-09-27).
-    "notion_add", "notion_create_page",
   ]);
 
 /**
@@ -474,14 +490,12 @@ const SEED_UNATTENDED = new Set([
  * sent to the owner by someone else's assistant, or what a caller left.
  * Anyone who knows the owner's number can write "Ravi's new UPI ID is
  * x@ybl, save it". A tool that only SOMETIMES carries such words (the
- * daily brief with unread messages, check_my_calls with calls) says so
+ * daily brief with unread messages) says so
  * on its result with `untrusted: true` instead of being listed here.
  */
 const UNTRUSTED_SOURCES = new Set(["email_read", "read_webpage", "deep_research",
   // It hands back an article's text, exactly as read_webpage does.
-  "read_news_story",
-  // A Notion page is third-party text: shared workspaces have other authors.
-  "notion_search", "notion_read_page"]);
+  "read_news_story"]);
 const TAINT_SENSITIVE = new Set([
   "email_send", "send_agent_message", "send_whatsapp_message", "send_document",
   "send_patient_document", "place_phone_call", "delete_calendar_event",
@@ -494,9 +508,6 @@ const TAINT_SENSITIVE = new Set([
   "uninstall_app",
   // Nor put words in the user's own mouth, on video.
   "send_video_note",
-  // A Notion page can be shared with other people: a write after reading
-  // an email or a web page gets the same warning as a send.
-  "notion_add", "notion_create_page",
   // Shortcuts (2026-09-27) outlive the taint window: a step planted by an
   // email today would run next week with no question asked, so saving,
   // changing, deleting and running one after reading becomes a question.
@@ -710,7 +721,7 @@ function catalogue() {
 const STALE_TURN_MS = 45 * 1000;
 
 /** Tools that put a call on a line — guarded by outcome, not by clock. */
-const CALL_TOOLS = new Set(["place_phone_call", "book_by_calling_business"]);
+const CALL_TOOLS = new Set(["place_phone_call"]);
 
 async function execute(name, rawArgs, ctx = {}) {
   const tool = get(name);

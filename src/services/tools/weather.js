@@ -1,8 +1,8 @@
 /**
  * WEATHER TOOL — OpenWeatherMap (OPENWEATHER_API_KEY) first, Open-Meteo
  * (free, no key) as the fallback.
- * Used by the /chat intent layer ("what's the weather") and the app's
- * Today screen (GET /tools/weather). 10-minute in-memory cache.
+ * Used by the get_weather voice tool, the brief, live facts and Home's
+ * weather card (GET /tools/weather/forecast). 10-minute in-memory cache.
  */
 const TIMEOUT = 8000;
 const cache = new Map(); // key → { ts, data }

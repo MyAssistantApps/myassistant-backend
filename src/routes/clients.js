@@ -8,8 +8,6 @@
  *   DELETE /clients/:id                   → { ok, documentsDeleted } (its documents go with it)
  *   POST   /clients/:id/notes   {text}    → { note }
  *   DELETE /clients/:id/notes/:noteId     → { ok }
- *   POST   /clients/:id/docs/:docId       → { ok }   link an existing saved document
- *   DELETE /clients/:id/docs/:docId       → { ok }   unlink (document itself survives)
  *
  * Sensitive by nature (patient files!), so every case-file read is
  * audit-logged — the professional can show WHO looked at WHAT and WHEN
@@ -159,27 +157,6 @@ router.delete("/:id/notes/:noteId", async (req, res) => {
   const id = uid(req, res);
   if (id === null) return;
   const ok = await store.deleteNote(id, Number(req.params.id), Number(req.params.noteId));
-  res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: "not found" });
-});
-
-/* ---------------- document links ---------------- */
-
-router.post("/:id/docs/:docId", async (req, res) => {
-  const id = uid(req, res);
-  if (id === null) return;
-  const ok = await store.linkDocument(id, Number(req.params.docId), Number(req.params.id));
-  res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: "client or document not found" });
-});
-
-router.delete("/:id/docs/:docId", async (req, res) => {
-  const id = uid(req, res);
-  if (id === null) return;
-  // Verify the doc currently belongs to THIS client before unlinking.
-  const doc = await docsStore.getDocument(id, Number(req.params.docId));
-  if (!doc || Number(doc.client_id) !== Number(req.params.id)) {
-    return res.status(404).json({ error: "not found" });
-  }
-  const ok = await store.linkDocument(id, Number(req.params.docId), null);
   res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: "not found" });
 });
 

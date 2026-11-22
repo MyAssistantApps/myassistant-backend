@@ -243,54 +243,23 @@ async function test(name, fn) {
     assert.ok(g.length < 1600);
   });
 
-  console.log("(i) the Manager, only when asked");
-  for (const [text, want] of [
-    ["I want to talk to your manager", true], ["connect me to your boss", true],
-    ["can I speak with the manager agent", true], ["let me talk to your supervisor please", true],
-    ["call the manager at the bank", false], ["call my manager Ravi", false], ["call mom", false],
-    ["set an alarm for 6", false],
-  ]) {
-    await test(`"${text}" -> ${want ? "the Manager" : "Maya"}`, () => {
-      assert.strictEqual(manager.askedManager(text), want);
-    });
-  }
-  await test("asked: the Manager takes the conversation, keeps follow-ups, and hands back", async () => {
+  console.log("(i) no Manager persona (removed 2026-11-22): only the main assistant");
+  await test("'talk to your manager' is an ordinary turn, never a takeover", async () => {
     const session = {};
     const p = await manager.decide({ text: "I want to talk to your manager", session });
-    assert.deepStrictEqual([p.via, p.addressed], ["manager", "manager"]);
-    const next = await manager.decide({ text: "find the best rated biryani near me and open Swiggy", session });
-    assert.strictEqual(next.addressed, "manager", "a follow-up stays with the Manager");
-    const back = await manager.decide({ text: "thanks manager, back to Maya", session });
-    assert.deepStrictEqual([back.via, !!back.handback, !!back.addressed], ["handback", true, false]);
-    const after = await manager.decide({ text: "set an alarm for 6", session });
-    assert.strictEqual(after.via, "maya", "Maya again");
+    assert.notStrictEqual(p.via, "manager");
+    assert.strictEqual(p.addressed, undefined);
+    assert.ok(!session.persona);
+    assert.deepStrictEqual(manager.controlFor(p), { via: "maya", agents: [], toolAgent: {} });
   });
-  await test("the Manager's hold ends after five quiet minutes", async () => {
-    const session = { persona: { id: "manager", at: Date.now() - 6 * 60_000 } };
-    const p = await manager.decide({ text: "set an alarm for 6", session });
-    assert.strictEqual(p.via, "maya");
+  await test("an old session still marked by the Manager goes back to the assistant", async () => {
+    const session = { persona: { id: "manager", at: Date.now() } };
+    await manager.decide({ text: "set an alarm for 6", session });
+    assert.strictEqual(session.persona, null);
   });
-  await test("the Manager gets the internet, apps and every team's tools (more than Maya)", () => {
-    const p = { agents: manager.SPECIALISTS ? Object.keys(manager.SPECIALISTS) : [], addressed: "manager" };
-    const out = manager.toolsFor(p, { base: ["get_weather"], live, cap: 40 });
-    for (const n of ["web_search", "read_webpage", "open_named_app", "phone_control", "place_phone_call",
-      "create_reminder", "order_food", "remember_fact"]) {
-      if (live.has(n)) assert.ok(out.includes(n), n);
-    }
-    assert.ok(out.length > 40 && out.length <= manager.MANAGER_CAP, `${out.length} tools`);
-  });
-  await test("the brief makes it the Manager; the phone is told to show the panel", () => {
-    const brief = manager.briefFor({ agents: [], addressed: "manager" }, { assistant: "Maya" });
-    assert.ok(/you ARE the Manager/.test(brief) && /Manager here/.test(brief) && /handing them back to Maya/.test(brief), brief);
-    assert.deepStrictEqual(manager.controlFor({ agents: [], addressed: "manager" }).addressed, { id: "manager", label: "Manager" });
-    assert.strictEqual(manager.controlFor({ agents: [], handback: true }).via, "handback");
-    assert.deepStrictEqual(manager.controlFor({ agents: ["comms"], via: "maya" }), { via: "maya", agents: [], toolAgent: {} },
-      "any other turn: nothing shown");
-  });
-  await test("the live voice has the switch as tools, and no old persona tool", () => {
-    assert.ok(registry.get("hand_to_manager") && registry.get("hand_back_to_assistant"));
+  await test("the Manager switch tools are gone", () => {
+    assert.ok(!registry.get("hand_to_manager") && !registry.get("hand_back_to_assistant"));
     assert.ok(!registry.get("talk_as_agent"));
-    assert.ok(/hand_to_manager/.test(manager.managerRule("Maya")));
   });
 
   console.log("(g) parallel-safe tools (registry.isParallelSafe)");

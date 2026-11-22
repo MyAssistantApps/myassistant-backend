@@ -10,14 +10,15 @@
  *                 button ("Prepare me", "Draft wishes").
  *   template()    the script written by code — always correct, a little
  *                 plain. Used whenever the model is off, slow or wrong.
- *   scriptFor()   one short Gemini text call turns the facts into warm
+ *   scriptFor()   one short OpenAI text call turns the facts into warm
  *                 speech. The answer is checked before it is used: no
  *                 number that is not in the facts, never the user's name,
  *                 the title (Sir / Ma'am) once, the offer at the end. Any
  *                 doubt and the template is used instead — a brief that
  *                 invents a meeting is worse than no brief.
  *
- * Kill switches: BRIEF_SCRIPT_AI=off (template only), BRIEF_SCRIPT_MODEL,
+ * Kill switches: BRIEF_SCRIPT_AI=off (template only), BRIEF_SCRIPT_MODEL
+ * (an OpenAI model id; blank = OPENAI_FAST_MODEL),
  * BRIEF_SCRIPT_TIMEOUT_MS (6000), BRIEF_SCRIPT_CACHE_MIN (30; 0 = off).
  */
 const crypto = require("crypto");
@@ -399,11 +400,10 @@ function sentencesOf(script) {
 
 async function modelScript(f) {
   const router = require("./ai/router");
-  const model = router.envModel("BRIEF_SCRIPT_MODEL", "gemini-flash-lite-latest");
+  const model = router.envModel("BRIEF_SCRIPT_MODEL", require("./ai/openai").models.fast());
   const { reply } = await router.generateReply(
     [{ role: "user", content: JSON.stringify(f) }],
-    { system: SYSTEM, json: true, model, modelEnv: "BRIEF_SCRIPT_MODEL",
-      timeoutMs: timeoutMs(), noRetry: true, thinking: "MINIMAL" }
+    { system: SYSTEM, json: true, model, timeoutMs: timeoutMs(), noRetry: true }
   );
   return parseScript(reply);
 }

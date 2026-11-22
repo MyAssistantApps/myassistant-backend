@@ -39,6 +39,8 @@ const CODE_MS = 5 * 60_000;
 const MAX_TRIES = 5;
 const MAX_CODES = 3;
 const CODES_WINDOW_MS = 15 * 60_000;
+const MAX_CODES_DAY = 6;
+const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString("hex"), 10);
 
 let migrated = null;
 function migrate() {
@@ -90,7 +92,7 @@ async function consoleAuth(req, res, next) {
   if (!authz.startsWith("Bearer ")) return res.status(401).json({ error: "sign in to the developer console" });
   let p;
   try {
-    p = jwt.verify(authz.slice(7), process.env.JWT_SECRET, { algorithms: ["HS256"] });
+    p = jwt.verify(authz.slice(7), require("../infra/jwtKey").sessionKey(), { algorithms: ["HS256"] });
   } catch (_) {
     return res.status(401).json({ error: "your console sign-in has expired — sign in again" });
   }
@@ -130,6 +132,13 @@ auth.post("/code", async (req, res) => {
     `SELECT COUNT(*)::int AS n FROM platform_console_codes WHERE user_id=$1 AND created_at > $2`,
     [user.id, Date.now() - CODES_WINDOW_MS]);
   if (recent && recent.n >= MAX_CODES) return res.json({ ok: true, message: SENT });
+  // A daily ceiling too (2026-11-15): 3 codes × 5 tries every 15 minutes
+  // was ~1,440 guesses a day at one account's 6-digit code. Now at most
+  // MAX_CODES_DAY × MAX_TRIES (30) a day.
+  const today = await one(
+    `SELECT COUNT(*)::int AS n FROM platform_console_codes WHERE user_id=$1 AND created_at > $2`,
+    [user.id, Date.now() - 24 * 3600_000]);
+  if (today && today.n >= MAX_CODES_DAY) return res.json({ ok: true, message: SENT });
   const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
   const now = Date.now();
   await run(
@@ -176,10 +185,18 @@ auth.post("/verify", async (req, res) => {
 
 auth.post("/password", async (req, res) => {
   const { email, password } = req.body || {};
+  const guard = require("../services/loginGuard");
+  // Shares the per-account throttle with the app's /auth/login.
+  if (email && guard.locked(String(email))) return res.status(429).json({ error: guard.LOCKED_MESSAGE });
   const user = email ? await db.findByEmail(String(email).toLowerCase()).catch(() => null) : null;
-  if (!user || !user.password_hash || !(await bcrypt.compare(String(password || ""), user.password_hash))) {
+  const ok = user && user.password_hash
+    ? await bcrypt.compare(String(password || ""), user.password_hash)
+    : (await bcrypt.compare(String(password || ""), DUMMY_HASH), false); // same time either way
+  if (!ok) {
+    if (email) guard.failed(String(email));
     return res.status(401).json({ error: "That email and password don't match. Signed up with Google or your phone? Use a code instead." });
   }
+  guard.succeeded(String(email));
   if (user.status === "paused") return res.status(403).json({ error: "This account is paused." });
   try { require("../audit/log").record(user.id, "console.signin", "Signed in to the developer console (password)"); } catch (_) {}
   res.json({ token: issue(user), user: publicUser(user), expiresInHours: TOKEN_HOURS });

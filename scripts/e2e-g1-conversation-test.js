@@ -50,17 +50,16 @@ const assert = require("assert");
 
 const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "g1-e2e-data-"));
 process.env.DATA_DIR = DATA_DIR;
-process.env.LIVE_RECORD = "0";
 // Background turns need a key; this one never reaches Google (fetch is
 // blocked below).
 process.env.OPENAI_API_KEY = "g1-e2e-not-a-real-key";
 process.env.JWT_SECRET = "g1-e2e-" + crypto.randomBytes(12).toString("hex");
 for (const k of [
-  "GEMINI_LIVE_MODEL", "GEMINI_LIVE_MODEL_NEXT", "LIVE_BARGE_IN", "LIVE_SILENCE_MS",
+  "LIVE_BARGE_IN", "LIVE_SILENCE_MS",
   "LIVE_SILENCE_MS_DUPLEX", "LIVE_ACTIVITY_HANDLING", "LIVE_END_SENSITIVITY",
   "LIVE_GOOGLE_SEARCH", "MORNING_BRIEF", "MORNING_BRIEF_HOUR", "MORNING_BRIEF_WINDOW_H",
-  "QUIET_HOURS_START", "QUIET_HOURS_END", "BRAVE_SEARCH_API_KEY", "TAVILY_API_KEY",
-  "GOOGLE_CSE_KEY", "GOOGLE_CSE_CX", "OPENAI_API_KEY", "AGENT_RUNTIME", "AUTH_DISABLED",
+  "QUIET_HOURS_START", "QUIET_HOURS_END", "BRAVE_SEARCH_API_KEY",
+  "OPENAI_API_KEY", "AGENT_RUNTIME", "AUTH_DISABLED",
   "ALLOW_APP_KEY",
 ]) delete process.env[k];
 
@@ -122,7 +121,6 @@ aiRouter.generateReply = async (messages = [], opts = {}) => {
   return { reply: "[]" };
 };
 aiRouter.generateReplyStream = async () => { throw new Error("g1-e2e: offline"); };
-aiRouter.callGemini = async () => { throw new Error("g1-e2e: offline"); };
 
 /* Push: captured, never sent. */
 const push = require("../src/services/push");
@@ -326,7 +324,6 @@ function isoLocal(ms, tz = 330) {
       for (const n of ["forget_memory", "set_alarm"]) {
         assert.ok(asks.tools.map((d) => d.name).includes(n), `asked for, ${n} is offered`);
       }
-      assert.ok(!names.includes("make_greeting_poster"), "build 119 cards are not offered to 118");
     });
 
     await atest("an older build (110) is not offered newer tools", async () => {

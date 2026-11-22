@@ -16,7 +16,6 @@ process.env.DATABASE_URL = process.env.DATABASE_URL ||
   "postgres://myassistant:localdev@127.0.0.1:55432/myassistant";
 process.env.NODE_ENV = process.env.NODE_ENV || "test";
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "test-key-never-sent";
-process.env.LIVE_RECORD = "0";
 
 const assert = require("assert");
 const fs = require("fs");

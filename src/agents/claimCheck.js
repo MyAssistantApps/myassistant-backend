@@ -58,7 +58,6 @@ function saysVideoNoteWent(s) {
 const VIDEO_NOTE_QUEUED =
   "Your video note hasn't gone yet — it's being made, and you'll get a notification when it's ready.";
 const NO_VIDEO_NOTE = "I haven't queued a video note — nothing is being made or sent.";
-const CARD_SHARE_OPEN = "The card is open to share — pick the person and press Send.";
 
 /**
  * Families of action, each with the tools that satisfy it and the
@@ -73,7 +72,7 @@ const CARD_SHARE_OPEN = "The card is open to share — pick the person and press
 const FAMILIES = [
   {
     id: "call",
-    tools: ["place_phone_call", "book_by_calling_business", "arrange_meeting_with"],
+    tools: ["place_phone_call"],
     // "calling X", "I'll call", "connecting your call", "dialling"
     // "My calling service couldn't place it" names the SERVICE — it is
     // the honest line said when a call fails, and must not itself be
@@ -106,7 +105,7 @@ const FAMILIES = [
     // screen was open in front of the user.
     tools: [
       "open_app", "open_named_app", "do_in_app", "open_webpage", "open_public_pdf", "open_service_app",
-      "open_video_mode", "phone_control", "start_navigation",
+      "phone_control", "start_navigation",
       // "Opening GPay with ₹500 for Ravi" — the UPI app on screen.
       "pay_by_upi",
       // "Opening Jio's recharge with the ₹349 plan" — the operator's page.
@@ -123,7 +122,7 @@ const FAMILIES = [
       // live in SOME family or the membership test (rightly) fails.
       "end_conversation",
       // These open an app or a screen too, and say so in the same words.
-      "enable_usage_tracking", "order_food", "book_ride", "book_movie_tickets",
+      "enable_usage_tracking", "order_food", "order_groceries", "order_medicines", "send_parcel", "book_ride", "book_movie_tickets",
       "try_a_look", "present_text", "draft_text", "edit_draft", "generate_image", "generate_video",
       // show_pictures pops a photo on the phone ("Here is X") — same claim.
       "show_pictures", "show_search_results",
@@ -131,8 +130,6 @@ const FAMILIES = [
       "edit_my_photo", "prepare_meeting",
       // Screens inside this app. "Opening your settings" is the same claim.
       "open_app_screen", "set_app_theme",
-      // Bills by email opens its own screen ("Your address is on screen").
-      "bills_email",
       // Opens the phone clock app and says "Opening your alarms" — the
       // same words, so it belongs here or it denies what it just did.
       "show_alarms",
@@ -180,15 +177,6 @@ const FAMILIES = [
     honest: (_s, ranOk) => (ranOk && ranOk.has("send_video_note") ? VIDEO_NOTE_QUEUED : NO_VIDEO_NOTE),
   },
   {
-    // "Added it to your Notion" (2026-09-27). Ahead of `message`, and so of
-    // `create`/`record`, whose "saved it to your…" would otherwise take
-    // "saved it to your Notion" (the first family that matches wins).
-    id: "notion",
-    tools: ["notion_add", "notion_create_page"],
-    claim: /\b(added|saved|put|created)\b[^.]{0,40}\bnotion\b/i,
-    honest: () => "I haven't changed anything in your Notion — that didn't go through.",
-  },
-  {
     id: "message",
     tools: ["send_agent_message", "send_whatsapp_message", "send_document", "send_patient_document",
             "send_developer_feedback", // "I've passed that on to the developer"
@@ -201,13 +189,9 @@ const FAMILIES = [
     // "Sent!" (or भेज दिया) when only a video note was QUEUED is still
     // false, but "I haven't sent anything" would be too: something is on
     // its way to being made. Say that instead.
-    // A shared card is the same shape (2026-09-26): WhatsApp opened with
-    // it, and the user presses Send — "sent" is false, "nothing went
-    // through" would be too.
     honest: (_s, ranOk) =>
       ranOk && ranOk.has("send_video_note") ? VIDEO_NOTE_QUEUED
-        : ranOk && ranOk.has("share_poster") ? CARD_SHARE_OPEN
-          : "I haven't sent anything — that didn't go through.",
+        : "I haven't sent anything — that didn't go through.",
   },
   {
     id: "remind",
@@ -540,28 +524,20 @@ function familiesAskedAbout(question) {
 }
 
 /**
- * WHAT THE APP'S OWN [SYSTEM] LINES VOUCH FOR (photo cards, 2026-09-26).
- * The card screen reports back with lines like "[SYSTEM] Signature saved
- * on this phone; it is on the card now." — a turn in which no tool runs,
- * so "Done, your signature is on the card now" had nothing behind it and
- * was rewritten into "I couldn't create that file — nothing was saved",
- * straight after it was saved. The line itself is the evidence: the phone
- * only sends it once the thing is on the card. Returns the tools such a
- * line stands for (runtime and live proxy file them for the reply), or [].
- * Only the lines that say something landed: "the picker was closed…
- * Nothing was made" vouches for nothing, and neither does any
- * "[SYSTEM] ERROR:" line — the app's own failure reports, some of which
- * name the card ("the photo on the card has not arrived on this phone
- * yet, so nothing was sent"; integration check, 2026-09-26).
+ * WHAT THE APP'S OWN [SYSTEM] LINES VOUCH FOR (2026-09-26). The phone
+ * reports some things with a line in a turn in which no tool runs ("The
+ * call to X has ended"), so a true reply about it had nothing behind it
+ * and was rewritten into a denial. The line itself is the evidence.
+ * Returns the tools such a line stands for (runtime and live proxy file
+ * them for the reply), or []. Only the lines that say something landed:
+ * "Nothing was made" vouches for nothing, and neither does any
+ * "[SYSTEM] ERROR:" line — the app's own failure reports.
  */
 function appNoteVouches(text) {
   const t = String(text || "");
   if (!/^\s*\[SYSTEM\]/.test(t) || /^\s*\[SYSTEM\]\s*ERROR\b/i.test(t) ||
       /\bnothing was (made|cut|changed|saved|sent)\b/i.test(t)) return [];
   const out = [];
-  if (/\b(on the card|card is on the screen)\b/i.test(t)) out.push("change_poster");
-  if (/\bcleaned-up photo is on the screen\b/i.test(t)) out.push("improve_old_photo");
-  if (/\bopen with the card\b/i.test(t)) out.push("share_poster");
   // CALL STATUS FROM THE PHONE (2026-10-11): "[SYSTEM] The assistant is now
   // calling X", "The call to X has ended / started / is still going on" are
   // turns in which no tool runs, so "I'm calling Jayantha now" was

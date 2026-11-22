@@ -217,17 +217,27 @@ async function messagesOf(phoneNumber) {
   if (!phoneNumber) return [];
   try {
     const rows = await db.query(
-      `SELECT m.message, u.name AS from_name
+      // Up to 20, urgent first: Home groups them by sender (2026-11-21,
+      // "ten contacts writing at once").
+      `SELECT m.id, m.message, m.created_at, u.name AS from_name, u.phone_number AS from_phone
          FROM agent_messages m
          LEFT JOIN users u ON u.id = m.from_user_id
         WHERE m.status = 'unread' AND m.to_phone_number = $1
-        ORDER BY m.created_at DESC LIMIT 4`,
+        ORDER BY (m.message LIKE '[URGENT]%') DESC, m.created_at DESC LIMIT 20`,
       [phoneNumber]
     );
-    return rows.map((r) => ({
-      from: r.from_name || "Someone",
-      text: String(r.message || "").slice(0, 160),
-    }));
+    return rows.map((r) => {
+      const raw = String(r.message || "");
+      const urgent = raw.startsWith("[URGENT]");
+      return {
+        from: r.from_name || "Someone",
+        text: (urgent ? raw.replace(/^\[URGENT\]\s*/, "") : raw).slice(0, 1000),
+        urgent,
+        at: Number(r.created_at) || null,
+        id: Number(r.id),
+        from_phone: r.from_phone || "",
+      };
+    });
   } catch (_) {
     return [];
   }
@@ -387,6 +397,8 @@ async function buildBrief(uid, opts = {}) {
     ]);
 
   const practice = await boxed(practiceOf(uid, tz), 2500, null);
+  // Bookings made through a contact's assistant: Home's top strip.
+  const appointments = await boxed(require("../connect/bookings").upcomingFor(uid), 2000, []);
   const [days, promises, messages, people, weather_line, headlines, screen_time, dates, weather_note] =
     await Promise.all([
       boxed(daysOf(uid, tz), 3000, { today: [], tomorrow: [], failed: true }),
@@ -415,6 +427,7 @@ async function buildBrief(uid, opts = {}) {
     practice,
     promises,
     messages,
+    appointments,
     people,
     people_count: people.length,
     headlines,

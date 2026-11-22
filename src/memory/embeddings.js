@@ -18,19 +18,20 @@
  * RECOMMENDED PRODUCTION CONFIG:
  *   image: pgvector/pgvector:pg16   (drop-in replacement for postgres:16)
  *   CREATE EXTENSION vector;
- *   ALTER TABLE agent_memories ALTER COLUMN embedding TYPE vector(768)
+ *   ALTER TABLE agent_memories ALTER COLUMN embedding TYPE vector(1536)
  *     USING (embedding::text::vector);
  *   CREATE INDEX ON agent_memories USING hnsw (embedding vector_cosine_ops);
  * The retrieval API does not change; only the ranking moves into SQL.
  */
 
 const PROVIDERS = {
-  /** Google Gemini embeddings — same key as the rest of the app. */
+  /** OpenAI embeddings — same key as the rest of the app. */
   openai: {
     available: () => Boolean(process.env.OPENAI_API_KEY),
     dims: 1536,
     async embed(texts) {
       const base = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+      await require("../ops/budget").check({ path: "/embeddings" });
       const r = await fetch(`${base}/embeddings`, {
         method: "POST",
         headers: {

@@ -91,6 +91,35 @@ async function fromPptx(buffer) {
 }
 
 /**
+ * ZIP-BOMB GUARD (2026-11-15, security hardening). .docx/.xlsx/.pptx are
+ * ZIPs, and mammoth / ExcelJS / JSZip inflate every part into memory: an
+ * 18 MB upload can expand to gigabytes and take the container down for
+ * every user. Before any parser runs, the ZIP's own directory (read
+ * without inflating anything) must declare a sane total and entry count,
+ * and no entry may claim an extreme compression ratio.
+ */
+const ZIP_MAX_TOTAL = 80 * 1024 * 1024; // bytes, all entries uncompressed
+const ZIP_MAX_ENTRIES = 3000;
+const ZIP_MAX_RATIO = 200; // a real Office part is rarely above ~30:1
+
+async function zipLooksSafe(buffer) {
+  const JSZip = require("jszip");
+  const zip = await JSZip.loadAsync(buffer); // parses the directory only
+  const entries = Object.values(zip.files);
+  if (entries.length > ZIP_MAX_ENTRIES) return false;
+  let total = 0;
+  for (const f of entries) {
+    const d = f._data || {};
+    const size = Number(d.uncompressedSize) || 0;
+    const packed = Number(d.compressedSize) || 0;
+    total += size;
+    if (total > ZIP_MAX_TOTAL) return false;
+    if (size > 1024 * 1024 && packed > 0 && size / packed > ZIP_MAX_RATIO) return false;
+  }
+  return true;
+}
+
+/**
  * @returns {Promise<string|null>} plain text, or null when the format is
  * not one we can open (or the file turned out to be empty).
  */
@@ -98,6 +127,10 @@ async function extractText(buffer, mime, filename) {
   const type = EXTRACTABLE.has(mime) ? mime : byExtension(filename);
   if (!type) return null;
   try {
+    if ((type === DOCX || type === XLSX || type === PPTX) && !(await zipLooksSafe(buffer))) {
+      console.warn("doc extract refused: the archive expands beyond the safe limit", mime);
+      return null;
+    }
     let text;
     if (type === DOCX) text = await fromDocx(buffer);
     else if (type === XLSX) text = await fromXlsx(buffer);
@@ -117,4 +150,4 @@ async function extractText(buffer, mime, filename) {
   }
 }
 
-module.exports = { extractText, EXTRACTABLE, byExtension, DOCX, XLSX, PPTX };
+module.exports = { extractText, zipLooksSafe, EXTRACTABLE, byExtension, DOCX, XLSX, PPTX };

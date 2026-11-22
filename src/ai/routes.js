@@ -1,19 +1,16 @@
 /**
- * /ai — the backend half of the app's hybrid brain (2026-09-29).
+ * /ai — the backend half of the app's assistant (2026-09-29).
  *
- * The phone runs the models itself: Gemini Nano on the device for what it
- * can answer in words, Gemini in the cloud through Firebase AI Logic for
- * the rest (tools, fresh facts, images), Gemini TTS for the voice. This
- * server is what those models stand on — the context and memory, the
- * tools, the approvals, the record — and no model is called here:
+ * The phone's turns reach OpenAI through this server (ai/proxy.js, and
+ * the Realtime voice with a key minted here). These routes are what the
+ * model stands on — the context and memory, the tools, the approvals,
+ * the record:
  *
- *   GET  /ai/config          models, voice, Nano on/off, routing words
- *   POST /ai/context         one turn's system instruction, Nano preamble,
- *                            tools and history (ai/context.js)
+ *   GET  /ai/config          models, voice, routing words
+ *   POST /ai/context         one turn's system instruction, tools and
+ *                            history (ai/context.js)
  *   POST /ai/tool            run a tool the model called (ai/tool.js)
  *   POST /ai/turn            claim-check and record the reply (ai/turn.js)
- *   POST /ai/firebase-token  a Firebase custom token ("u<id>") so Firebase
- *                            AI Logic can require a signed-in user
  *
  * Mounted behind appAuth (server.js). Background, stored-data and
  * multi-user work stays on the server's own agent (agents/runtime.js).
@@ -281,31 +278,8 @@ async function serveGreeting(req, res) {
   }
 }
 
-// Keep old paths working for installed builds. v4 invalidates clips generated
-// with an earlier voice source.
-router.get("/voices/:id/greeting", serveGreeting);
-router.get("/voices/:id/greeting-v3", serveGreeting);
-router.get("/voices/:id/greeting-v4", serveGreeting);
-// v5: the path every current build asks for.
-router.get("/voices/:id/greeting-v5", serveGreeting);
 // v6 (2026-11-04): the faster hello — a new path so phones fetch it again.
 router.get("/voices/:id/greeting-v6", serveGreeting);
-
-router.post("/firebase-token", async (req, res) => {
-  const uid = userOf(req, res);
-  if (!uid) return;
-  const firebase = require("../services/firebase");
-  if (!firebase.ensure()) return res.status(503).json({ error: "firebase unavailable" });
-  const fuid = `u${uid}`;
-  try {
-    const token = await firebase.auth().createCustomToken(fuid);
-    res.json({ token, uid: fuid });
-  } catch (e) {
-    // Most often the service account lacks "Service Account Token Creator".
-    console.error("ai: firebase custom token failed:", String((e && e.message) || e).slice(0, 200));
-    res.status(503).json({ error: "firebase unavailable" });
-  }
-});
 
 // Connected apps' voice sessions speak the same way (src/platform/voice.js).
 router.VOICE_STYLE = VOICE_STYLE;

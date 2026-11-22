@@ -369,7 +369,7 @@ router.get("/", async (req, res) => {
     if ((row.title && row.full_text) || healAttempted.has(row.id) || STORE_ONLY.has(row.mime)) continue;
     // Never an email document: analyzeInBackground writes a memory fact
     // from its title and runs understandDocument, and an outside sender's
-    // words must reach neither (mailin/process.js files these itself).
+    // words must reach neither.
     if (row.source === "email") continue;
     healAttempted.add(row.id);
     fs.promises
@@ -386,6 +386,14 @@ router.get("/:id/file", async (req, res) => {
   if (!row || !fs.existsSync(row.path)) return res.status(404).json({ error: "not found" });
   res.setHeader("Content-Type", row.mime);
   res.setHeader("Cache-Control", "private, max-age=86400"); // immutable per id
+  // The type is the one the uploader declared. Only passive types render
+  // inline; anything else (an uploaded .html, an SVG with script) is a
+  // download, never a page on this origin (2026-11-15).
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  if (!/^(image\/(jpeg|png|webp|gif|heic|heif)|application\/pdf|audio\/|video\/)/i.test(String(row.mime || ""))) {
+    res.setHeader("Content-Disposition", "attachment");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+  }
   fs.createReadStream(row.path).pipe(res);
 });
 
@@ -408,12 +416,6 @@ router.delete("/:id", async (req, res) => {
       await memory.deleteFactsContaining(id, `"${row.title}"`).catch(() => {});
     }
     audit.record(id, "document.deleted", `document #${docId} and its memory fact`);
-    // A document that came by email takes the reminders that email set
-    // with it once none of its documents remain, so deleting a fake bill
-    // deletes its reminders too. Ordinary deletes never load this.
-    if (row?.source === "email") {
-      await require("../mailin/service").onDocumentDeleted(id, docId).catch(() => {});
-    }
   }
   res.status(ok ? 200 : 404).json(ok ? { ok: true } : { error: "not found" });
 });

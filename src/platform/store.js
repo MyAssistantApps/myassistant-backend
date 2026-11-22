@@ -327,7 +327,7 @@ async function resolveKey(key) {
   if (typeof key !== "string" || !/^mya_[A-Za-z0-9]{40}$/.test(key)) return null;
   await migrate();
   const r = await one(
-    `SELECT k.id AS key_id, k.last_used_at AS key_used, a.*
+    `SELECT k.id AS key_id, k.last_used_at AS key_used, k.created_at AS key_created, a.*
        FROM platform_keys k JOIN platform_apps a ON a.id = k.app_id AND a.user_id = k.user_id
       WHERE k.hash=$1 AND k.revoked_at IS NULL`,
     [hashKey(key)]);
@@ -337,7 +337,7 @@ async function resolveKey(key) {
     run(`UPDATE platform_keys SET last_used_at=$2 WHERE id=$1`, [r.key_id, now()]).catch(() => {});
     touchApp(r.id);
   }
-  return { keyId: Number(r.key_id), app: appRow(r) };
+  return { keyId: Number(r.key_id), keyCreatedAt: Number(r.key_created) || 0, app: appRow(r) };
 }
 
 /* --------------------------------------------------------------- records */

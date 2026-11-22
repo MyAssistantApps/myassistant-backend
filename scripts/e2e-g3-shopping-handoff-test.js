@@ -207,9 +207,9 @@ const haveApp = fs.existsSync(path.join(FLUTTER, "lib/features/assistant/state/a
       }
     });
 
-    await atest("payment connectors that need a partner stay hidden: collect_payment, calling a business, one-time cards", () => {
+    await atest("payment connectors that need a partner stay hidden: collect_payment, one-time cards", () => {
       const names = new Set(registry.declarations({}).map((x) => x.name));
-      for (const n of ["collect_payment", "book_by_calling_business", "arrange_meeting_with"]) {
+      for (const n of ["collect_payment"]) {
         assert.ok(!names.has(n), `${n} must not be offered`);
       }
       assert.ok(names.has("pay_by_upi") && names.has("open_service_app"));

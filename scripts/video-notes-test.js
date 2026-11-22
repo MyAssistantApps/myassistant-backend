@@ -144,11 +144,6 @@ const tmpUploads = () => filesIn(os.tmpdir()).filter((f) => /^(avatar|note)-\d+-
     form.append("file", new Blob([buf], { type }), "identity.mp4");
     return call(uid, "/avatar-profile/video", { method: "POST", body: form });
   }
-  async function uploadLegacy(uid, kind, buf, type) {
-    const form = new FormData();
-    form.append("file", new Blob([buf], { type }), kind === "face" ? "face.jpg" : "voice.m4a");
-    return call(uid, `/avatar-profile/${kind}`, { method: "POST", body: form });
-  }
 
   const store = require("../src/videonotes/store");
   const service = require("../src/videonotes/service");
@@ -171,16 +166,11 @@ const tmpUploads = () => filesIn(os.tmpdir()).filter((f) => /^(avatar|note)-\d+-
     });
   });
 
-  await atest("without consent the video, the photo and the voice are refused (403), nothing written", async () => {
+  await atest("without consent the video is refused (403), nothing written", async () => {
     const before = tmpUploads().length;
-    for (const res of [
-      await uploadVideo(S),
-      await uploadLegacy(S, "face", Buffer.from("jpeg"), "image/jpeg"),
-      await uploadLegacy(S, "voice", Buffer.from("m4a"), "audio/mp4"),
-    ]) {
-      assert.strictEqual(res.status, 403);
-      assert.deepStrictEqual(await res.json(), { error: "consent_required" });
-    }
+    const res = await uploadVideo(S);
+    assert.strictEqual(res.status, 403);
+    assert.deepStrictEqual(await res.json(), { error: "consent_required" });
     assert.ok(!exists(path.join(MEDIA, "identity", String(S))), "a file was stored without consent");
     assert.strictEqual(tmpUploads().length, before, "an upload was spooled to disk anyway");
   });
@@ -256,15 +246,6 @@ const tmpUploads = () => filesIn(os.tmpdir()).filter((f) => /^(avatar|note)-\d+-
     const on = await call(S, "/avatar-profile/prefs", { method: "PUT", json: { enabled: true } });
     assert.strictEqual(on.status, 200);
     assert.strictEqual((await profile(S)).enabled, true);
-  });
-
-  await atest("builds <= 117 still save a photo and a voice sample", async () => {
-    assert.strictEqual((await uploadLegacy(S, "face", Buffer.from("jpeg-bytes"), "image/jpeg")).status, 200);
-    assert.strictEqual((await uploadLegacy(S, "voice", Buffer.from("m4a-bytes"), "audio/mp4")).status, 200);
-    const p = await profile(S);
-    assert.strictEqual(p.has_face, true);
-    assert.strictEqual(p.has_voice, true);
-    assert.strictEqual(filesIn(path.join(MEDIA, "identity", String(S))).length, 3);
   });
 
   /* ================================================================ */
@@ -344,7 +325,13 @@ const tmpUploads = () => filesIn(os.tmpdir()).filter((f) => /^(avatar|note)-\d+-
     assert.strictEqual(noteR.script_version, 1);
     assert.strictEqual(noteR.consent_version, store.CONSENT_VERSION);
     assert.strictEqual(noteR.identity_checked_at, null);
-    const out = await db.one(`SELECT * FROM task_outcomes WHERE external_id = $1`, [`video_note:${noteR.id}`]);
+    // The outcome is written in the background: give it a moment.
+    let out = null;
+    for (let i = 0; i < 40 && !out; i++) {
+      out = await db.one(`SELECT * FROM task_outcomes WHERE external_id = $1`, [`video_note:${noteR.id}`]);
+      if (!out) await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(out, "the outcome row is written");
     assert.strictEqual(out.status, "requested");
     assert.strictEqual(out.kind, "message");
   });
@@ -969,7 +956,7 @@ const tmpUploads = () => filesIn(os.tmpdir()).filter((f) => /^(avatar|note)-\d+-
     assert.strictEqual((await profile(S)).consented, false);
   });
 
-  await atest("a take or a photo that lands after consent went is refused and leaves nothing", async () => {
+  await atest("a take that lands after consent went is refused and leaves nothing", async () => {
     await call(S, "/avatar-profile/consent", { method: "POST" });
     await call(S, "/avatar-profile/prefs", { method: "PUT", json: { enabled: true } });
     const before = await store.getProfile(S);
@@ -983,26 +970,20 @@ const tmpUploads = () => filesIn(os.tmpdir()).filter((f) => /^(avatar|note)-\d+-
       return out;
     };
     try {
-      for (const res of [
-        await uploadVideo(S, { buf: mp4(4500) }),
-        await uploadLegacy(S, "face", Buffer.from("late-jpeg"), "image/jpeg"),
-      ]) {
-        assert.strictEqual(res.status, 403);
-        assert.deepStrictEqual(await res.json(), { error: "consent_required" });
-        await store.setConsent(S, true);
-      }
+      const res = await uploadVideo(S, { buf: mp4(4500) });
+      assert.strictEqual(res.status, 403);
+      assert.deepStrictEqual(await res.json(), { error: "consent_required" });
+      await store.setConsent(S, true);
     } finally {
       media.put = realPut;
     }
     const after = await store.getProfile(S);
     assert.strictEqual(after.video_key, before.video_key, "the row points at a take that was refused");
-    assert.strictEqual(after.face_key, before.face_key);
     assert.deepStrictEqual(filesIn(dir).sort(), filesBefore, "a refused file stayed, or the old take went");
     assert.ok(exists(path.join(MEDIA, before.video_key)), "the take in use was deleted");
     // Straight at the store: no row, or no consent, and nothing changes.
     await assert.rejects(store.setVideo(T, { key: "identity/x/video-y.mp4", id: "y", mime: "video/mp4",
       bytes: 1, durationMs: 30000, scriptVersion: 1 }), (e) => e.http === 403);
-    await assert.rejects(store.setAsset(T, "face", "identity/x/face-y.jpg"), (e) => e.http === 403);
   });
 
   await atest("Delete everything removes every file and the row, and cancels what is waiting", async () => {

@@ -124,6 +124,5 @@ IDs that installed apps still use go in `GOOGLE_WEB_CLIENT_ID_LEGACY`
 The server starts without these, but the features they back fail:
 
 - `OPENAI_API_KEY` — replies, document analysis, notes, pictures
-- `GEMINI_API_KEY` — Gemini text, speech and images
-- `PLIVO_*` — agent and inbound calls
+- `BOLNA_*` — agent and inbound calls
 - See `.env.example` for the rest; every key is documented there.

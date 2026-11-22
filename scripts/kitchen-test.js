@@ -5,10 +5,7 @@
  *   (b) /shopping: every route, merging (groceries by name; clothes only
  *       with the same details), limits, another user's ids (404), bad
  *       input (400), the share text, the shop hand-off
- *   (c) /kitchen: pantry (and what it learns), recipes (save, update by
- *       title, rating, notes, cooked, limits, onto the list), the week plan,
- *       preferences with safe defaults and read from memory
- *   (d) every tool through registry.execute on a FRESH registry that holds
+ *   (c) every tool through registry.execute on a FRESH registry that holds
  *       only these tools: confirmation for clearing everything and for
  *       shopping, the shop_handoff links, never a payment app, the
  *       WhatsApp share, app-build gating
@@ -22,7 +19,6 @@ process.env.NODE_ENV = process.env.NODE_ENV || "test";
 delete process.env.OPENAI_API_KEY;
 delete process.env.OPENAI_API_KEY;
 process.env.SHOPPING_RATE_PER_MIN = "100000";
-process.env.KITCHEN_RATE_PER_MIN = "100000";
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || "warn"; // no per-tool log lines
 
 const assert = require("assert");
@@ -36,7 +32,6 @@ const { readPrefs } = require("../src/shopping/prefs");
 const shopping = require("../src/shopping");
 const kitchen = require("../src/kitchen");
 const kStore = require("../src/kitchen/store");
-const { readKitchen } = require("../src/kitchen/prefs");
 
 // A FRESH registry with only these tools. It must not load registerBuiltins
 // (which registers them too once wired) — a second registration throws.
@@ -63,30 +58,6 @@ const ctxFor = (userId, extra = {}) => ({
 });
 const exec = (name, args, ctx) => registry.execute(name, args, ctx);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-const RECIPE = (over = {}) => ({
-  title: "Paneer butter masala",
-  cuisine: "North Indian",
-  diet: "veg",
-  servings: 4,
-  prepMinutes: 15,
-  cookMinutes: 25,
-  equipment: ["kadai"],
-  ingredients: [
-    { name: "Paneer", quantity: 200, unit: "g", category: "dairy" },
-    { name: "Tomatoes", quantity: 3, unit: "pcs" },
-    { name: "Butter", quantity: 2, unit: "tbsp" },
-    { name: "Salt", localName: "namak", staple: true },
-    { name: "Mint", quantity: 1, unit: "bunch" },
-    { name: "Fresh cream", quantity: 100, unit: "ml" },
-  ],
-  steps: [{ n: 1, text: "Heat butter.", minutes: 2 }, { n: 2, text: "Add tomatoes.", minutes: 10, timer: true }],
-  tips: ["Soak paneer in warm water."],
-  substitutions: [{ ingredient: "cream", use: "cashew paste" }],
-  nutritionPerServing: { kcal: 320, proteinG: 12, carbsG: 10, fatG: 25, estimate: true },
-  language: "en",
-  ...over,
-});
 
 (async () => {
   await db.init();
@@ -120,7 +91,6 @@ const RECIPE = (over = {}) => ({
     next();
   });
   app.use("/shopping", shopping.limiter, shopping.router);
-  app.use("/kitchen", kitchen.limiter, kitchen.router);
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = async (userId, method, path, body) => {
@@ -553,8 +523,6 @@ const RECIPE = (over = {}) => ({
     const again = await call(A, "POST", "/shopping/handoff", {});
     assert.strictEqual(again.body.handoff.groups[0].app, "zepto", "remembered: not asked again");
     assert.strictEqual(again.body.rememberedGroceryApp, null);
-    const prefs = await call(A, "GET", "/kitchen/prefs");
-    assert.strictEqual(prefs.body.groceryApp, "Zepto");
   });
 
   await atest("hand-off: one named app takes everything (Amazon Fresh for groceries); chosen ids only", async () => {
@@ -629,249 +597,6 @@ const RECIPE = (over = {}) => ({
       [{ id: 1, name: "Phone charger", category: "electronics_accessories" }, { id: 2, name: "Lipstick", category: "personal_care_beauty" }],
       { prefs: p });
     assert.deepStrictEqual(plan.groups.map((g) => g.app), ["flipkart", "nykaa"], "Amazon avoided: next default");
-  });
-
-  /* ================================================================ */
-  console.log("\n/kitchen");
-
-  await atest("prefs: safe defaults for someone we know nothing about", async () => {
-    const r = await call(B, "GET", "/kitchen/prefs");
-    assert.strictEqual(r.status, 200);
-    assert.deepStrictEqual(Object.keys(r.body).sort(),
-      ["allergies", "cuisine", "diet", "groceryApp", "household", "language", "spice", "staples"]);
-    assert.strictEqual(r.body.diet, null);
-    assert.deepStrictEqual(r.body.allergies, []);
-    assert.strictEqual(r.body.spice, "medium");
-    assert.strictEqual(r.body.household, 2);
-    assert.strictEqual(r.body.cuisine, null);
-    assert.strictEqual(r.body.language, "English");
-    assert.strictEqual(r.body.groceryApp, null);
-    assert.ok(r.body.staples.includes("Salt") && r.body.staples.includes("Turmeric"));
-  });
-
-  await atest("pantry: have / out remembered, learns when it changes, B sees none of it", async () => {
-    let r = await call(A, "GET", "/kitchen/pantry");
-    assert.deepStrictEqual(r.body, { items: [] });
-    r = await call(A, "PUT", "/kitchen/pantry", { have: ["Eggs", "paneer"], out: ["rice", "haldi"] });
-    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
-    const st = Object.fromEntries(r.body.items.map((i) => [i.name, i.status]));
-    assert.deepStrictEqual(st, { Eggs: "have", Paneer: "have", Rice: "out", Haldi: "out" });
-    assert.ok(r.body.items.every((i) => i.updatedAt > 0));
-    r = await call(A, "PUT", "/kitchen/pantry", { have: ["Rice"], out: ["eggs"] });
-    const st2 = Object.fromEntries(r.body.items.map((i) => [i.name, i.status]));
-    assert.strictEqual(st2.Rice, "have");
-    assert.strictEqual(st2.Eggs, "out");
-    assert.strictEqual(r.body.items.length, 4, "the same thing is one row");
-    const prefs = (await call(A, "GET", "/kitchen/prefs")).body;
-    assert.ok(!prefs.staples.includes("Turmeric"), "haldi ran out: turmeric is not a staple now");
-    assert.ok(prefs.staples.includes("Paneer") && prefs.staples.includes("Rice"));
-    assert.deepStrictEqual((await call(B, "GET", "/kitchen/pantry")).body, { items: [] });
-  });
-
-  await atest("pantry: bad input 400", async () => {
-    bad(await call(A, "PUT", "/kitchen/pantry", {}), 400, "nothing_to_change");
-    bad(await call(A, "PUT", "/kitchen/pantry", { have: "rice" }), 400, "bad_have");
-    bad(await call(A, "PUT", "/kitchen/pantry", { out: [3] }), 400, "bad_out");
-    bad(await call(A, "PUT", "/kitchen/pantry", { have: ["x".repeat(81)] }), 400, "name_too_long");
-    bad(await call(A, "PUT", "/kitchen/pantry", { have: ["curd"], out: ["dahi"] }), 400, "both");
-  });
-
-  let recipeId;
-  await atest("recipes: save (as given), the same title updates it, list and search", async () => {
-    let r = await call(A, "POST", "/kitchen/recipes", { recipe: RECIPE(), notes: "Amma's way" });
-    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
-    const s = r.body.recipe;
-    recipeId = s.id;
-    assert.strictEqual(s.title, "Paneer butter masala");
-    assert.deepStrictEqual(s.recipe, RECIPE());
-    assert.strictEqual(s.rating, null);
-    assert.strictEqual(s.notes, "Amma's way");
-    assert.strictEqual(s.cookedCount, 0);
-    assert.strictEqual(s.lastCookedAt, null);
-    assert.ok(s.createdAt > 0 && s.updatedAt > 0);
-    r = await call(A, "POST", "/kitchen/recipes", { recipe: RECIPE({ title: "paneer  Butter masala", servings: 2 }) });
-    assert.strictEqual(r.body.recipe.id, recipeId, "same title: updated, not duplicated");
-    assert.strictEqual(r.body.recipe.recipe.servings, 2);
-    assert.strictEqual(r.body.recipe.notes, "Amma's way", "notes kept when not sent");
-    await call(A, "POST", "/kitchen/recipes", { recipe: RECIPE({ title: "Rasam", servings: 4 }) });
-    r = await call(A, "GET", "/kitchen/recipes");
-    assert.strictEqual(r.body.recipes.length, 2);
-    r = await call(A, "GET", "/kitchen/recipes?q=paneer");
-    assert.deepStrictEqual(r.body.recipes.map((x) => x.id), [recipeId]);
-    assert.deepStrictEqual((await call(B, "GET", "/kitchen/recipes")).body, { recipes: [] });
-  });
-
-  await atest("recipes: shape and size are checked (400)", async () => {
-    bad(await call(A, "POST", "/kitchen/recipes", {}), 400, "bad_recipe");
-    bad(await call(A, "POST", "/kitchen/recipes", { recipe: [] }), 400, "bad_recipe");
-    bad(await call(A, "POST", "/kitchen/recipes", { recipe: RECIPE({ title: "" }) }), 400, "bad_recipe");
-    bad(await call(A, "POST", "/kitchen/recipes", { recipe: RECIPE({ ingredients: "onion" }) }), 400, "bad_recipe");
-    bad(await call(A, "POST", "/kitchen/recipes", { recipe: RECIPE({ ingredients: [{ quantity: 2 }] }) }), 400, "bad_recipe");
-    bad(await call(A, "POST", "/kitchen/recipes", { recipe: RECIPE({ steps: undefined }) }), 400, "bad_recipe");
-    bad(await call(A, "POST", "/kitchen/recipes", { recipe: RECIPE({ servings: 0 }) }), 400, "bad_recipe");
-    bad(await call(A, "POST", "/kitchen/recipes", { recipe: RECIPE({ tips: ["x".repeat(66 * 1024)] }) }), 400, "recipe_too_large");
-    bad(await call(A, "POST", "/kitchen/recipes", { recipe: RECIPE(), notes: "x".repeat(2001) }), 400, "notes_too_long");
-    bad(await call(A, "POST", "/kitchen/recipes", { recipe: RECIPE(), pad: "x".repeat(80 * 1024) }), 400, "too_large");
-  });
-
-  await atest("recipes: rating 1-5, notes, recipe replaced; cooked adds a dated note and remembers it", async () => {
-    let r = await call(A, "PATCH", `/kitchen/recipes/${recipeId}`, { rating: 5, notes: "Great with naan" });
-    assert.strictEqual(r.body.recipe.rating, 5);
-    assert.strictEqual(r.body.recipe.notes, "Great with naan");
-    bad(await call(A, "PATCH", `/kitchen/recipes/${recipeId}`, { rating: 6 }), 400, "bad_rating");
-    bad(await call(A, "PATCH", `/kitchen/recipes/${recipeId}`, { rating: 2.5 }), 400, "bad_rating");
-    bad(await call(A, "PATCH", `/kitchen/recipes/${recipeId}`, {}), 400, "nothing_to_change");
-    bad(await call(A, "PATCH", `/kitchen/recipes/${recipeId}`, { recipe: { title: "x" } }), 400, "bad_recipe");
-    r = await call(A, "PATCH", `/kitchen/recipes/${recipeId}`, { rating: null });
-    assert.strictEqual(r.body.recipe.rating, null);
-    r = await call(A, "POST", `/kitchen/recipes/${recipeId}/cooked`, { rating: 4, notes: "less chilli next time" });
-    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
-    assert.strictEqual(r.body.recipe.cookedCount, 1);
-    assert.strictEqual(r.body.recipe.rating, 4);
-    assert.ok(r.body.recipe.lastCookedAt > 0);
-    assert.match(r.body.recipe.notes, /^Great with naan\n\d{4}-\d{2}-\d{2}: less chilli next time$/);
-    r = await call(A, "POST", `/kitchen/recipes/${recipeId}/cooked`, {});
-    assert.strictEqual(r.body.recipe.cookedCount, 2);
-    assert.strictEqual(r.body.recipe.rating, 4, "rating kept when not sent");
-    const mem = await db.one(
-      "SELECT fact FROM agent_memories WHERE user_id = $1 AND fact ILIKE $2", [A, "%after cooking Paneer butter masala%"]);
-    assert.ok(mem && /less chilli next time/.test(mem.fact), "the note is in memory");
-    bad(await call(A, "POST", `/kitchen/recipes/${recipeId}/cooked`, { rating: 0 }), 400, "bad_rating");
-  });
-
-  await atest("recipes: another user's id is 404 everywhere; bad ids 400", async () => {
-    bad(await call(B, "PATCH", `/kitchen/recipes/${recipeId}`, { rating: 1 }), 404, "not_found");
-    bad(await call(B, "POST", `/kitchen/recipes/${recipeId}/cooked`, {}), 404, "not_found");
-    bad(await call(B, "POST", `/kitchen/recipes/${recipeId}/shop`, {}), 404, "not_found");
-    bad(await call(B, "DELETE", `/kitchen/recipes/${recipeId}`), 404, "not_found");
-    bad(await call(A, "PATCH", "/kitchen/recipes/abc", { rating: 1 }), 400, "bad_id");
-    const still = await call(A, "GET", "/kitchen/recipes?q=paneer");
-    assert.strictEqual(still.body.recipes[0].rating, 4);
-  });
-
-  await atest("a saved recipe onto the shopping list: scaled, staples and what they have left off", async () => {
-    const E = await mkUser("e");
-    const saved = (await call(E, "POST", "/kitchen/recipes", { recipe: RECIPE() })).body.recipe;
-    await call(E, "PUT", "/kitchen/pantry", { have: ["paneer"] });
-    const r = await call(E, "POST", `/kitchen/recipes/${saved.id}/shop`, { servings: 8, skip: ["mint"] });
-    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
-    assert.deepStrictEqual(r.body.skipped.sort(), ["Mint", "Paneer", "Salt"]);
-    const by = Object.fromEntries(r.body.added.map((i) => [i.name, i]));
-    assert.strictEqual(by.Tomatoes.amountText, "6 pcs", "4 servings -> 8: doubled");
-    assert.strictEqual(by.Butter.amountText, "4 tbsp");
-    assert.strictEqual(by["Fresh cream"].category, "dairy_eggs");
-    assert.ok(r.body.added.every((i) => i.source === "recipe" && i.recipe === "Paneer butter masala"));
-    bad(await call(E, "POST", `/kitchen/recipes/${saved.id}/shop`, { servings: 0 }), 400, "bad_servings");
-    bad(await call(E, "POST", `/kitchen/recipes/${saved.id}/shop`, { skip: "mint" }), 400, "bad_skip");
-  });
-
-  await atest("200 saved recipes at most", async () => {
-    const F = await mkUser("f");
-    const now = Date.now();
-    await db.run(
-      `INSERT INTO kitchen_recipes (user_id, title, title_key, recipe, created_at, updated_at)
-       SELECT $1, 'Dish ' || g, 'dish ' || g, '{"title":"x","ingredients":[],"steps":[]}'::jsonb, $2, $2
-         FROM generate_series(1, 200) g`, [F, now]);
-    bad(await call(F, "POST", "/kitchen/recipes", { recipe: RECIPE() }), 400, "recipes_full");
-    const r = await call(F, "POST", "/kitchen/recipes", { recipe: RECIPE({ title: "Dish 7" }) });
-    assert.strictEqual(r.status, 200, "an existing title still updates");
-  });
-
-  await atest("recipes: delete, then 404", async () => {
-    const r0 = await call(A, "GET", "/kitchen/recipes?q=rasam");
-    const id = r0.body.recipes[0].id;
-    assert.deepStrictEqual((await call(A, "DELETE", `/kitchen/recipes/${id}`)).body, { ok: true });
-    bad(await call(A, "DELETE", `/kitchen/recipes/${id}`), 404, "not_found");
-  });
-
-  await atest("week plan: round trip, own recipes only, shape checked, B has none", async () => {
-    assert.deepStrictEqual((await call(A, "GET", "/kitchen/plan")).body, { plan: null });
-    const days = [
-      { date: "2026-09-29", meals: [{ slot: "dinner", title: "Paneer butter masala", recipeId }] },
-      { date: "2026-09-28", meals: [{ slot: "breakfast", title: "Idli sambar" }, { slot: "lunch", title: "Rasam rice" }] },
-    ];
-    let r = await call(A, "PUT", "/kitchen/plan", { weekStart: "2026-09-28", days });
-    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
-    assert.strictEqual(r.body.plan.weekStart, "2026-09-28");
-    assert.deepStrictEqual(r.body.plan.days.map((d) => d.date), ["2026-09-28", "2026-09-29"], "sorted by date");
-    assert.deepStrictEqual(r.body.plan.days[1].meals[0], { slot: "dinner", title: "Paneer butter masala", recipeId });
-    assert.strictEqual(r.body.plan.days[0].meals[0].recipeId, null);
-    r = await call(A, "GET", "/kitchen/plan");
-    assert.strictEqual(r.body.plan.days.length, 2);
-    assert.ok(r.body.plan.updatedAt > 0);
-    assert.deepStrictEqual((await call(B, "GET", "/kitchen/plan")).body, { plan: null });
-    const bRecipe = (await call(B, "POST", "/kitchen/recipes", { recipe: RECIPE({ title: "B's dal" }) })).body.recipe.id;
-    bad(await call(A, "PUT", "/kitchen/plan", { weekStart: "2026-09-28", days: [{ date: "2026-09-28", meals: [{ slot: "lunch", title: "x", recipeId: bRecipe }] }] }), 400, "unknown_recipe");
-    bad(await call(A, "PUT", "/kitchen/plan", { weekStart: "28-09-2026", days }), 400, "bad_week_start");
-    bad(await call(A, "PUT", "/kitchen/plan", { weekStart: "2026-02-30", days }), 400, "bad_week_start");
-    bad(await call(A, "PUT", "/kitchen/plan", { weekStart: "2026-09-28", days: [] }), 400, "bad_days");
-    bad(await call(A, "PUT", "/kitchen/plan", { weekStart: "2026-09-28", days: Array.from({ length: 8 }, (_, i) => ({ date: `2026-10-0${i + 1}`, meals: [] })) }), 400, "bad_days");
-    bad(await call(A, "PUT", "/kitchen/plan", { weekStart: "2026-09-28", days: [days[0], days[0]] }), 400, "bad_days");
-    bad(await call(A, "PUT", "/kitchen/plan", { weekStart: "2026-09-28", days: [{ date: "2026-09-28", meals: [{ slot: "brunch", title: "x" }] }] }), 400, "bad_meals");
-    bad(await call(A, "PUT", "/kitchen/plan", { weekStart: "2026-09-28", days: [{ date: "2026-09-28", meals: [{ slot: "lunch", title: "" }] }] }), 400, "bad_meals");
-    assert.strictEqual((await call(A, "GET", "/kitchen/plan")).body.plan.days.length, 2, "a rejected plan changes nothing");
-  });
-
-  await atest("week plan: its merged shopping list goes onto the list (source plan)", async () => {
-    const G = await mkUser("g");
-    const r = await call(G, "PUT", "/kitchen/plan", {
-      weekStart: "2026-09-28",
-      days: [{ date: "2026-09-28", meals: [{ slot: "lunch", title: "Sambar rice" }] }],
-      shoppingItems: [{ name: "toor dal", quantity: 500, unit: "g" }, { name: "drumsticks", quantity: 4 }, { name: "salt" }],
-    });
-    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
-    assert.strictEqual(r.body.shopping.added.length, 2);
-    assert.deepStrictEqual(r.body.shopping.skipped, ["Salt"]);
-    const list = (await call(G, "GET", "/shopping")).body.items;
-    assert.ok(list.every((i) => i.source === "plan" && i.recipe === "Week of 2026-09-28"));
-    bad(await call(G, "PUT", "/kitchen/plan", {
-      weekStart: "2026-09-28", days: [{ date: "2026-09-28", meals: [] }], shoppingItems: [{ name: "" }],
-    }), 400, "name_required");
-  });
-
-  await atest("prefs are read from memory and rules: diet, allergies (family too), spice, household, cuisine, language", async () => {
-    const H = await mkUser("h");
-    const now = Date.now();
-    const fact = (t, at, subject = "") => db.run(
-      `INSERT INTO agent_memories (user_id, fact, importance, created_at, kind, subject_type, valid)
-       VALUES ($1, $2, 2, $3, 'semantic', $4, 1)`, [H, t, at, subject]);
-    await fact("User is vegetarian but eats eggs", now - 5000);
-    await fact("User's wife is non-vegetarian", now - 4000);
-    await fact("User is allergic to peanuts and prawns", now - 3000);
-    await fact("User's son has a cashew allergy", now - 2500);
-    await fact("User prefers mild food, not too spicy", now - 2000);
-    await fact("User lives with a family of four", now - 1500);
-    await fact("User loves Kerala food", now - 1000);
-    await fact("is lactose intolerant", now - 900, "person");
-    await db.run("INSERT INTO user_instructions (user_id, instruction, created_at) VALUES ($1, $2, $3)",
-      [H, "Always order my groceries on Blinkit", now - 500]);
-    await db.run("UPDATE users SET preferred_language = 'Malayalam' WHERE id = $1", [H]);
-    await call(H, "PUT", "/kitchen/pantry", { out: ["salt"], have: ["ghee"] });
-    const r = await call(H, "GET", "/kitchen/prefs");
-    assert.strictEqual(r.status, 200, JSON.stringify(r.body));
-    assert.strictEqual(r.body.diet, "egg");
-    assert.deepStrictEqual(r.body.allergies, ["Lactose (milk)", "Cashew", "Peanuts", "Prawns"]);
-    assert.strictEqual(r.body.spice, "mild");
-    assert.strictEqual(r.body.household, 4);
-    assert.strictEqual(r.body.cuisine, "Kerala");
-    assert.strictEqual(r.body.language, "Malayalam");
-    assert.strictEqual(r.body.groceryApp, "Blinkit");
-    assert.ok(!r.body.staples.includes("Salt") && r.body.staples.includes("Ghee"));
-  });
-
-  await atest("prefs parsing: another person's diet is not the user's; 'not vegetarian'; lives alone; no allergies", () => {
-    const rows = (xs) => xs.map((t) => ({ t, subject: "" }));
-    assert.strictEqual(readKitchen(rows(["User's mother is vegetarian"])).diet, null);
-    assert.strictEqual(readKitchen(rows(["User is not vegetarian"])).diet, "non-veg");
-    assert.strictEqual(readKitchen(rows(["User is vegan"])).diet, "vegan");
-    assert.strictEqual(readKitchen(rows(["User is strictly Jain, no onion or garlic"])).diet, "jain");
-    assert.strictEqual(readKitchen(rows(["User's colleague is Rahul Jain"])).diet, null);
-    assert.strictEqual(readKitchen(rows(["User is pure veg"])).diet, "veg");
-    assert.strictEqual(readKitchen(rows(["User lives alone"])).household, 1);
-    assert.strictEqual(readKitchen(rows(["User likes spicy food"])).spice, "hot");
-    assert.strictEqual(readKitchen(rows(["User doesn't like spicy food"])).spice, "mild");
-    assert.deepStrictEqual(readKitchen(rows(["User has no allergies"])).allergies, []);
-    assert.strictEqual(readKitchen(rows(["User lives in Mangalore"])).cuisine, null, "a home town is not a cuisine");
   });
 
   /* ================================================================ */

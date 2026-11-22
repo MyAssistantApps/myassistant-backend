@@ -200,9 +200,6 @@ const RECIPES = [
     icon: "outfit",
     group: "Try it on",
     needs: { model: true, garment: "optional" },
-    // A garment PHOTO can go to a purpose-built virtual-try-on model,
-    // which holds a real print and weave far better than a general editor.
-    vto: true,
     aspect: "portrait",
     presets: OUTFIT_PRESETS,
     params: [
@@ -358,7 +355,6 @@ const RECIPES = [
     group: "Try it on",
     aspect: "portrait",
     needs: { model: true, garment: "optional" },
-    vto: false,
     params: [
       { key: "piece", label: "The piece", type: "text", hint: "temple-gold necklace, jhumkas, diamond studs" },
       PERSONAL,
@@ -443,11 +439,21 @@ const RECIPES = [
         Saree: "a well-draped formal silk saree in a solid muted colour with a matching blouse",
         "Doctor's coat": "a clean white medical coat over a formal shirt, with a stethoscope at the neck",
       }[attire];
+      // Onboarding passes what they do instead of an attire choice: dress
+      // them for THAT job, in a way that suits how they already present.
+      const profession = q(params.profession, 60);
+      const dress = wear
+        ? `Dress them in ${wear}.`
+        : profession && !attire
+          ? `Dress them in polished, well-fitted professional attire that a ${profession} ` +
+            "would wear for a professional portrait, in keeping with the person's own " +
+            "style, culture and gender presentation in the photo."
+          : "Keep the clothing they are wearing, but make it look clean and well-pressed.";
       return [
         KEEP_IDENTITY,
         "Turn this snapshot into a professional corporate headshot of the " +
           "SAME person, of the quality a studio photographer would deliver.",
-        wear ? `Dress them in ${wear}.` : "Keep the clothing they are wearing, but make it look clean and well-pressed.",
+        dress,
         `Place them against ${bd}.`,
         "Re-light it properly: a large soft key light from slightly above and " +
           "to one side, a gentle fill on the shadow side, a subtle rim light " +

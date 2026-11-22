@@ -205,7 +205,6 @@ async function plan(userId, goal, ctx = {}) {
   const text = String(goal || "").trim();
   if (!text) return { ok: false, code: "empty_goal", reason: "no goal was given" };
 
-  await require("../connectors/notion/store").prime(userId).catch(() => {});
   let declarations = registry.declarations({
     userId,
     deviceCaps: ctx.deviceCaps || null,
@@ -354,14 +353,12 @@ async function plan(userId, goal, ctx = {}) {
  * Tools a plan may never contain.
  *
  * start_task is the obvious one: a plan whose step starts another plan
- * recurses, and MAX_STEPS would not bound it. The interpreter pair are
- * modes rather than actions — they change what the microphone is doing
- * and have no meaning inside a batch that runs without the user present.
+ * recurses, and MAX_STEPS would not bound it. translator_mode is a mode
+ * rather than an action — it changes what the microphone is doing and has
+ * no meaning inside a batch that runs without the user present.
  */
 const NEVER_PLANNABLE = new Set([
   "start_task",
-  "start_interpreter_mode",
-  "stop_interpreter_mode",
   "translator_mode",
 ]);
 

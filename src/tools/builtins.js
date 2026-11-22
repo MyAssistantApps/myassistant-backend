@@ -7,9 +7,10 @@
  * tool says so honestly rather than returning a pretend result (§28).
  */
 const registry = require("./registry");
-const { offsetOr } = require("../services/tz");
 const { normalizePhone } = require("../users/phone");
 const { safeFetch } = require("../services/safeFetch");
+// A spoken name as a LIKE literal: "%" and "_" must not widen the match.
+const likeEscape = (s) => String(s).replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /// Parses a model-supplied datetime as the USER's wall-clock time.
 /// Models routinely emit bare ISO strings ("2026-09-04T17:00:00"); the old
@@ -280,8 +281,8 @@ async function resolveRecipient(userId, spokenName) {
     const users = await query(
       `SELECT phone_number FROM users
         WHERE phone_verified_at IS NOT NULL AND phone_number IS NOT NULL
-          AND (lower(name) = $1 OR lower(name) LIKE $1 || ' %')`,
-      [contactLower]
+          AND (lower(name) = $1 OR lower(name) LIKE $2 || ' %' ESCAPE '\\')`,
+      [contactLower, likeEscape(contactLower)]
     ).catch(() => []);
     if (users.length === 1) contactPhone = users[0].phone_number;
   }
@@ -355,20 +356,19 @@ function registerBuiltins() {
 
   // Photo cards and the Poster Studio are gone (owner, 2026-10-02): a card
   // or poster is generate_image, OpenAI's image model, directly.
-  // Connected apps (2026-09-27): Notion, for users who linked it on build 120+.
-  require("../connectors/notion/tools").registerNotionTools(registry);
 
   // Shortcuts (2026-09-27): "office mode" — one word, several things. App
   // build 120+.
   require("../shortcuts/tools").registerShortcutTools(registry);
-  require("../mailin/tools").registerMailinTools(registry);
 
   // The shopping list (2026-09-29): anything they want to buy, one list,
-  // handed to the right shopping app at the end. And the kitchen: pantry,
-  // recipes and the week plan — ingredients go on that same list. The
-  // tools that need the new app screens ask for build 124.
+  // handed to the right shopping app at the end. And the kitchen pantry,
+  // kept by voice. The tools that need the new app screens ask for build
+  // 124.
   require("../shopping").registerShoppingTools(registry);
   require("../kitchen").registerKitchenTools(registry);
+  // Jyotish by voice (2026-11-22): birth details told → chart cast, saved, explained; readings.
+  require("../jyotish").registerJyotishTools(registry);
   // Connected apps (2026-10-14): what happened in the apps the user built.
   require("../platform").registerPlatformTools(registry);
 
@@ -2340,8 +2340,8 @@ function registerBuiltins() {
 
       // A VOICE CHANGE NEEDS A NEW SESSION TO BE HEARD.
       //
-      // Gemini Live fixes the voice in the setup message, which is sent
-      // once when the socket opens. Changing the profile mid-call updates
+      // The Realtime voice is fixed when the client secret is minted
+      // (ai/routes.js), once per session. Changing the profile mid-call updates
       // the database and nothing else: the user asks for a male voice, is
       // told it changed, and carries on hearing the same female one. The
       // Settings screen has the same gap — it saves and never reconnects.
@@ -3208,7 +3208,12 @@ function registerBuiltins() {
       // Rao" as heard is "Ashalatha Rao" in their contacts. Emergency
       // services are never "corrected" into a contact.
       let heardAs = null;
-      if (!/\b(ambulance|police|fire|emergency|helpline|10[0-9]|112)\b/i.test(String(args.name || ""))) {
+      // A numbered answer to "which one?" ("2", "the second one", "ending
+      // 8765") is the phone's to resolve against the list it just read
+      // out (contact_pick.dart): never "corrected" into a contact name.
+      const numberedPick = /^\s*(?:#|no\.?|number|option|the)?\s*(?:\d{1,2}|first|second|third|fourth|fifth|sixth|last|one|two|three|four|five|six)(?:st|nd|rd|th)?(?:\s+one)?\s*$|ending\s*\d{3,}|^\s*\d{4}\s*$/i
+        .test(String(args.name || ""));
+      if (!numberedPick && !/\b(ambulance|police|fire|emergency|helpline|10[0-9]|112)\b/i.test(String(args.name || ""))) {
         const fix = await require("../agents/contactFix").best(ctx?.userId, args.name).catch(() => null);
         if (fix) {
           heardAs = String(args.name);
@@ -4326,21 +4331,10 @@ function registerBuiltins() {
       };
       let results = [];
       const ws = require("./webSearch");
-      // Brave first: it honours filetype:pdf and returns the files
-      // themselves. The general chain (OpenAI search first) answers with a
-      // summary and a few web pages, which is how the first try ended on
-      // the Google page.
-      if (process.env.BRAVE_SEARCH_API_KEY) {
-        try {
-          results = (await ws.searchWith("brave", `${q} filetype:pdf`)) || [];
-        } catch (_) {}
-      }
-      if (!results.length) {
-        try {
-          const r = await ws.run(`${q} filetype:pdf`, ctx || {});
-          if (r && r.ok && Array.isArray(r.data)) results = r.data;
-        } catch (_) {}
-      }
+      try {
+        const r = await ws.run(`${q} filetype:pdf`, ctx || {});
+        if (r && r.ok && Array.isArray(r.data)) results = r.data;
+      } catch (_) {}
       const words = q.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !["the", "and", "state", "versus"].includes(w));
       const OFFICIAL = /(\.gov\.in|\.nic\.in|sci\.gov\.in|indiacode|egazette|judis|ecourts|indiankanoon\.org|\.ac\.in|\.edu)$/i;
       const scored = [];
@@ -5114,11 +5108,9 @@ function registerBuiltins() {
       "that you will tell them when it lands in their documents, then carry " +
       "on. Never wait for it and never describe what you have not seen. " +
       "Write a vivid prompt the way you would for an image.\n" +
-      "Tell the user what they are getting, because there are two kinds and " +
-      "the result says which: `kind: \"veo\"` is fully synthesised video, " +
-      "`kind: \"keyframes\"` is a cinematic sequence of generated frames " +
-      "crossfaded with a slow camera push — a real moving clip, but not " +
-      "synthesised motion. Describe the second one as that honestly if " +
+      "Tell the user what they are getting: a cinematic sequence of " +
+      "generated frames crossfaded with a slow camera push — a real moving " +
+      "clip, but not synthesised motion. Describe it as that honestly if " +
       "asked; never call it something it is not.",
     risk: "low",
     deviceAction: true,
@@ -5743,10 +5735,10 @@ function registerBuiltins() {
           type: "string",
           enum: [
             "settings", "home", "hub", "chat",
-            "documents", "clients", "finance", "stocks",
+            "documents", "clients", "finance", "stocks", "linked_accounts",
             "diagnostics", "mcp", "meetings", "reminders", "call_notes",
             "news", "focus", "avatar_identity", "connected_apps", "shortcuts",
-            "bills_email", "shopping_list", "calendar", "voice_settings",
+            "shopping_list", "calendar", "voice_settings", "jyotish",
           ],
           description:
             "settings = the assistant's own settings (voice, name, theme). " +
@@ -5754,16 +5746,16 @@ function registerBuiltins() {
             "news = the News screen, only when they ask to OPEN it — for " +
             "'what's the news' use show_news. avatar_identity = Send " +
             "messages as you (their recorded video for video notes). " +
-            "connected_apps = link or unlink Notion, mail and other apps. " +
+            "connected_apps = link or unlink their Google account and mail. " +
             "shortcuts = their saved shortcuts (build 120). " +
-            "bills_email = Bills by email (their private address for " +
-            "forwarding bills). shopping_list = their shopping list " +
+            "shopping_list = their shopping list " +
             "(build 124). calendar = this app's calendar: their events, " +
             "reminders and holidays (build 140). voice_settings = choose the " +
             "assistant's voice: hear each voice's sample and pick one ('open " +
             "voice settings', 'change your voice', 'I want a different voice'; " +
             "build 163). Opening it ENDS this conversation, so say one short line " +
-            "first, e.g. 'Opening voice settings.' The " +
+            "first, e.g. 'Opening voice settings.' jyotish = the Vedic horoscope: " +
+            "their kundli, dasha and readings ('open my kundli', 'show my chart'). The " +
             "rest are feature screens.",
         },
       },
@@ -5775,7 +5767,7 @@ function registerBuiltins() {
         "settings", "home", "hub", "chat", "documents", "clients",
         "finance", "stocks", "diagnostics", "mcp", "meetings", "reminders",
         "call_notes", "news", "focus", "avatar_identity", "connected_apps", "shortcuts",
-        "bills_email", "shopping_list", "calendar", "voice_settings",
+        "shopping_list", "calendar", "voice_settings", "jyotish",
       ];
       if (!ALLOWED.includes(screen)) {
         return { ok: false, error: `I don't have a screen called "${args.screen}"` };
@@ -5800,11 +5792,7 @@ function registerBuiltins() {
         return { ok: false, error: "that screen needs the latest app update — say so" };
       }
       // Connected apps arrives in build 120.
-      if (screen === "connected_apps" && build < require("../connectors/notion/tools").NOTION_MIN_BUILD) {
-        return { ok: false, error: "that screen needs the latest app update — say so" };
-      }
-      // Bills by email arrives in build 120; an unknown build counts as old.
-      if (screen === "bills_email" && build < require("../mailin/tools").MAILIN_MIN_BUILD) {
+      if (screen === "connected_apps" && build < 120) {
         return { ok: false, error: "that screen needs the latest app update — say so" };
       }
       // The shopping list screen arrives in build 124; an unknown build counts as old.
@@ -5847,7 +5835,6 @@ function registerBuiltins() {
         avatar_identity: "Send messages as you",
         connected_apps: "Connected apps",
         shortcuts: "your shortcuts",
-        bills_email: "Bills by email",
         shopping_list: "your shopping list",
         calendar: "your calendar",
         voice_settings: "voice settings",
@@ -6151,27 +6138,6 @@ function registerBuiltins() {
           providerLabel: deeplinks.labelFor(args.service),
           what: args.query,
         }),
-      };
-    },
-  });
-
-  registry.register({
-    name: "open_video_mode",
-    // HIDDEN (2026-09-29): face-to-face video rode the Live socket, which is
-    // gone — the app answers open_video with "not available". Offered, the
-    // model said "Opening video mode." and the next line took it back.
-    available: () => false,
-    description:
-      "Switch to the face-to-face video avatar conversation. Use only when " +
-      "the user asks for video/face mode — NOT for calling a contact.",
-    risk: "medium",
-    deviceAction: true,
-    inputSchema: { type: "object", properties: {} },
-    async execute() {
-      return {
-        ok: true,
-        deviceAction: { type: "open_video" },
-        speak: "Opening video mode.",
       };
     },
   });
@@ -7185,7 +7151,7 @@ function registerBuiltins() {
 
   registry.register({
     name: "get_horoscope",
-    description: "Get daily astrological horoscope predictions for a given zodiac sign using an external astrology API.",
+    description: "Get the GENERIC daily horoscope for a western zodiac sign from an external astrology API. For anything personal — their kundli, rashi, nakshatra, dasha, or a reading from their own birth chart — use jyotish_chart / jyotish_reading instead.",
     risk: "low",
     inputSchema: {
       type: "object",
@@ -7212,6 +7178,55 @@ function registerBuiltins() {
         return { ok: false, error: e.message };
       }
     }
+  });
+  registry.register({
+    name: "connect_to_assistant",
+    description:
+      "TALK TO ANOTHER PERSON'S ASSISTANT, LIVE — 'connect me to Alan's " +
+      "assistant', 'let me talk to Priya's agent', 'call Ravi's assistant'. " +
+      "Opens a voice call on this phone with that person's OWN assistant " +
+      "(their assistant's name, voice and photo), which can take a message, " +
+      "pass on something urgent, say when they are free and book an " +
+      "appointment. Only for contacts who use this app. NOT for sending a " +
+      "message (send_agent_message) or phoning the person (place_phone_call).",
+    risk: "low",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contact_name: { type: "string", description: "Whose assistant to connect to (e.g. Alan)" },
+      },
+      required: ["contact_name"],
+    },
+    async execute(args, ctx) {
+      if (!ctx.userId) return { ok: false, error: "not signed in" };
+      const fix = await require("../agents/contactFix").best(ctx.userId, args.contact_name).catch(() => null);
+      const name = fix ? fix.name : args.contact_name;
+      const who = await resolveRecipient(ctx.userId, name);
+      if (who.ambiguous) {
+        return { ok: false, speak: `I found more than one match — ${who.ambiguous}. Whose assistant should I connect to?` };
+      }
+      if (!who.appUser) {
+        return {
+          ok: false,
+          error: who.contactPhone ? "this contact does not use MyAssistant yet" : "no saved contact by that name",
+          speak: who.contactPhone
+            ? `${name} does not use MyAssistant yet, so there is no assistant to connect to. I can send them a message instead.`
+            : `I could not find ${name} in your contacts.`,
+        };
+      }
+      const connect = require("../connect/service");
+      try {
+        const { card } = await connect.host(ctx.userId, who.appUser.id);
+        return {
+          ok: true,
+          deviceAction: { type: "connect_assistant", hostId: card.id, ownerName: card.ownerName, assistantName: card.assistantName },
+          speak: `Connecting you to ${card.ownerName}'s assistant, ${card.assistantName}.`,
+        };
+      } catch (e) {
+        if (e instanceof connect.ConnectError) return { ok: false, error: e.message, speak: e.message };
+        throw e;
+      }
+    },
   });
   registry.register({
     name: "send_agent_message",
@@ -7568,8 +7583,8 @@ function registerBuiltins() {
         const users = await query(
           `SELECT id, name, fcm_token, phone_number FROM users
             WHERE phone_verified_at IS NOT NULL AND phone_number IS NOT NULL
-              AND (lower(name) = $1 OR lower(name) LIKE $1 || ' %')`,
-          [contactLower]
+              AND (lower(name) = $1 OR lower(name) LIKE $2 || ' %' ESCAPE '\\')`,
+          [contactLower, likeEscape(contactLower)]
         ).catch(() => []);
         if (users.length === 1) {
           appUser = users[0];
@@ -7850,216 +7865,6 @@ function registerBuiltins() {
     },
   });
 
-  // ---------------- FULFILLMENT: BOOKING BY REAL PHONE CALL ----------------
-  //
-  // This tool used to be a mock: it slept three seconds and told the user
-  // "I spoke to their receptionist and your appointment is confirmed" —
-  // without dialling anything. That is the exact failure §28 exists to
-  // prevent, and the user would have discovered it by turning up at a
-  // clinic that had never heard of them.
-  //
-  // It now uses the real agent-call engine (src/agents/agentCall.js,
-  // Bolna), pointed at a business number resolved from Google
-  // Places. Hari genuinely dials, genuinely asks, and reports what the
-  // business genuinely said. When telephony is not configured on this
-  // deployment, it says so instead of pretending.
-
-  registry.register({
-    name: "book_by_calling_business",
-    requiresPermission: "phone",
-    // HIDDEN entirely for now: the call rings via the server, but the
-    // follow-up channel is a deviceAction ("fulfillment_call") no app
-    // build handles, so the user never hears the real outcome — a fake
-    // feature by our own rule. Re-enable together with the app handler
-    // (and only when telephony credit exists).
-    available: () => false,
-    description:
-      "Actually telephone a business and speak to them to arrange something: " +
-      "a doctor/dentist/salon appointment, a restaurant table, or an order " +
-      "for collection. The assistant places the call and reports what they " +
-      "said. Use this when the user wants the booking MADE, not just an app " +
-      "opened. Do not use it for ordering delivery on Swiggy/Zomato.",
-    risk: "high",
-    inputSchema: {
-      type: "object",
-      properties: {
-        business_name: {
-          type: "string",
-          description: "Name of the clinic, restaurant or business to call",
-        },
-        kind: {
-          type: "string",
-          enum: ["appointment", "table", "food"],
-          description: "appointment = doctor/salon/service, table = restaurant reservation, food = order for collection",
-        },
-        when: {
-          type: "string",
-          description: "When the user wants it, in their words: 'tomorrow at 7pm', 'Friday morning'",
-        },
-        party_size: { type: "integer", description: "Number of people, for a table" },
-        purpose: { type: "string", description: "Reason for an appointment, e.g. 'a filling'" },
-        items: { type: "string", description: "What to order, for a collection order" },
-        phone: {
-          type: "string",
-          description: "The business's number if the user gave it. Otherwise it is looked up.",
-        },
-        // Filled in by prepare() from the Google Places result, not by the
-        // model. It must be declared here or coerceArgs would strip it when
-        // the approved call is replayed, and the confirmation card would
-        // lose the address it was approved with.
-        address: {
-          type: "string",
-          description: "Resolved street address of the business. Set automatically.",
-        },
-      },
-      required: ["business_name"],
-    },
-    confirmSummary: (a) => {
-      const what =
-        a.kind === "table"
-          ? `a table for ${a.party_size || 2}`
-          : a.kind === "food"
-            ? `an order${a.items ? ` of ${a.items}` : ""}`
-            : `an appointment${a.purpose ? ` for ${a.purpose}` : ""}`;
-      const where = a.address ? `\n${a.address}` : "";
-      const num = a.phone ? `\n${a.phone}` : "";
-      return `Phone ${a.business_name} and ask for ${what}${a.when ? ` ${a.when}` : ""}${where}${num}`;
-    },
-
-    /**
-     * Looks the business up on Google BEFORE the confirmation card is
-     * shown, so the user approves a specific place — name, address and the
-     * number Hari is about to dial — rather than a bare search term.
-     *
-     * This is also what stops the approved business and the called
-     * business from being two different places: the number is pinned into
-     * the args here and reused verbatim after approval.
-     */
-    async prepare(args, ctx) {
-      if (args.phone) return null; // the user gave a number; nothing to resolve
-
-      const fulfil = require("../fulfillment/service");
-      const agentCall = require("../agents/agentCall");
-
-      if (!agentCall.enabled()) {
-        return {
-          error:
-            "calling businesses on your behalf isn't configured on this server " +
-            "(no telephony credentials), so I cannot make this booking myself",
-        };
-      }
-
-      const place = await fulfil.resolveBusiness({
-        query: args.business_name,
-        lat: ctx.lat,
-        lng: ctx.lng,
-        requirePhone: true,
-      });
-
-      // No listed number means there is nothing to approve. Say so now
-      // rather than showing a confirmation for a call that cannot happen.
-      if (!place || !place.phone) {
-        return {
-          error:
-            `I couldn't find a listed phone number for ${args.business_name}` +
-            (ctx.lat ? " near you" : " — and I don't have your location to narrow it down") +
-            ". Ask the user for the number and I'll call it.",
-        };
-      }
-
-      return {
-        args: {
-          business_name: place.name || args.business_name,
-          phone: place.phone,
-          address: place.address || null,
-        },
-      };
-    },
-    async execute(args, ctx) {
-      if (!ctx.userId) return { ok: false, error: "not signed in" };
-
-      const fulfil = require("../fulfillment/service");
-      const agentCall = require("../agents/agentCall");
-      const kind = args.kind || "appointment";
-
-      // Honest early exit: without telephony this tool cannot do the one
-      // thing it claims to do. Say that, and let the model offer the
-      // handoff or a direct dial instead of inventing a confirmation.
-      if (!agentCall.enabled()) {
-        return {
-          ok: false,
-          error:
-            "calling businesses on your behalf isn't configured on this server " +
-            "(no telephony credentials), so I cannot make this booking myself",
-        };
-      }
-
-      // Find a number to ring. A booking tool with no phone number is not
-      // a booking tool, so this failure is reported plainly.
-      let phone = args.phone || null;
-      let venue = args.business_name;
-      if (!phone) {
-        const place = await fulfil.resolveBusiness({
-          query: args.business_name,
-          lat: ctx.lat,
-          lng: ctx.lng,
-          requirePhone: true,
-        });
-        if (place) {
-          phone = place.phone;
-          venue = place.name || venue;
-        }
-      }
-      if (!phone) {
-        return {
-          ok: false,
-          error: `I couldn't find a phone number for ${args.business_name}, so I can't call them. Ask the user for the number.`,
-        };
-      }
-
-      const whenMs = parseWhenMs(args.when, ctx.tzOffsetMin);
-      const started = await fulfil.startCallBooking({
-        userId: ctx.userId,
-        userName: ctx.userName || null,
-        kind,
-        venue,
-        phone,
-        when: args.when || null,
-        whenMs,
-        partySize: args.party_size || null,
-        items: args.items || null,
-        purpose: args.purpose || null,
-        lang: ctx.lang || null,
-      });
-
-      if (!started.ok) {
-        const why = {
-          telephony: "calling isn't configured on this server",
-          no_phone: `I couldn't find a number for ${venue}`,
-          quota: "you've reached today's limit for calls I place for you",
-          failed: "the call wouldn't start",
-        }[started.reason];
-        return { ok: false, error: why || "the call wouldn't start" };
-      }
-
-      // The call is RINGING. It is not booked. The device action hands the
-      // session layer the ids it needs to follow the call to its real end
-      // and speak the true outcome when it lands.
-      return {
-        ok: true,
-        data: { task_id: started.task.id, call_id: started.callId, venue, phone },
-        deviceAction: {
-          type: "fulfillment_call",
-          task_id: started.task.id,
-          call_id: started.callId,
-          venue,
-          kind,
-        },
-        speak: `Calling ${venue} now — I'll tell you exactly what they say.`,
-      };
-    },
-  });
-
   // ---------------- FULFILLMENT: SMART HANDOFF TO PROVIDER APPS ----------
   //
   // Swiggy, Zomato, BookMyShow, Uber and Ola publish no consumer ordering
@@ -8077,8 +7882,7 @@ function registerBuiltins() {
       "Act IMMEDIATELY: call this the moment the user asks, with the dish " +
       "exactly as they said it. Do NOT ask which restaurant, which app, " +
       "veg or non-veg, or for confirmation — default to swiggy and let " +
-      "them choose specifics inside the app. For a table reservation or a " +
-      "collection order use book_by_calling_business.",
+      "them choose specifics inside the app.",
     risk: "low",
     deviceAction: true,
     inputSchema: {
@@ -8087,6 +7891,7 @@ function registerBuiltins() {
         dish: { type: "string", description: "What the user wants to eat, e.g. 'chicken biryani'" },
         restaurant: { type: "string", description: "Specific restaurant, if the user named one" },
         provider: { type: "string", enum: ["swiggy", "zomato"], description: "Default swiggy" },
+        confirm_total: { type: "boolean", description: "true only after the user said yes to a quoted high total." },
       },
     },
     async execute(args, ctx) {
@@ -8095,6 +7900,12 @@ function registerBuiltins() {
       if (!args.dish && !args.restaurant) {
         return { ok: false, needsArgs: ["dish"] };
       }
+      // A REAL ORDER when a provider can take it (Swiggy's MCP once
+      // approved, or the test provider while building), else the app.
+      const placed = await placeOrder(ctx, { kind: "food", items: args.dish ? [args.dish] : [],
+        restaurant: args.restaurant, provider: args.provider === "zomato" ? undefined : args.provider,
+        confirm: args.confirm_total });
+      if (placed) return placed;
       const provider = args.provider || "swiggy";
       const link = deeplinks.food({
         provider,
@@ -8127,25 +7938,222 @@ function registerBuiltins() {
     },
   });
 
+  // ---------------- ORDERS: groceries, medicines, parcels, status ----------
+  // One helper for every kind (src/orders/service.js): placed and
+  // confirmed when a provider can take it, else null and the caller opens
+  // the right app.
+  async function placeOrder(ctx, { kind, items, restaurant, pickup, drop, provider, confirm }) {
+    const orders = require("../orders/service");
+    if (!ctx.userId || !orders.canOrder(kind)) return null;
+    const r = await orders.place({ userId: Number(ctx.userId), kind, items, restaurant, pickup, drop,
+      provider, confirmTotal: confirm === true });
+    if (r.ok) return { ok: true, data: { ordered: true, order: r.order }, speak: r.speak,
+      deviceAction: { type: "order_placed", order: r.order } };
+    if (r.error === "no_provider") return null;
+    return { ok: false, error: r.error, needs_details: r.needs ? [r.needs] : undefined,
+      data: { total: r.total }, speak: r.speak,
+      ...(r.error === "link_required" ? { deviceAction: { type: "open_app_screen", screen: "linked_accounts" } } : {}) };
+  }
+
+  registry.register({
+    name: "order_groceries",
+    description:
+      "Order groceries or daily essentials for delivery: 'order milk and eggs', " +
+      "'get me 2 kg onions'. Places the order when grocery ordering is live " +
+      "and says so; otherwise opens a grocery app searching for them. Do not " +
+      "ask which app.",
+    risk: "low",
+    deviceAction: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: { type: "array", items: { type: "string" }, description: "Each item with its quantity, as said" },
+        confirm_total: { type: "boolean", description: "true only after the user said yes to a quoted high total." },
+      },
+      required: ["items"],
+    },
+    async execute(args, ctx) {
+      const items = (args.items || []).map(String).filter(Boolean);
+      if (!items.length) return { ok: false, needsArgs: ["items"] };
+      const placed = await placeOrder(ctx, { kind: "grocery", items, confirm: args.confirm_total });
+      if (placed) return placed;
+      const link = require("../fulfillment/deeplinks").shop({ provider: "blinkit", query: items.join(" "), platform: ctx.platform });
+      return { ok: true, deviceAction: { type: "open_url", url: link.url },
+        speak: `Opening Blinkit with ${items.join(", ")} searched; choose and pay there.` };
+    },
+  });
+
+  registry.register({
+    name: "order_medicines",
+    description:
+      "Order medicines for delivery: 'order Dolo 650', 'get my BP tablets'. " +
+      "Places the order when medicine ordering is live; otherwise opens Tata " +
+      "1mg searching for them. Prescription medicines need the prescription " +
+      "uploaded to the pharmacy; say so. Never suggest a dose.",
+    risk: "low",
+    deviceAction: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: { type: "array", items: { type: "string" }, description: "Medicine names with strength and quantity, as said" },
+        confirm_total: { type: "boolean", description: "true only after the user said yes to a quoted high total." },
+      },
+      required: ["items"],
+    },
+    async execute(args, ctx) {
+      const items = (args.items || []).map(String).filter(Boolean);
+      if (!items.length) return { ok: false, needsArgs: ["items"] };
+      const placed = await placeOrder(ctx, { kind: "medicine", items, confirm: args.confirm_total });
+      if (placed) return placed;
+      const url = `https://www.1mg.com/search/all?name=${encodeURIComponent(items.join(" "))}`;
+      return { ok: true, deviceAction: { type: "open_url", url },
+        speak: `Opening Tata 1mg with ${items.join(", ")} searched. Prescription medicines will need your prescription.` };
+    },
+  });
+
+  registry.register({
+    name: "send_parcel",
+    description:
+      "Send a parcel or package across town: 'send this file to my office', " +
+      "'pick up a parcel from Indiranagar and drop it at Jayanagar'. Books a " +
+      "two-wheeler pickup when parcel booking is live; otherwise opens Porter.",
+    risk: "low",
+    deviceAction: true,
+    inputSchema: {
+      type: "object",
+      properties: {
+        pickup: { type: "string", description: "Pickup address or place" },
+        drop: { type: "string", description: "Drop-off address or place" },
+        item: { type: "string", description: "What is being sent" },
+        confirm_total: { type: "boolean", description: "true only after the user said yes to a quoted high total." },
+      },
+      required: ["pickup", "drop"],
+    },
+    async execute(args, ctx) {
+      if (!args.pickup || !args.drop) return { ok: false, needsArgs: [!args.pickup ? "pickup" : "drop"] };
+      const placed = await placeOrder(ctx, { kind: "parcel", items: args.item ? [args.item] : ["a parcel"],
+        pickup: args.pickup, drop: args.drop, confirm: args.confirm_total });
+      if (placed) return placed;
+      return { ok: true, deviceAction: { type: "open_url", url: "https://porter.in/" },
+        speak: `Opening Porter to book the pickup from ${args.pickup} to ${args.drop}.` };
+    },
+  });
+
+  registry.register({
+    name: "order_status",
+    description: "The user's orders in progress (food, groceries, medicines, parcels): status, delivery partner, OTP, arrival. Use for 'where is my order', 'what is the delivery OTP'.",
+    risk: "low",
+    available: () => require("../orders/service").KINDS.some((k) => require("../orders/service").canOrder(k)),
+    inputSchema: { type: "object", properties: {} },
+    async execute(_args, ctx) {
+      const list = await require("../orders/service").activeList(Number(ctx.userId));
+      if (!list.length) return { ok: true, data: { orders: [] }, speak: "You have no orders in progress." };
+      const line = (o) => [
+        `${o.summary} from ${o.providerLabel}: ${o.status.replace(/_/g, " ")}`,
+        o.partner?.name ? `with ${o.partner.name}` : "",
+        o.otp ? `OTP ${o.otp.split("").join(" ")}` : "",
+        o.etaMin != null && !["placed", "delivered"].includes(o.status) ? `about ${o.etaMin} min` : "",
+      ].filter(Boolean).join(", ");
+      return { ok: true, data: { orders: list }, speak: list.map(line).join(". ") + "." };
+    },
+  });
+
+  registry.register({
+    name: "cancel_order",
+    description: "Cancel the user's latest order in progress (or the one they describe). Use for 'cancel my order'.",
+    risk: "low",
+    available: () => require("../orders/service").KINDS.some((k) => require("../orders/service").canOrder(k)),
+    inputSchema: { type: "object", properties: {} },
+    async execute(_args, ctx) {
+      const r = await require("../orders/service").cancel(Number(ctx.userId));
+      if (r.ok) return { ok: true, data: { order: r.order }, speak: `Done, ${r.order.summary} is cancelled.` };
+      if (r.error === "too_late") return { ok: false, error: "too_late", speak: "It is already on the way, so it can no longer be cancelled." };
+      return { ok: false, error: "none", speak: "You have no orders in progress." };
+    },
+  });
+
+  registry.register({
+    name: "ride_status",
+    description:
+      "The user's booked cab right now: status, driver, car number, OTP and " +
+      "arrival time. Use for 'where is my cab', 'what is my OTP', 'who is the driver'.",
+    risk: "low",
+    available: () => require("../rides/service").canBook(),
+    inputSchema: { type: "object", properties: {} },
+    async execute(_args, ctx) {
+      const ride = await require("../rides/service").active(Number(ctx.userId));
+      if (!ride) return { ok: true, data: { ride: null }, speak: "You have no cab booked right now." };
+      const bits = [
+        `${ride.providerLabel} to ${ride.drop}: ${ride.status.replace("_", " ")}`,
+        ride.driver?.name ? `driver ${ride.driver.name}` : "",
+        ride.vehicle?.plate ? `car ${ride.vehicle.plate}` : "",
+        ride.otp ? `OTP ${ride.otp.split("").join(" ")}` : "",
+        ride.etaMin != null && ["accepted", "arriving"].includes(ride.status) ? `about ${ride.etaMin} min away` : "",
+      ].filter(Boolean);
+      return { ok: true, data: { ride }, speak: bits.join(", ") + "." };
+    },
+  });
+
+  registry.register({
+    name: "cancel_ride",
+    description: "Cancel the user's booked cab. Use for 'cancel my cab', 'cancel the ride'.",
+    risk: "low",
+    available: () => require("../rides/service").canBook(),
+    inputSchema: { type: "object", properties: {} },
+    async execute(_args, ctx) {
+      const ride = await require("../rides/service").cancel(Number(ctx.userId));
+      if (!ride) return { ok: false, error: "no active ride", speak: "You have no cab booked right now." };
+      return { ok: true, data: { ride }, speak: `Done, your ${ride.providerLabel} ride to ${ride.drop} is cancelled.` };
+    },
+  });
+
   registry.register({
     name: "book_ride",
     description:
-      "Book a cab through Uber or Ola to a destination. Resolves the real " +
-      "address and opens the app with the trip already set up; the user " +
-      "confirms and pays. Use for 'book a cab to the airport', 'get me an Uber home'.",
+      "Book a cab to a destination, from a named pickup or from where the " +
+      "user is now. Use for 'book a cab from Yeshwanthpur to Majestic', " +
+      "'book a cab to the airport', 'get me an Uber home'. Do NOT ask which " +
+      "company when none was named: the cheapest available is chosen. When " +
+      "booking is live it BOOKS the ride and the result says so — tell the " +
+      "user it is booked, the fare, and that the driver, car and OTP follow. " +
+      "If the result asks to confirm a high fare, ask in one line and call " +
+      "again with confirm_fare true. Otherwise it opens the provider's app " +
+      "with the trip set up and the user confirms there.",
     risk: "low",
     deviceAction: true,
     inputSchema: {
       type: "object",
       properties: {
         destination: { type: "string", description: "Where the user wants to go" },
-        provider: { type: "string", enum: ["uber", "ola"], description: "Default uber" },
+        pickup: { type: "string", description: "Where to be picked up, only if the user named it ('from Yeshwanthpur'). Omit for the current location." },
+        provider: { type: "string", enum: ["uber", "ola"], description: "Only when the user named the company." },
+        confirm_fare: { type: "boolean", description: "true only after the user said yes to a quoted high fare." },
       },
       required: ["destination"],
     },
     async execute(args, ctx) {
       const deeplinks = require("../fulfillment/deeplinks");
       const fulfil = require("../fulfillment/service");
+      const rides = require("../rides/service");
+
+      // REAL BOOKING when a provider can book (partner access, or the test
+      // provider while building): booked, confirmed, then followed.
+      if (ctx.userId && rides.canBook()) {
+        const here = Number.isFinite(Number(ctx.lat)) ? { lat: Number(ctx.lat), lng: Number(ctx.lng) } : null;
+        const r = await rides.book({
+          userId: Number(ctx.userId), from: args.pickup, to: args.destination,
+          provider: args.provider, confirmFare: args.confirm_fare === true, here,
+        });
+        if (r.ok) {
+          return { ok: true, data: { booked: true, ride: r.ride }, speak: r.speak,
+            deviceAction: { type: "ride_booked", ride: r.ride } };
+        }
+        if (r.error !== "no_provider") {
+          return { ok: false, error: r.error, needs_details: r.needs ? [r.needs] : undefined,
+            data: { fare: r.fare, ride: r.ride }, speak: r.speak,
+            ...(r.error === "link_required" ? { deviceAction: { type: "open_app_screen", screen: "linked_accounts" } } : {}) };
+        }
+      }
       const provider = args.provider || "uber";
 
       // Coordinates are what make a ride link land on a real quoted trip
@@ -8162,13 +8170,21 @@ function registerBuiltins() {
         resolvedName = place.name || resolvedName;
       }
 
+      let pickupLat = ctx.lat, pickupLng = ctx.lng;
+      if (args.pickup) {
+        const from = await fulfil.resolveBusiness({ query: args.pickup, lat: ctx.lat, lng: ctx.lng }).catch(() => null);
+        if (from && Number.isFinite(Number(from.lat))) {
+          pickupLat = from.lat;
+          pickupLng = from.lng;
+        }
+      }
       const link = deeplinks.ride({
         provider,
         destination: resolvedName,
         lat,
         lng,
-        pickupLat: ctx.lat,
-        pickupLng: ctx.lng,
+        pickupLat,
+        pickupLng,
         platform: ctx.platform,
       });
 
@@ -8236,83 +8252,6 @@ function registerBuiltins() {
         data: { task_id: out.task.id, handoff: true },
         deviceAction: { type: "open_url", url: out.url },
         speak: out.speak,
-      };
-    },
-  });
-
-  // ---------------- INTERPRETER ----------------
-
-  registry.register({
-    name: "start_interpreter_mode",
-    // HIDDEN: duplicates translator_mode, and its whole effect rides on a
-    // deviceAction ("interpreter_mode") no app build has ever handled —
-    // the model announced interpreter mode while nothing changed. Remove
-    // this gate only together with an app-side handler.
-    available: () => false,
-    description:
-      "Become a live two-way interpreter between the user and someone who " +
-      "speaks another language. Use for 'translate between me and him', " +
-      "'my patient speaks only Tamil', 'be my interpreter for Hindi', " +
-      "'I need to talk to someone in Kannada'.",
-    risk: "low",
-    deviceAction: true,
-    inputSchema: {
-      type: "object",
-      properties: {
-        their_language: {
-          type: "string",
-          description: "The OTHER person's language, e.g. 'Tamil', 'ta'",
-        },
-        my_language: {
-          type: "string",
-          description: "The user's language. Default English.",
-        },
-      },
-      required: ["their_language"],
-    },
-    async execute(args) {
-      const mode = require("../interpreter/mode");
-      const b = mode.languageName(args.their_language);
-      const a = mode.languageName(args.my_language) || "English";
-      if (!b) return { ok: false, needsArgs: ["their_language"] };
-      if (a.toLowerCase() === b.toLowerCase()) {
-        return { ok: false, error: `both sides are ${a} — no interpreting needed` };
-      }
-      return {
-        ok: true,
-        data: { active: true, languages: [a, b] },
-        deviceAction: {
-          type: "interpreter_mode",
-          active: true,
-          a, b,
-          instructions: mode.instructions({ a, b }),
-        },
-        speak: mode.announcement({ a, b }),
-      };
-    },
-  });
-
-  registry.register({
-    name: "stop_interpreter_mode",
-    // HIDDEN: see start_interpreter_mode.
-    available: () => false,
-    description:
-      "Leave interpreter mode and go back to being the user's assistant. " +
-      "Use for 'stop translating', 'that's enough', 'back to normal'.",
-    risk: "low",
-    deviceAction: true,
-    inputSchema: { type: "object", properties: {} },
-    async execute() {
-      const mode = require("../interpreter/mode");
-      return {
-        ok: true,
-        data: { active: false },
-        deviceAction: {
-          type: "interpreter_mode",
-          active: false,
-          instructions: mode.OFF_INSTRUCTIONS,
-        },
-        speak: "Interpreter mode off.",
       };
     },
   });
@@ -8502,147 +8441,6 @@ function registerBuiltins() {
         speak:
           lines.join(". ") +
           (outstanding > 0 ? `. That's ₹${outstanding.toLocaleString("en-IN")} outstanding.` : ""),
-      };
-    },
-  });
-
-  // ---------------- MEETING NEGOTIATION ----------------
-
-  registry.register({
-    name: "arrange_meeting_with",
-    // HIDDEN: same reason as book_by_calling_business — its outcome rides
-    // on the unhandled "scheduling_call" deviceAction.
-    available: () => false,
-    description:
-      "Arrange a meeting with someone END TO END: find times the user is " +
-      "free, PHONE the person, agree a slot with them, and put it in the " +
-      "calendar. Use for 'set up a call with Ravi next week', 'get me 30 " +
-      "minutes with Dr Rao', 'arrange a meeting with the client'. This " +
-      "actually telephones them — it is not a calendar invite.",
-    risk: "high",
-    inputSchema: {
-      type: "object",
-      properties: {
-        person: { type: "string", description: "Who to meet, by name" },
-        purpose: { type: "string", description: "What it's about, e.g. 'the pricing review'" },
-        duration_minutes: { type: "integer", description: "Default 30" },
-        within_days: { type: "integer", description: "How far ahead to look. Default 7" },
-        // Filled by prepare(), not the model — they MUST be declared or
-        // coerceArgs strips them before execute() ever sees them (the same
-        // hazard book_by_calling_business documents on its own schema).
-        phone: { type: "string", description: "Filled automatically — do not set" },
-        slots_label: { type: "string", description: "Filled automatically — do not set" },
-      },
-      required: ["person"],
-    },
-    confirmSummary: (a) =>
-      `Phone ${a.person} and agree a ${a.duration_minutes || 30}-minute meeting` +
-      (a.purpose ? ` about ${a.purpose}` : "") +
-      (a.slots_label ? `\nOffering: ${a.slots_label}` : "") +
-      (a.phone ? `\n${a.phone}` : ""),
-
-    /**
-     * Resolve the person AND the free slots before asking permission.
-     *
-     * The user is approving a real phone call, so they need to see who is
-     * being rung and — just as important — which times are about to be
-     * offered on their behalf. Pinning both into the args also means the
-     * slots that were approved are the slots that get offered.
-     */
-    async prepare(args, ctx) {
-      if (!ctx.userId) return { error: "not signed in" };
-      const agentCallMod = require("../agents/agentCall");
-      if (!agentCallMod.enabled()) {
-        return { error: "calling isn't configured on this server, so I can't arrange it by phone" };
-      }
-
-      const { resolveContact } = require("../users/resolve");
-      const { match, candidates } = await resolveContact(ctx.userId, args.person);
-      if (!match) {
-        return {
-          error: candidates.length
-            ? `several contacts match "${args.person}" — ${candidates.map((c) => c.name).join(", ")}. Ask which one.`
-            : `I couldn't find ${args.person} in your contacts, and I need their number to call them.`,
-        };
-      }
-
-      const freeslots = require("../scheduling/freeslots");
-      const slots = await freeslots.findSlots(ctx.userId, {
-        durationMin: args.duration_minutes || 30,
-        withinDays: args.within_days || 7,
-        tzOffsetMin: offsetOr(ctx.tzOffsetMin),
-        count: 3,
-      });
-
-      // No calendar linked: we will not invent availability.
-      if (slots === null) {
-        return {
-          error:
-            "your Google Calendar isn't linked, so I don't know when you're free. " +
-            "Link it, or tell me which times to offer.",
-        };
-      }
-      if (!slots.length) {
-        return { error: `you have no free ${args.duration_minutes || 30}-minute gaps in the next ${args.within_days || 7} days` };
-      }
-
-      return {
-        args: {
-          person: match.name,
-          phone: match.phone,
-          slots_label: slots.map((s) => s.label).join(", "),
-        },
-      };
-    },
-
-    async execute(args, ctx) {
-      const negotiator = require("../scheduling/negotiator");
-      const freeslots = require("../scheduling/freeslots");
-
-      const slots = await freeslots.findSlots(ctx.userId, {
-        durationMin: args.duration_minutes || 30,
-        withinDays: args.within_days || 7,
-        tzOffsetMin: offsetOr(ctx.tzOffsetMin),
-        count: 3,
-      });
-      if (!slots || !slots.length) {
-        return { ok: false, error: "I no longer have free slots to offer" };
-      }
-
-      const started = await negotiator.start({
-        userId: ctx.userId,
-        userName: ctx.userName || null,
-        contact: { name: args.person, phone: args.phone },
-        purpose: args.purpose || null,
-        slots,
-        lang: ctx.lang || null,
-      });
-
-      if (!started.ok) {
-        const why = {
-          telephony: "calling isn't configured on this server",
-          no_phone: `I don't have a number for ${args.person}`,
-          no_slots: "I couldn't find any free slots",
-          quota: "you've reached today's limit for calls I place",
-          failed: "the call wouldn't start",
-        }[started.reason];
-        return { ok: false, error: why || "the call wouldn't start" };
-      }
-
-      // Ringing, not arranged. The session layer follows it to the end.
-      return {
-        ok: true,
-        data: { task_id: started.taskId, call_id: started.callId },
-        deviceAction: {
-          type: "scheduling_call",
-          task_id: started.taskId,
-          call_id: started.callId,
-          person: args.person,
-          purpose: args.purpose || null,
-          slots,
-          tz: offsetOr(ctx.tzOffsetMin),
-        },
-        speak: `Calling ${args.person} now to fix a time — I'll tell you what they say.`,
       };
     },
   });
@@ -8838,68 +8636,6 @@ function registerBuiltins() {
     },
   });
 
-  // ---------------- INBOUND CALLS (Hari answered the phone) ----------------
-
-  registry.register({
-    name: "check_my_calls",
-    description:
-      "Read back the calls answered on the user's behalf while they " +
-      "were unavailable — who rang, what they wanted, and any message left. " +
-      "Use for 'did anyone call', 'any messages', 'who called me', 'what did " +
-      "I miss'. ONLY the calls the assistant itself answered: the phone's own " +
-      "missed, received and dialled calls are phone_calls whenever that tool " +
-      "is offered.",
-    risk: "low",
-    inputSchema: {
-      type: "object",
-      properties: {
-        unseen_only: {
-          type: "boolean",
-          description: "Only calls the user hasn't been told about yet. Default true.",
-        },
-      },
-    },
-    async execute(args, ctx) {
-      if (!ctx.userId) return { ok: false, error: "not signed in" };
-      const receptionist = require("../inbound/receptionist");
-      const unseenOnly = args.unseen_only !== false;
-      const calls = await receptionist.listCalls(ctx.userId, { limit: 10, unseenOnly });
-
-      if (!calls.length) {
-        return {
-          ok: true,
-          data: [],
-          speak: unseenOnly ? "No new calls." : "No calls yet.",
-        };
-      }
-
-      // Urgent first — the whole reason for screening is that the important
-      // one should not be buried behind three sales calls.
-      const order = { urgent: 0, normal: 1, low: 2 };
-      calls.sort((a, b) => (order[a.urgency] ?? 1) - (order[b.urgency] ?? 1));
-
-      const lines = calls.slice(0, 5).map((c) => {
-        const who = c.caller_name || `a number ending ${String(c.from_number).slice(-4)}`;
-        if (c.outcome === "forwarded") return `${who} — I put them through`;
-        if (c.outcome === "blocked") return `${who} — a sales call, I ended it`;
-        const urgent = c.urgency === "urgent" ? "Urgent — " : "";
-        return `${urgent}${who}: ${c.message || c.summary}`;
-      });
-
-      // Reading them out IS being told about them.
-      await receptionist.markSeen(ctx.userId, calls.map((c) => Number(c.id)));
-
-      return {
-        ok: true,
-        data: calls,
-        speak: `${calls.length === 1 ? "One call" : `${calls.length} calls`}. ` + lines.join(". "),
-        // What a stranger said on the phone: data, never an instruction
-        // (the prompt-injection gate in registry.js).
-        untrusted: true,
-      };
-    },
-  });
-
   /** Shared: resolve a spoken name to exactly one real client, or return a
    *  tool error the model can act on (ask / say nobody matches). */
   async function requireClient(userId, spokenName) {
@@ -8983,8 +8719,8 @@ function registerBuiltins() {
   });
 
   // DOCTORS ONLY: a real slot in the clinic's appointment book (clinic/
-  // store.js) — the same book the Clinic screen and the phone receptionist
-  // use, so a voice booking can never double-book a slot.
+  // store.js) — the same book the Clinic screen uses, so a voice booking
+  // can never double-book a slot.
   registry.register({
     name: "book_patient_appointment",
     description:
@@ -9016,9 +8752,8 @@ function registerBuiltins() {
         return { ok: false, error: "starts_at must be a valid future datetime (ISO-8601)" };
       }
       const store = require("../clinic/store");
-      // Booked exactly as the doctor said, without the free-slot check the
-      // phone receptionist uses: a doctor squeezing someone in outside the
-      // grid is a deliberate choice, a caller doing it is not.
+      // Booked exactly as the doctor said, without the free-slot check: a
+      // doctor squeezing someone in outside the grid is a deliberate choice.
       const row = await store.createAppointment(ctx.userId, {
         clientId: client.id, patientName: client.name, patientPhone: client.phone || "",
         startsAt: when, reason: args.reason || "", source: "voice",
@@ -9825,20 +9560,14 @@ function registerBuiltins() {
     },
   });
 
-  // AI Poster Studio + photo edits (2026-09-30): create_event_poster and
-  // edit_my_photo — src/posters/studioTools.js.
-  require("../posters/studioTools").registerStudioTools(registry);
+  // Photo edits (2026-09-30): edit_my_photo — src/tools/editMyPhoto.js.
+  require("./editMyPhoto").registerEditMyPhoto(registry);
 
   // "Play my morning" and meeting prep (2026-09-30): play_daily_brief and
   // prepare_meeting — src/meetings/tools.js.
   require("../meetings/tools").registerBriefMeetingTools(registry);
 }
 
-/**
- * Best-effort epoch-ms for a spoken time ("tomorrow at 7pm"), in the user's
- * local frame. Returns null when the phrase carries no time — the ledger
- * stores NULL rather than a guessed timestamp.
- */
 /** "in 2 hours", "tomorrow", "on Friday" — spoken, not ISO. */
 function relative(ms, now) {
   const d = Math.round((ms - now) / 60000);
@@ -9848,19 +9577,6 @@ function relative(ms, now) {
   if (days === 1) return "tomorrow";
   if (days < 7) return `in ${days} days`;
   return `in ${Math.round(days / 7)} weeks`;
-}
-
-function parseWhenMs(when, tzOffsetMin) {
-  if (!when) return null;
-  try {
-    const chrono = require("chrono-node");
-    const off = Number.isFinite(Number(tzOffsetMin)) ? Number(tzOffsetMin) : 330;
-    const ref = new Date(Date.now() + off * 60_000);
-    const d = chrono.parseDate(String(when), ref, { forwardDate: true });
-    return d ? d.getTime() - off * 60_000 : null;
-  } catch (_) {
-    return null;
-  }
 }
 
 

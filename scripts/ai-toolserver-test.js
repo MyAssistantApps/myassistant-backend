@@ -1,12 +1,8 @@
 /**
  * THE TOOL SERVER — `npm run test:ai`.
  *
- * Since 2026-09-29 the app runs its own models (Gemini through Firebase
- * AI Logic; Gemini Nano was removed the same night) and this server is its
- * tool server and
- * memory: GET /ai/config, POST /ai/context, /ai/tool, /ai/turn and
- * /ai/firebase-token. The old model routes (/live/ws, /assistant, /stt,
- * /tts, /vision, the assistant's /chat turns) answer 426.
+ * This server is the app's tool server and memory: GET /ai/config,
+ * POST /ai/context, /ai/tool and /ai/turn.
  *
  * Boots the REAL server (real appAuth, real routes, real tools, real
  * Postgres) with every outbound call answered locally. No model is called
@@ -26,20 +22,18 @@ const os = require("os");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const http = require("http");
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "ai-toolserver-"));
 process.env.DATA_DIR = path.join(TMP, "data");
 process.env.MEDIA_DIR = path.join(TMP, "media");
 process.env.MEDIA_BACKEND = "local";
 process.env.LIVE_RECORD_DIR = path.join(TMP, "recordings");
-process.env.LIVE_RECORD = "0";
 process.env.LOG_LEVEL = "error";
 process.env.JWT_SECRET = "ai-toolserver-" + crypto.randomBytes(16).toString("hex");
 for (const k of [
-  "OPENAI_API_KEY", "GEMINI_MODEL", "GEMINI_LIVE_MODEL", "GEMINI_TTS_MODEL", "OPENAI_API_KEY",
+  "OPENAI_API_KEY",
   "AUTH_DISABLED", "ALLOW_APP_KEY", "APP_API_KEY", "METRICS_TOKEN", "PLIVO_AUTH_TOKEN",
-  "BOLNA_API_KEY", "TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY", "GOOGLE_CSE_KEY", "HEYGEN_API_KEY",
+  "BOLNA_API_KEY", "BRAVE_SEARCH_API_KEY",
   "AI_CLOUD_MODEL", "AI_CLOUD_FAST_MODEL", "AI_TTS_MODEL", "AI_TTS_VOICE", "AI_LIVE_MODEL",
   "AI_LIVE_VOICE", "AI_NANO", "AI_APPROVAL_SECRET", "SHORTCUTS",
 ]) delete process.env[k];
@@ -76,9 +70,7 @@ const pushes = [];
 push.send = async (...a) => { pushes.push(a); return { ok: true, stub: true }; };
 push.sendNotification = async (...a) => { pushes.push(a); return { ok: true, stub: true }; };
 const firebase = require(path.join(BACKEND, "src/services/firebase"));
-let firebaseOn = false;
-firebase.ensure = () => firebaseOn;
-firebase.auth = () => ({ createCustomToken: async (uid) => `custom-token-for-${uid}` });
+firebase.ensure = () => false;
 
 const assert = require("assert");
 const jwt = require("jsonwebtoken");
@@ -167,12 +159,11 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
       assert.deepStrictEqual(Object.keys(c).sort(), ["limits", "listen", "live", "models", "provider", "routing"]);
       assert.strictEqual(c.provider, "openai", "the phone always talks to our server");
       assert.deepStrictEqual(Object.keys(c.models).sort(),
-        ["cloud", "cloudFallback", "cloudFast", "thinking", "tts", "ttsLanguage", "ttsStyle", "ttsVoice"]);
+        ["cloud", "cloudFallback", "cloudFast", "tts", "ttsLanguage", "ttsStyle", "ttsVoice"]);
       assert.strictEqual(c.models.cloud, openai.models.chat());
       assert.strictEqual(c.models.cloudFast, openai.models.fast());
       assert.strictEqual(c.models.cloudFallback, openai.models.fallback());
       assert.strictEqual(c.models.tts, openai.models.tts());
-      assert.strictEqual(c.models.thinking, "low");
       assert.strictEqual(c.models.ttsStyle, "warm, friendly and natural");
       assert.strictEqual(c.models.ttsVoice, "marin"); // owner: Marin is the default voice (2c0dae4)
       assert.strictEqual(c.models.ttsLanguage, "en-IN");
@@ -181,22 +172,13 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
         assert.ok(c.routing.toolWords.includes(w), `toolWords has ${w}`);
       }
       for (const w of ["day", "the", "get"]) assert.ok(!c.routing.toolWords.includes(w), `toolWords has no ${w}`);
-      // Grounding is off unless AI_GROUNDING=on (its quota ran out): a word
-      // nobody says keeps the app from its own list of fresh words.
+      // A word nobody says keeps older builds off their own Google-grounded
+      // search route.
       assert.deepStrictEqual(c.routing.freshWords, ["__grounding_off__"]);
-      process.env.AI_GROUNDING = "on";
-      try {
-        const on = (await api("GET", "/ai/config", { token: A.token })).json;
-        for (const w of ["today", "latest", "who won", "price", "score"]) {
-          assert.ok(on.routing.freshWords.includes(w), `freshWords has ${w}`);
-        }
-      } finally {
-        delete process.env.AI_GROUNDING;
-      }
       assert.deepStrictEqual(c.routing.shortcutNames, []);
     });
 
-    await atest("env and the user's own choices: models, voice, speech language, thinking", async () => {
+    await atest("env and the user's own choices: models, voice, speech language", async () => {
       Object.assign(process.env, { OPENAI_MODEL: "gpt-test-chat", OPENAI_TTS_MODEL: "gpt-test-tts" });
       try {
         let c = (await api("GET", "/ai/config", { token: A.token })).json;
@@ -211,12 +193,8 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
         await require(path.join(BACKEND, "src/users/context")).setAssistantProfile(A.id, { voice: "Fola" });
         c = (await api("GET", "/ai/config", { token: A.token })).json;
         assert.strictEqual(c.models.ttsVoice, "marin", "a voice she cannot speak in falls back to the default");
-        process.env.AI_CLOUD_THINKING = "HIGH";
-        assert.strictEqual((await api("GET", "/ai/config", { token: A.token })).json.models.thinking, "high");
-        process.env.AI_CLOUD_THINKING = "loud";
-        assert.strictEqual((await api("GET", "/ai/config", { token: A.token })).json.models.thinking, "low", "an unknown level falls back");
       } finally {
-        for (const k of ["OPENAI_MODEL", "OPENAI_TTS_MODEL", "AI_CLOUD_THINKING"]) delete process.env[k];
+        for (const k of ["OPENAI_MODEL", "OPENAI_TTS_MODEL"]) delete process.env[k];
         await db.run(`UPDATE users SET preferred_language='' WHERE id=$1`, [A.id]);
         await db.run(`UPDATE assistant_profiles SET voice='' WHERE user_id=$1`, [A.id]).catch(() => {});
       }
@@ -224,7 +202,7 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
 
     await atest("a request without a session is refused", async () => {
       for (const [m, p] of [["GET", "/ai/config"], ["POST", "/ai/context"], ["POST", "/ai/tool"],
-        ["POST", "/ai/turn"], ["POST", "/ai/firebase-token"]]) {
+        ["POST", "/ai/turn"]]) {
         assert.strictEqual((await api(m, p, { body: m === "POST" ? {} : undefined })).status, 401, `${m} ${p}`);
       }
     });
@@ -838,56 +816,11 @@ const GRANTED = ["microphone", "contacts", "location", "camera", "phone", "notif
     });
 
     /* ============================================================ */
-    console.log("\nPOST /ai/firebase-token");
+    console.log("\nhuman chat");
     /* ============================================================ */
 
-    await atest("503 until Firebase is configured, then a custom token for u<id>", async () => {
-      firebaseOn = false;
-      let r = await api("POST", "/ai/firebase-token", { token: A.token });
-      assert.deepStrictEqual([r.status, r.json], [503, { error: "firebase unavailable" }]);
-      firebaseOn = true;
-      r = await api("POST", "/ai/firebase-token", { token: A.token });
-      assert.strictEqual(r.status, 200, r.text);
-      assert.deepStrictEqual(r.json, { token: `custom-token-for-u${A.id}`, uid: `u${A.id}` });
-    });
-
-    /* ============================================================ */
-    console.log("\nthe old ways in");
-    /* ============================================================ */
-
-    await atest("the removed model routes answer 426 with one plain sentence", async () => {
-      for (const [m, p] of [
-        ["POST", "/assistant/session"], ["GET", "/assistant/stream/abc?token=x"], ["POST", "/assistant/abc/message"],
-        ["POST", "/stt"], ["POST", "/tts"], ["POST", "/vision"], ["POST", "/chat"], ["POST", "/chat/stream"],
-        ["POST", "/chat/greeting"], ["GET", "/live"], ["GET", "/live/ws"],
-      ]) {
-        const r = await api(m, p, { token: A.token, body: m === "POST" ? {} : undefined });
-        assert.strictEqual(r.status, 426, `${m} ${p} → ${r.status}`);
-        assert.deepStrictEqual(r.json, { error: "Update the app to keep talking to your assistant." }, p);
-      }
-      // What stays: human chat, and the avatar screen's routes under /live.
+    await atest("human chat answers on the single /chat mount", async () => {
       assert.strictEqual((await api("GET", "/chat/threads", { token: A.token })).status, 200);
-      assert.notStrictEqual((await api("GET", "/live/avatar", { token: A.token })).status, 426);
-    });
-
-    await atest("the /live/ws upgrade answers 426 too", async () => {
-      const res = await new Promise((resolve, reject) => {
-        const req = http.request({
-          host: "127.0.0.1", port: Number(process.env.PORT), path: `/live/ws?token=${A.token}`,
-          headers: { Connection: "Upgrade", Upgrade: "websocket", "Sec-WebSocket-Version": "13",
-            "Sec-WebSocket-Key": crypto.randomBytes(16).toString("base64") },
-        });
-        req.on("upgrade", () => reject(new Error("upgraded")));
-        req.on("response", (r) => {
-          let b = "";
-          r.on("data", (d) => { b += d; });
-          r.on("end", () => resolve({ status: r.statusCode, body: b }));
-        });
-        req.on("error", reject);
-        req.end();
-      });
-      assert.strictEqual(res.status, 426);
-      assert.deepStrictEqual(JSON.parse(res.body), { error: "Update the app to keep talking to your assistant." });
     });
 
     await atest("nothing here called a model", () => {

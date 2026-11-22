@@ -5,10 +5,8 @@
  * admin panel) and every installed app picks up the change on next
  * launch — no Play Store release, no rebuild.
  *
- * Use it to:
- *  - announce new AI capabilities the moment they ship server-side
- *  - flip feature flags for screens already built into the app
- *  - prompt (or force) a Play Store update when a new APK is released
+ * Use it to prompt (or force) an update when a new APK is released. A
+ * published APK (POST /admin/apk) overrides the version fields here.
  */
 module.exports = {
   latestVersionCode: 1,
@@ -18,19 +16,4 @@ module.exports = {
   changelog: [
     "First internal build — chat with live AI",
   ],
-
-  announcement: null,
-
-  // Rebuild-from-scratch reset: every removed feature is OFF so installed
-  // apps hide their entry points. Flip back only when a feature returns.
-  features: {
-    voice_mode: true,         // speak in -> spoken reply out (Gemini)
-    morning_briefing: false,
-    face_mode: false,
-    face_interview: false,
-    video_briefing: false,
-    photo_questions: true,    // photos/receipts via /vision + /docs
-    live_info_cards: false,
-    agent_calls: false,
-  },
 };

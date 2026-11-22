@@ -9,7 +9,6 @@
  *   POST /chat/groups/:id/send  {text}
  *   POST /chat/groups/:id/agent {enabled} → may my assistant answer here
  *   PATCH  /chat/groups/:id            rename
- *   POST   /chat/groups/:id/members    {members:[userId]} add people
  *   POST   /chat/groups/:id/leave      leave the group
  *   POST   /chat/groups/:id/clear      clear MY copy of the history
  *   POST   /chat/groups/:id/mute       {muted}
@@ -383,36 +382,6 @@ router.patch("/groups/:id", async (req, res) => {
   }
   await run(`UPDATE chat_groups SET title=$2 WHERE id=$1`, [gid, title]).catch(() => {});
   res.json({ title });
-});
-
-/** Add people — again only from the caller's own address book. */
-router.post("/groups/:id/members", async (req, res) => {
-  const uid = me(req, res);
-  if (uid === null) return;
-  const gid = Number(req.params.id);
-  if (!(await membership(gid, uid))) {
-    return res.status(404).json({ error: "not in that group" });
-  }
-  const ids = [...new Set((req.body?.members || []).map(Number))]
-    .filter((n) => Number.isInteger(n) && n > 0)
-    .slice(0, 100);
-  if (!ids.length) return res.json({ added: 0 });
-  const ok = await query(
-    `SELECT DISTINCT u.id FROM users u
-       JOIN contacts c ON c.phone = u.phone_number AND c.user_id = $1
-      WHERE u.id = ANY($2::int[])`,
-    [uid, ids]
-  ).catch(() => []);
-  let added = 0;
-  for (const r of ok) {
-    const n = await run(
-      `INSERT INTO chat_group_members (group_id, user_id, joined_at)
-       VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-      [gid, Number(r.id), Date.now()]
-    ).catch(() => 0);
-    if (n) added++;
-  }
-  res.json({ added });
 });
 
 /**

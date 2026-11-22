@@ -19,9 +19,13 @@ const { createRemoteJWKSet, jwtVerify } = require("jose");
 
 const db = require("../db");
 const { verifySession } = require("../middleware/auth");
+const loginGuard = require("../services/loginGuard");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const SESSION_DAYS = 30;
+// A real bcrypt hash of a random string: compared against when the account
+// does not exist, so "no such user" costs the same time as "wrong password".
+const DUMMY_HASH = bcrypt.hashSync(require("crypto").randomBytes(16).toString("hex"), 10);
 
 const googleClient = new OAuth2Client();
 // Apple publishes its signing keys here; jose caches them for us.
@@ -80,11 +84,23 @@ router.post("/signup", async (req, res) => {
 
 router.post("/login", async (req, res) => {
   const { email, password } = req.body || {};
-  const user = email ? await db.findByEmail(email) : null;
-  // Same error for "no user" and "wrong password" — don't leak which emails exist.
-  if (!user || !user.password_hash || !(await bcrypt.compare(password || "", user.password_hash))) {
+  if (typeof email !== "string" || typeof password !== "string") {
+    return res.status(400).json({ error: "Please enter your email address and password." });
+  }
+  // Per-account throttle on top of the per-IP one (services/loginGuard.js).
+  if (loginGuard.locked(email)) return res.status(429).json({ error: loginGuard.LOCKED_MESSAGE });
+  const user = await db.findByEmail(email);
+  // Same error for "no user" and "wrong password" — don't leak which emails
+  // exist. A missing account still pays for one bcrypt compare, so the
+  // response time does not tell them apart either.
+  const ok = user && user.password_hash
+    ? await bcrypt.compare(password, user.password_hash)
+    : (await bcrypt.compare(password, DUMMY_HASH), false);
+  if (!ok) {
+    loginGuard.failed(email);
     return res.status(401).json({ error: "The email address and password do not match. Please check and try again." });
   }
+  loginGuard.succeeded(email);
   respond(res, user);
 });
 
@@ -211,6 +227,40 @@ router.get("/me", async (req, res) => {
   } catch (e) {
     // A throw is the database, not the token — 503 keeps the app signed in.
     console.warn("[auth] /me failed:", e && e.message);
+    res.status(503).json({ error: "The service is temporarily unavailable. Please try again shortly." });
+  }
+});
+
+/**
+ * SIGN OUT EVERYWHERE (2026-11-15, security hardening). There was no way
+ * to end a session: tokens renew for as long as the app is opened, so a
+ * token copied off a phone worked indefinitely. This ends every session
+ * token, console token and connected-app key the account has issued
+ * (sessions_valid_after), and hands back
+ * one fresh token so the device that asked stays signed in when it asks
+ * with keepThisDevice:true.
+ */
+router.post("/logout-all", async (req, res) => {
+  const authz = req.get("Authorization") || "";
+  if (!authz.startsWith("Bearer ")) return res.status(401).json({ error: "token required" });
+  try {
+    const v = await verifySession(authz.slice(7));
+    if (v.error) return res.status(v.status).json({ error: v.error });
+    const nowSec = Math.floor(Date.now() / 1000);
+    // +1: a token minted in this same second must not survive.
+    await db.run(
+      `UPDATE users SET sessions_valid_after = $2 WHERE id = $1`,
+      [v.user.id, nowSec + 1]
+    );
+    try { require("../audit/log").record(v.user.id, "auth.logout_all", "Signed out of every device"); } catch (_) {}
+    const out = { ok: true };
+    if (req.body && req.body.keepThisDevice === true) {
+      // Issued with iat in the future second, so it passes the new cutoff.
+      out.token = jwt.sign({ uid: v.user.id, iat: nowSec + 1 }, JWT_SECRET, { expiresIn: `${SESSION_DAYS}d` });
+    }
+    res.json(out);
+  } catch (e) {
+    console.warn("[auth] logout-all failed:", e && e.message);
     res.status(503).json({ error: "The service is temporarily unavailable. Please try again shortly." });
   }
 });

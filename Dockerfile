@@ -1,47 +1,28 @@
 # MYASSISTANT_BACKEND — place this file in the repo root
 #
-# Base: node:22-slim (Debian/glibc, Node 22 LTS — 20 reached end of life in April 2026), NOT alpine. Reason: better-sqlite3 is
-# a native module with PREBUILT binaries for glibc — on slim it installs
-# instantly with zero compilation. On alpine (musl) there is no prebuilt
-# binary, so node-gyp must compile from source AND download Node headers
-# from unofficial-builds.nodejs.org — which fails on flaky networks
-# (ETIMEDOUT) and adds minutes to every build. Slim is ~40 MB larger and
-# completely reliable; that is the right trade for a production API.
+# Base: node:22-slim (Debian/glibc, Node 22 LTS — 20 reached end of life in
+# April 2026), NOT alpine: the runtime stage needs Debian's ffmpeg and the
+# DejaVu/Noto fonts below. Every dependency is pure JavaScript, so nothing
+# is compiled and the builder stage needs no toolchain.
 
 # ---------- Stage 1: install deps ----------
 FROM node:22-slim AS builder
 
-# Toolchain as a FALLBACK: normally better-sqlite3's prebuilt binary just
-# downloads (fast path). But that download comes from GitHub Releases,
-# which some networks block/timeout — in that case node-gyp compiles the
-# module locally instead. npm_config_nodedir points gyp at the headers
-# already inside this image, so the compile needs NO downloads at all.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 make g++ \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 COPY package.json package-lock.json ./
-ENV npm_config_nodedir=/usr/local
 RUN npm ci --omit=dev
 
 # ---------- Stage 2: runtime ----------
 FROM node:22-slim
 
-# ca-certificates is REQUIRED, not cosmetic. @livekit/rtc-node's WebRTC
-# layer is native Rust and validates TLS against the SYSTEM trust store,
-# which node:22-slim ships empty. Node's own fetch bundles its CAs, so
-# HTTPS calls to BeyondPresence succeed while the LiveKit connection dies
-# with "no native root CA certificates found" — the avatar fails and
-# nothing else does. Keep this even if the image is slimmed further.
+# ca-certificates: node:22-slim ships an empty SYSTEM trust store. Node's
+# own fetch bundles its CAs, but native code and child processes validate
+# TLS against the system store and fail without it. Keep this even if
+# the image is slimmed further.
 #
-# ffmpeg is for VIDEO GENERATION. Veo produces real video but only on a
-# paid Gemini key; until billing is enabled the assistant could only say
-# "video isn't available on this plan", which is a capability the product
-# claims and does not have. With ffmpeg it builds a genuine MP4 out of
-# generated keyframes — a slow push with crossfades, honestly described
-# as that rather than passed off as synthesised video. The moment billing
-# lands, Veo takes over the same code path.
+# ffmpeg is for VIDEO GENERATION (and image transforms). It builds a
+# genuine MP4 out of generated keyframes — a slow push with crossfades,
+# honestly described as that rather than passed off as synthesised video.
 #
 # ffmpeg here is the headless Debian build (no X, no GUI deps).
 #
@@ -66,8 +47,9 @@ COPY package.json ./
 COPY src ./src
 COPY scripts ./scripts
 
-# SQLite user DB lives here — mount a volume at /app/data to persist it.
-# Created before dropping root so the 'node' user can write to it.
+# Server-kept files live here (DATA_DIR: document uploads, recordings, voice
+# samples, the published APK); compose.yml mounts ./data:/app/data. Created
+# before dropping root so the 'node' user can write to it.
 RUN mkdir -p /app/data && chown -R node:node /app/data
 ENV DATA_DIR=/app/data
 
@@ -75,6 +57,9 @@ ENV DATA_DIR=/app/data
 USER node
 
 ENV NODE_ENV=production
+# The commit this image was built from; /health reports it (CI passes it).
+ARG GIT_SHA=dev
+ENV GIT_SHA=$GIT_SHA
 EXPOSE 3000
 
 # Health check via node itself — slim ships no wget/curl, and adding one

@@ -141,8 +141,8 @@ const stepCalls = (from) => calls.slice(from).filter((c) => S.STEP_TOOLS[c.name]
   const step = (tool, args, extra = {}) => ({ tool, args, said: `${tool}`, ...extra });
 
   await atest("a tool outside the allowlist is never a step, with a reason", () => {
-    for (const t of ["pay_by_upi", "collect_payment", "save_upi_id", "record_patient_payment", "book_by_calling_business",
-      "arrange_meeting_with", "order_food", "book_ride", "book_movie_tickets", "place_phone_call", "uninstall_app",
+    for (const t of ["pay_by_upi", "collect_payment", "save_upi_id", "record_patient_payment",
+      "order_food", "book_ride", "book_movie_tickets", "place_phone_call", "uninstall_app",
       "forget_memory", "delete_calendar_event", "add_standing_instruction", "configure_assistant", "update_my_profile",
       "remember_fact", "send_video_note", "send_document", "email_reply", "schedule_task", "start_task",
       "run_shortcut", "create_shortcut", "end_conversation", "stay_silent", "mcp__someone__tool"]) {

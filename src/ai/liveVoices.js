@@ -102,7 +102,18 @@ async function greeting(id, line) {
   const v = byId(id) || byId(require("./proxy").DEFAULT_VOICE);
   const key = require("crypto").createHash("sha1")
     .update(`tts-v2|${GREETING_TEMPO}|${v.id}|${text}`).digest("hex").slice(0, 16);
+  // Only the shared openings are kept on disk. Any other line (one with
+  // the user's name, or anything a caller makes up) is spoken but not
+  // stored: every distinct line used to become a permanent ~100 KB file,
+  // so one account could fill the disk. The phone caches its own copy.
+  if (!OPENING_LINES.includes(text)) return once(`greet-tts-${key}`, () => greetingWav(v, text));
   return kept(path.join(DIR, `greet-tts-${key}.wav`), () => greetingWav(v, text));
+}
+
+/** Same in-flight sharing as kept(), without the file. */
+function once(key, make) {
+  if (!making.has(key)) making.set(key, make().finally(() => making.delete(key)));
+  return making.get(key);
 }
 
 /**

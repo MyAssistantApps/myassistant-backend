@@ -1,18 +1,11 @@
 /**
  * VIDEO GENERATION.
  *
- * Two paths, and the honest difference between them matters:
- *
- *   1. VEO — real synthesised video, motion and all. Paid tier only on
- *      this key. Tried first; the day billing is enabled it just starts
- *      working and nothing else changes.
- *
- *   2. KEYFRAMES + ffmpeg — free, and real MP4 output. Several frames are
- *      generated from one seed so the subject stays itself, then they are
- *      crossfaded together under a slow push in. It is a moving picture,
- *      not synthesised motion, and the caller is told which it got so the
- *      assistant can say so. Passing this off as Veo would be the same
- *      class of lie as claiming an alarm was set.
+ * KEYFRAMES + ffmpeg — real MP4 output. Several frames are generated
+ * from one seed so the subject stays itself, then they are crossfaded
+ * together under a slow push in. It is a moving picture, not synthesised
+ * motion, and the assistant says so. Passing it off as real video would
+ * be the same class of lie as claiming an alarm was set.
  *
  * Before this, "make me a video" answered "video isn't enabled on the
  * current plan" — a capability the product listed and did not have.
@@ -22,7 +15,7 @@ const os = require("os");
 const path = require("path");
 const { execFile } = require("child_process");
 
-const { generateImage, tryVeoVideo } = require("./imagegen");
+const { generateImage } = require("./imagegen");
 
 /** Does this container actually have ffmpeg? Probed once. */
 let ffmpegOk = null;
@@ -67,15 +60,12 @@ function shotList(prompt, frames) {
 }
 
 /**
- * @returns {{ buffer, mime, kind: "veo"|"keyframes", frames?: number, seconds?: number }}
- * @throws when neither path can produce anything
+ * @returns {{ buffer, mime, kind: "keyframes", frames: number, seconds: number }}
+ * @throws when no video can be produced
  */
 async function generateVideo(prompt, { seconds = 8, frames = 4, aspect = "wide" } = {}) {
   const p = String(prompt || "").trim();
   if (!p) throw new Error("empty prompt");
-
-  const veo = await tryVeoVideo(p).catch(() => null);
-  if (veo) return { ...veo, kind: "veo" };
 
   if (!(await haveFfmpeg())) {
     throw new Error("no video encoder available on the server");
