@@ -77,4 +77,26 @@ function capDeclarations(decls, names, max = LIVE_MAX) {
     .slice(0, max);
 }
 
-module.exports = { liveNames, capDeclarations, LIVE_MAX, LIVE_ORDER };
+/**
+ * ROLE TOOLS (2026-11-23). The phone's professional pages — the Doctor's,
+ * Advocate's and Business assistants' Quick Actions mics, the Jyotish
+ * guru — name the tools their work needs (roleTools in POST /ai/context).
+ * A Live session takes its tools once, when it opens, so those go in as
+ * must-haves; otherwise "Ramesh paid 500" or "how is my career this month"
+ * reached a session without the tool. Only registered names, at most
+ * ROLE_MAX, never repeated — and gating is unchanged (registry.declarations).
+ */
+const ROLE_MAX = 16;
+function roleTools(asked, known) {
+  if (!Array.isArray(asked)) return [];
+  const out = [];
+  for (const n of asked) {
+    const name = String(n == null ? "" : n).trim();
+    if (!/^[a-z][a-z0-9_]{1,63}$/.test(name) || !known.has(name) || out.includes(name)) continue;
+    out.push(name);
+    if (out.length >= ROLE_MAX) break;
+  }
+  return out;
+}
+
+module.exports = { liveNames, capDeclarations, roleTools, LIVE_MAX, LIVE_ORDER, ROLE_MAX };

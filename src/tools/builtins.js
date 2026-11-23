@@ -8724,11 +8724,13 @@ function registerBuiltins() {
   registry.register({
     name: "book_patient_appointment",
     description:
-      "DOCTOR users only: book a patient into a specific clinic APPOINTMENT slot " +
-      "('book Ramesh tomorrow at 10', 'put Asha in at 5:30 today for dressing'). " +
-      "Use this instead of schedule_patient_recall when the doctor names an exact " +
-      "day AND time to see the patient. The patient gets a reminder call a few " +
-      "hours before when they have a phone number on their card.",
+      "PROFESSIONAL users (doctor, advocate, business) only: book a patient or " +
+      "client into a specific APPOINTMENT slot — a doctor's visit, an advocate's " +
+      "consultation, a business meeting ('book Ramesh tomorrow at 10', 'put Asha in " +
+      "at 5:30 today for dressing', 'consultation with Sharma on Friday at 4'). Use " +
+      "this instead of schedule_patient_recall when an exact day AND time is named. " +
+      "The person gets a reminder call a few hours before when they have a phone " +
+      "number on their card.",
     risk: "medium",
     inputSchema: {
       type: "object",
@@ -8741,9 +8743,13 @@ function registerBuiltins() {
     },
     async execute(args, ctx) {
       if (!ctx.userId) return { ok: false, error: "not signed in" };
+      // The appointment book is shared by the three professions (the
+      // workspace API serves them all, src/clinic/routes.js) — the
+      // advocate's "Book Consultation" and the business "Schedule Meeting"
+      // tiles book by voice too (owner, 2026-11-23).
       const { personaOf } = require("../users/persona");
-      if ((await personaOf(ctx.userId)) !== "doctor") {
-        return { ok: false, error: "clinic appointments are only for doctor profiles" };
+      if (!["doctor", "advocate", "business"].includes(await personaOf(ctx.userId))) {
+        return { ok: false, error: "appointments are only for doctor, advocate and business profiles" };
       }
       const { client, err } = await requireClient(ctx.userId, args.client_name);
       if (err) return err;
