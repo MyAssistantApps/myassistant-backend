@@ -503,6 +503,10 @@ async function prepare(uid, body) {
   const history = await historyFor(uid, s.id);
   tm.mark("history");
   const must = [];
+  // THE PAGE'S ROLE (2026-11-23): the tools its work needs, up front — a
+  // Live session's tools are fixed when it opens (ai/liveTools.roleTools).
+  must.push(...require("./liveTools").roleTools(body.roleTools,
+    new Set(registry.list().map((t) => t.name))));
   // A user with shortcuts is always offered run_shortcut.
   if (shortcutKeys.length) must.push("run_shortcut", "continue_shortcut");
   // The tool a pending question is about must still be callable.

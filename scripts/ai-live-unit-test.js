@@ -91,6 +91,27 @@ function run(test) {
     assert.ok(!got.includes("uninstall_app"), "past the cap, the tail goes first");
   });
 
+  test("Role tools: a page's tools go in first; unknown, odd or repeated names never", () => {
+    const known = new Set(["jyotish_chart", "jyotish_reading", "check_patient_dues", "web_search"]);
+    assert.deepStrictEqual(
+      liveTools.roleTools(["jyotish_chart", "jyotish_reading", "jyotish_chart", "nope_tool",
+        "DROP TABLE", "", null, 7], known),
+      ["jyotish_chart", "jyotish_reading"]);
+    assert.deepStrictEqual(liveTools.roleTools(undefined, known), []);
+    assert.deepStrictEqual(liveTools.roleTools("jyotish_chart", known), []);
+    const many = Array.from({ length: 40 }, (_, i) => `tool_${i}`);
+    assert.strictEqual(liveTools.roleTools(many, new Set(many)).length, liveTools.ROLE_MAX);
+    // In a Live session they sit right after the conversation tools, so the
+    // cap cuts the general tail instead.
+    const { CORE } = require("../src/tools/relevance");
+    const all = [...new Set([...CORE, ...liveTools.LIVE_ORDER, "jyotish_chart", "jyotish_reading"])]
+      .map((name) => ({ name }));
+    const names = liveTools.liveNames(all, { must: ["jyotish_chart", "jyotish_reading"] });
+    const got = liveTools.capDeclarations(all, names).map((d) => d.name);
+    assert.deepStrictEqual(got.slice(0, 4), ["stay_silent", "end_conversation", "jyotish_chart", "jyotish_reading"]);
+    assert.ok(got.length <= liveTools.LIVE_MAX);
+  });
+
   test("LAST RESULTS: a list keeps its order, ids, names and times; ≤400 chars a tool", () => {
     const data = [
       { kind: "reminder", id: 12, text: "Call the bank", dueAt: 1, when: "tomorrow 5:00 pm" },
