@@ -286,8 +286,11 @@ async function routeTests() {
       assert.ok(opts.json && opts.schema, "asks for JSON with a schema");
       return { reply: JSON.stringify({ name: "Asha", date: "2004-03-14", time: "06:30", timeStatus: "exact", place: "Udupi", gender: "", followUp: "" }) };
     };
+    // A real photo's size (far over the 32 KB the other routes allow).
+    const photo = Buffer.alloc(900 * 1024, 7);
+    photo.set([0xff, 0xd8, 0xff, 0xe0]);
     const fd = new FormData();
-    fd.append("file", new Blob([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3])], { type: "image/jpeg" }), "kundli.jpg");
+    fd.append("file", new Blob([photo], { type: "image/jpeg" }), "kundli.jpg");
     const r = await fetch(base + "/jyotish/read", { method: "POST", headers: { "X-Test-User": "1" }, body: fd });
     const j = await r.json();
     assert.strictEqual(r.status, 200, JSON.stringify(j));
@@ -311,8 +314,12 @@ async function routeTests() {
     assert.ok(j.followUp, "says what is missing");
   });
 
-  await atest("read: no file, or not a photo or PDF, is refused before the model", async () => {
+  await atest("read: no file, or not a photo or PDF, or over 10 MB, is refused before the model", async () => {
     const before = replyCalls;
+    const huge = new FormData();
+    huge.append("file", new Blob([Buffer.alloc(11 * 1024 * 1024)], { type: "image/jpeg" }), "big.jpg");
+    const r0 = await fetch(base + "/jyotish/read", { method: "POST", headers: { "X-Test-User": "1" }, body: huge });
+    assert.strictEqual(r0.status, 413);
     const r1 = await fetch(base + "/jyotish/read", { method: "POST", headers: { "X-Test-User": "1" }, body: new FormData() });
     assert.strictEqual(r1.status, 400);
     const fd = new FormData();

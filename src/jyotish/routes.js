@@ -36,10 +36,11 @@ function uid(req, res) {
   return id;
 }
 
-// The server's JSON parser allows 2 MB; nothing here needs more than a few KB.
+// The server's JSON parser allows 2 MB; nothing here needs more than a few KB
+// — except an uploaded horoscope (/read), which has its own 10 MB limit.
 router.use((req, res, next) => {
   const len = Number(req.headers["content-length"] || 0);
-  if (len > MAX_BODY) return fail(res, 413, "too_large", "The request is too large");
+  if (req.path !== "/read" && len > MAX_BODY) return fail(res, 413, "too_large", "The request is too large");
   next();
 });
 
