@@ -146,5 +146,39 @@ console.log("\nmeeting capture");
     assert.ok(t.description.includes("Mark"));
   });
 
+  // The Quick Actions tiles' mics (owner, 2026-11-23): the advocate's
+  // "Book Consultation" and the business "Schedule Meeting" book by voice
+  // into the same appointment book the doctor uses — nobody else does.
+  await atest("booking by voice is open to the three professions, and only them", async () => {
+    const registry = require("../src/tools/registry");
+    const persona = require("../src/users/persona");
+    const tool = registry.get("book_patient_appointment");
+    const refused = /only for doctor, advocate and business profiles/;
+    const args = { client_name: "Nobody Such", starts_at: "2099-01-05T10:00:00+05:30" };
+    const real = persona.personaOf;
+    try {
+      for (const who of ["student", "personal", "professional"]) {
+        persona.personaOf = async () => who;
+        const r = await tool.execute(args, { userId: 1, tzOffsetMin: 330 });
+        assert.ok(r && r.ok === false && refused.test(r.error), `${who} is refused`);
+      }
+      for (const who of ["doctor", "advocate", "business"]) {
+        persona.personaOf = async () => who;
+        // Past the gate it looks the client up; whatever that answers here,
+        // it is not the profession refusal.
+        let r;
+        try {
+          r = await tool.execute(args, { userId: 1, tzOffsetMin: 330 });
+        } catch (e) {
+          r = { ok: false, error: String(e && e.message) };
+        }
+        assert.ok(!refused.test(String(r && r.error)), `${who} passes the gate`);
+      }
+    } finally {
+      persona.personaOf = real;
+    }
+    assert.ok(/advocate's consultation/.test(tool.description));
+  });
+
   console.log(`\n${passed} passed${process.exitCode ? " — with failures above" : ""}\n`);
 })();
