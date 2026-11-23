@@ -30,7 +30,7 @@ const aiLimit = rateLimit({
 function limiter(req, res, next) {
   general(req, res, (err) => {
     if (err) return next(err);
-    if (req.method === "POST" && (req.path === "/extract" || req.path === "/predict")) return aiLimit(req, res, next);
+    if (req.method === "POST" && ["/extract", "/predict", "/read"].includes(req.path)) return aiLimit(req, res, next);
     next();
   });
 }

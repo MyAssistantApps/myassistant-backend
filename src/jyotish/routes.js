@@ -100,6 +100,35 @@ router.post("/extract", async (req, res) => {
   }
 });
 
+// A HOROSCOPE, READ (2026-11-23): one photo or PDF of a janam kundli → the
+// birth details, for the person to check (jai.readDocument). Held in memory
+// for the one request and never stored.
+const multer = require("multer");
+const READ_TYPES = /^(image\/(jpeg|png|webp|gif)|application\/pdf)$/;
+const readUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
+
+router.post("/read", (req, res, next) => readUpload.single("file")(req, res, (err) => {
+  if (!err) return next();
+  if (err.code === "LIMIT_FILE_SIZE") return fail(res, 413, "too_large", "The file is too large. Use a photo or PDF under 10 MB.");
+  fail(res, 400, "bad_file", "Send one photo or PDF of the horoscope.");
+}), async (req, res) => {
+  if (!uid(req, res)) return;
+  const f = req.file;
+  if (!f || !f.buffer || !f.buffer.length) return fail(res, 400, "bad_file", "Send one photo or PDF of the horoscope.");
+  const mime = String(f.mimetype || "").toLowerCase();
+  if (!READ_TYPES.test(mime)) return fail(res, 415, "bad_type", "Use a photo (JPEG or PNG) or a PDF of the horoscope.");
+  try {
+    const out = await jai.readDocument({ mime, data: f.buffer, filename: f.originalname });
+    if (out.fields.place) {
+      try { out.places = await geo.searchPlaces(out.fields.place); } catch { out.places = []; }
+    }
+    res.json(out);
+  } catch (e) {
+    console.warn("jyotish/read failed:", e.message);
+    fail(res, 502, "ai_unavailable", "Unable to read the horoscope right now. You can fill in the details instead.");
+  }
+});
+
 router.get("/places", async (req, res) => {
   if (!uid(req, res)) return;
   const q = String(req.query.q || "").trim();

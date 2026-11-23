@@ -81,6 +81,42 @@ async function extract(conversation, { today = new Date() } = {}) {
     system: extractSystem(today.toISOString().slice(0, 10)),
     json: true, schema: EXTRACT_SCHEMA, temperature: 0, maxTokens: 400, timeoutMs: 20_000,
   });
+  return shapeExtract(reply, today);
+}
+
+/**
+ * A HOROSCOPE, READ (owner, 2026-11-23: "if anyone wants to upload their
+ * horoscope, my assistant should be able to read it"). A photo or PDF of a
+ * janam kundli / patri → the same birth details as extract(), for the
+ * person to check before the chart is cast. The file is read and dropped:
+ * it is never stored.
+ */
+function readSystem(today) {
+  return [
+    "You read a photo or scan of a horoscope — a janam kundli, janam patri or birth chart, printed or handwritten — and extract the person's birth details.",
+    `Today is ${today}. Never invent anything: a detail you cannot read clearly stays empty.`,
+    "It may be written in English, Hindi, Kannada, Sanskrit, Marathi, Tamil, Telugu, Gujarati, Bengali or Malayalam. Give the name in Latin letters, as it would be written in English.",
+    "Date: as YYYY-MM-DD. It may be written DD/MM/YYYY, DD-MM-YY or in words, often beside a Vikram or Shaka samvat date — use the Gregorian date.",
+    "Time: as HH:MM in the 24-hour clock ('janma samay', 'time of birth'; '6.30 PM' = 18:30); timeStatus exact. If only ghati/pala or ishtakala is given, leave the time empty and timeStatus not_given.",
+    "Place: the birth place (janma sthan) as written — town, district, state.",
+    "If this is not a horoscope, or nothing can be read, leave every field empty and say so kindly in followUp.",
+    "followUp: one short, friendly sentence naming what is missing or unclear; empty when the date, place and time are all read.",
+    "Reply only with the JSON object.",
+  ].join("\n");
+}
+
+async function readDocument({ mime, data, filename }, { today = new Date() } = {}) {
+  const { reply } = await generateReply(
+    [{ role: "user", content: "Read the birth details from this horoscope.", images: [{ mime, data, filename: filename || "horoscope" }] }],
+    {
+      system: readSystem(today.toISOString().slice(0, 10)),
+      json: true, schema: EXTRACT_SCHEMA, temperature: 0, maxTokens: 500, timeoutMs: 45_000,
+    });
+  return shapeExtract(reply, today);
+}
+
+/** The model's JSON → cleaned fields, whether complete, and one follow-up. */
+function shapeExtract(reply, today = new Date()) {
   let j;
   try { j = JSON.parse(reply); } catch { j = {}; }
   const date = cleanDate(j.date, today);
@@ -227,6 +263,6 @@ async function wholeReading(natal, period, category, { language = "en", name = n
 
 module.exports = {
   chartHash, readingKey, wholeReading,
-  extract, cleanDate, cleanTime, predictionContext, streamPrediction, fallbackReading, periodOf, currentDasha,
+  extract, readDocument, cleanDate, cleanTime, predictionContext, streamPrediction, fallbackReading, periodOf, currentDasha,
   RANGES, CATEGORIES, LANGUAGES, EXTRACT_SCHEMA, _setModel,
 };

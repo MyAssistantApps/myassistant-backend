@@ -276,6 +276,52 @@ async function routeTests() {
     ] };
   });
 
+  await atest("read: a horoscope photo → its birth details; the photo reaches the model", async () => {
+    replyImpl = async (messages, opts) => {
+      assert.strictEqual(messages.length, 1);
+      assert.strictEqual(messages[0].images.length, 1, "the photo is sent");
+      assert.strictEqual(messages[0].images[0].mime, "image/jpeg");
+      assert.ok(Buffer.isBuffer(messages[0].images[0].data));
+      assert.match(opts.system, /janam kundli/);
+      assert.ok(opts.json && opts.schema, "asks for JSON with a schema");
+      return { reply: JSON.stringify({ name: "Asha", date: "2004-03-14", time: "06:30", timeStatus: "exact", place: "Udupi", gender: "", followUp: "" }) };
+    };
+    const fd = new FormData();
+    fd.append("file", new Blob([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3])], { type: "image/jpeg" }), "kundli.jpg");
+    const r = await fetch(base + "/jyotish/read", { method: "POST", headers: { "X-Test-User": "1" }, body: fd });
+    const j = await r.json();
+    assert.strictEqual(r.status, 200, JSON.stringify(j));
+    assert.strictEqual(j.complete, true);
+    assert.deepStrictEqual(j.fields, { name: "Asha", date: "2004-03-14", time: "06:30", timeStatus: "exact", place: "Udupi", gender: null });
+    assert.strictEqual(j.places.length, 2);
+  });
+
+  await atest("read: an unreadable page asks what is missing; a PDF is accepted", async () => {
+    replyImpl = async (messages) => {
+      assert.strictEqual(messages[0].images[0].mime, "application/pdf");
+      return { reply: JSON.stringify({ name: "", date: "1990-08-15", time: "", timeStatus: "not_given", place: "", gender: "", followUp: "" }) };
+    };
+    const fd = new FormData();
+    fd.append("file", new Blob([Buffer.from("%PDF-1.4 test")], { type: "application/pdf" }), "kundli.pdf");
+    const r = await fetch(base + "/jyotish/read", { method: "POST", headers: { "X-Test-User": "1" }, body: fd });
+    const j = await r.json();
+    assert.strictEqual(r.status, 200, JSON.stringify(j));
+    assert.strictEqual(j.complete, false);
+    assert.strictEqual(j.fields.date, "1990-08-15");
+    assert.ok(j.followUp, "says what is missing");
+  });
+
+  await atest("read: no file, or not a photo or PDF, is refused before the model", async () => {
+    const before = replyCalls;
+    const r1 = await fetch(base + "/jyotish/read", { method: "POST", headers: { "X-Test-User": "1" }, body: new FormData() });
+    assert.strictEqual(r1.status, 400);
+    const fd = new FormData();
+    fd.append("file", new Blob(["hello"], { type: "text/plain" }), "notes.txt");
+    const r2 = await fetch(base + "/jyotish/read", { method: "POST", headers: { "X-Test-User": "1" }, body: fd });
+    assert.strictEqual(r2.status, 415);
+    assert.strictEqual(replyCalls, before, "the model is never asked");
+  });
+
   await atest("extract: full details → complete, fields, places", async () => {
     replyImpl = async (messages, opts) => {
       assert.ok(opts.json && opts.schema, "asks for JSON with a schema");
