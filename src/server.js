@@ -436,6 +436,9 @@ app.use("/shopping", appAuth, shopping.limiter, shopping.router);
 // chat onboarding, a local sidereal chart, readings from its data (src/jyotish).
 const jyotish = require("./jyotish");
 app.use("/jyotish", appAuth, jyotish.limiter, jyotish.router);
+// PRICE COMPARE PHOTOS (2026-11-24) — real product photos by name for the
+// results grid and product page (src/pricecompare/photos.js).
+app.use("/price", appAuth, perUserLimit, require("./pricecompare/photos").router);
 
 // CONNECTED APPS — THE MY ASSISTANT API (2026-10-14, src/platform). The
 // apps a user builds reach THEIR assistant with an app key (mya_…): /v1 is
@@ -618,6 +621,14 @@ require("./db")
       require("./quotecards/service").start();
     } catch (e) {
       console.error("  quote cards failed to start:", e.message);
+    }
+
+    // TODAY'S HOROSCOPE — all twelve signs, written once a day for everyone
+    // and renewed at 4 AM India time (src/jyotish/daily.js). Background only.
+    try {
+      require("./jyotish/daily").start();
+    } catch (e) {
+      console.error("  jyotish daily failed to start:", e.message);
     }
 
     // The durable job queue: document indexing and user-scheduled tasks

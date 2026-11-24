@@ -21,6 +21,7 @@ const engine = require("./engine");
 const geo = require("./geo");
 const jai = require("./ai");
 const store = require("./store");
+const daily = require("./daily");
 
 const DISCLAIMER = "For entertainment and self-reflection only.";
 const MAX_BODY = 32 * 1024;
@@ -127,6 +128,18 @@ router.post("/read", (req, res, next) => readUpload.single("file")(req, res, (er
   } catch (e) {
     console.warn("jyotish/read failed:", e.message);
     fail(res, 502, "ai_unavailable", "Unable to read the horoscope right now. You can fill in the details instead.");
+  }
+});
+
+// TODAY'S HOROSCOPE, ALL TWELVE SIGNS (2026-11-24): the Jyotish card's
+// carousel. The same set for everyone, written once a day (daily.js).
+router.get("/today", async (req, res) => {
+  if (!uid(req, res)) return;
+  try {
+    res.json(await daily.today());
+  } catch (e) {
+    console.warn("jyotish/today failed:", e.message);
+    fail(res, 502, "today_unavailable", "Unable to load today's horoscope right now. Please try again.");
   }
 });
 
