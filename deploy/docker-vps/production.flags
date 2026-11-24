@@ -32,6 +32,10 @@ BOLNA_API_KEY=<secret>
 BOLNA_FROM_NUMBER=+917965860041
 BOLNA_AGENT_ID=5f68c977-d156-41f9-ab97-a505c34f346b
 BOLNA_AGENT_ID_MALE=cb752bce-9896-44ff-9442-3f54f7b22955
+# Live flight and hotel prices (2026-11-24): Google Flights / Google Hotels
+# via SerpApi — the app's /flights/search and /hotels/search, the
+# search_flights voice tool and fare watch. Free plan: 250 searches a month.
+SERPAPI_KEY=<secret>
 # Security hardening (2026-11-15) — not set on the server, so the code
 # defaults apply: SPEND_DAILY_USD_GLOBAL=40, SPEND_DAILY_USD_USER=3,
 # REALTIME_DAILY_SESSIONS_USER=150, LOGIN_MAX_FAILS=10. Set them in the
