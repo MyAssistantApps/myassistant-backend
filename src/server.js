@@ -334,6 +334,10 @@ app.use("/messages", appAuth, require("./routes/messages"));
 app.use("/feedback", appAuth, perUserLimit, require("./feedback/routes"));
 // A cab booked by voice: its status for the Home strip, and Cancel.
 app.use("/rides", appAuth, perUserLimit, require("./rides/routes"));
+// Real flight results for the app's flight search (Google Flights via SerpApi).
+app.use("/flights", appAuth, perUserLimit, require("./routes/flights"));
+// Real hotel prices for the app's Hotels screen (Google Hotels via SerpApi).
+app.use("/hotels", appAuth, perUserLimit, require("./routes/hotels"));
 // Orders placed by voice (food, groceries, medicines, parcels).
 app.use("/orders", appAuth, perUserLimit, require("./orders/routes"));
 // Link your Uber / Swiggy account (accounts/service.js): the sign-in

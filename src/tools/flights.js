@@ -154,4 +154,111 @@ const BACKENDS = {
   },
 };
 
-module.exports = { search, provider, resolveAirport, CITY_IATA };
+/* ------------- The app's flight results (2026-11-24) ------------- */
+
+const CABIN = { economy: "1", premium: "2", premiumEconomy: "2", business: "3", first: "4" };
+
+/** "2026-11-10 06:05" → "06:05". */
+const hhmm = (t) => (String(t || "").match(/(\d{1,2}):(\d{2})\s*$/) || []).slice(1, 3).map((x) => x.padStart(2, "0")).join(":");
+
+/** Days between two "YYYY-MM-DD hh:mm" stamps (the +1 on a red-eye). */
+function dayOffset(dep, arr) {
+  const d = (x) => Date.parse(String(x || "").slice(0, 10));
+  const a = d(dep), b = d(arr);
+  return Number.isFinite(a) && Number.isFinite(b) ? Math.max(0, Math.round((b - a) / 86400000)) : 0;
+}
+
+/**
+ * One SerpApi Google Flights answer as the app's results list (the same
+ * JSON its FlightFares.parse reads): each flight with its real times, stops
+ * and price, the Google Flights page to book from, and Google's own read on
+ * whether the price is low or high. Pure, for tests.
+ */
+function toAppJson(j, { from, to }) {
+  const link = String(j?.search_metadata?.google_flights_url || "");
+  const all = [...(j?.best_flights || []), ...(j?.other_flights || [])];
+  const flights = all
+    .map((o) => {
+      const seg = o.flights || [];
+      const first = seg[0] || {};
+      const last = seg[seg.length - 1] || {};
+      const price = Number(o.price);
+      if (!first.airline || !Number.isFinite(price) || price <= 0) return null;
+      return {
+        airline: first.airline,
+        flightNo: first.flight_number || "",
+        from: first.departure_airport?.id || from,
+        to: last.arrival_airport?.id || to,
+        depart: hhmm(first.departure_airport?.time),
+        arrive: hhmm(last.arrival_airport?.time),
+        arriveDayOffset: dayOffset(first.departure_airport?.time, last.arrival_airport?.time),
+        durationMin: Number(o.total_duration) || 0,
+        stops: Math.max(seg.length - 1, 0),
+        via: (o.layovers || []).map((l) => l.id).filter(Boolean),
+        fares: [{ store: "Google Flights", price, url: link.startsWith("https://") ? link : "" }],
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 15);
+  const pi = j?.price_insights || {};
+  const range = Array.isArray(pi.typical_price_range) ? pi.typical_price_range : [];
+  const fmt = (n) => `₹${Number(n).toLocaleString("en-IN")}`;
+  const advice = pi.price_level
+    ? `Google Flights rates prices on this route as ${pi.price_level} right now` +
+      (range.length === 2 ? `; they are usually ${fmt(range[0])}–${fmt(range[1])}.` : ".")
+    : "";
+  return { ok: true, provider: "google_flights", live: true, flights, nearbyDates: [], advice, deals: [] };
+}
+
+/**
+ * The app's flight search: real Google Flights results through SerpApi,
+ * kept 20 minutes in the shared search cache so a popular route costs one
+ * search, not one per user (the plan has a monthly quota).
+ * {ok:false, configured:false} without a key — the app then says its own
+ * fares are estimates.
+ */
+async function searchForApp({ from, to, date, adults = 1, children = 0, infants = 0, cabin = "economy", nonStop = false }) {
+  if (!process.env.SERPAPI_KEY) return { ok: false, configured: false, error: "Flight search is not configured on the server." };
+  const o = resolveAirport(from), d = resolveAirport(to);
+  if (!o || !d) return { ok: false, error: "Choose the airports from the list." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ""))) return { ok: false, error: "Choose a travel date." };
+  const a = Math.min(Math.max(Number(adults) || 1, 1), 9);
+  const c = Math.min(Math.max(Number(children) || 0, 0), 8);
+  const i = Math.min(Math.max(Number(infants) || 0, 0), a);
+  const cls = CABIN[cabin] || "1";
+  const cache = require("./searchCache");
+  const shape = `flights|${o}|${d}|${date}|${a}|${c}|${i}|${cls}|${nonStop ? 1 : 0}`;
+  const hit = await cache.get(shape);
+  if (hit) return hit;
+  const u = new URL("https://serpapi.com/search.json");
+  u.searchParams.set("engine", "google_flights");
+  u.searchParams.set("departure_id", o);
+  u.searchParams.set("arrival_id", d);
+  u.searchParams.set("outbound_date", date);
+  u.searchParams.set("type", "2"); // one way
+  u.searchParams.set("adults", String(a));
+  if (c) u.searchParams.set("children", String(c));
+  if (i) u.searchParams.set("infants_on_lap", String(i));
+  u.searchParams.set("travel_class", cls);
+  if (nonStop) u.searchParams.set("stops", "1"); // non-stop only
+  u.searchParams.set("currency", "INR");
+  u.searchParams.set("hl", "en");
+  u.searchParams.set("gl", "in");
+  u.searchParams.set("api_key", process.env.SERPAPI_KEY);
+  let j;
+  try {
+    const r = await fetch(u, { signal: AbortSignal.timeout(25_000) });
+    j = await r.json().catch(() => ({}));
+    if (!r.ok || j.error) {
+      if (/no results/i.test(String(j.error || ""))) return { ok: true, provider: "google_flights", live: true, flights: [], nearbyDates: [], advice: "", deals: [] };
+      return { ok: false, error: `The flight search did not answer (${r.status}). Please try again.` };
+    }
+  } catch (e) {
+    return { ok: false, error: "The flight search timed out. Please try again." };
+  }
+  const out = toAppJson(j, { from: o, to: d });
+  await cache.put(shape, `${o}-${d} ${date}`, out, true);
+  return out;
+}
+
+module.exports = { search, searchForApp, toAppJson, provider, resolveAirport, CITY_IATA };
