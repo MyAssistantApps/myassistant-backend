@@ -35,6 +35,19 @@ webhooks.post("/webhook", async (req, res) => {
   // itself is idempotent (it only fires on a real status change).
   res.json({ ok: true });
 
+  // WALLET TOP-UPS (src/wallet): payment.captured / order.paid for a wallet
+  // order credits it, once. Every verified delivery is recorded by
+  // Razorpay's event id, so a retried delivery is not processed twice; a
+  // delivery without one is keyed by a hash of its exact bytes.
+  try {
+    const eventId = req.get("X-Razorpay-Event-Id") ||
+      `sha256:${require("crypto").createHash("sha256").update(raw).digest("hex")}`;
+    await require("../wallet/service").handleEvent(req.body || {}, eventId);
+  } catch (e) {
+    // The reconcile job (wallet/jobs.js) still credits a captured top-up.
+    console.error("wallet webhook error:", e.message || e);
+  }
+
   try {
     const row = await payments.applyWebhook(req.body || {});
     if (row) await payments.notifyPaid(row);

@@ -165,6 +165,8 @@ const USER_TABLES = [
   // nothing left that it covers.
   ["studio_consent", "user_id"],
   ["chat_group_members", "user_id"], // what they SAID in groups: see SHARED_TABLES
+  ["wallet_pins", "user_id"], // the wallet PIN's hash
+  ["referral_codes", "user_id"], // their own referral code
   ["chat_prefs", "user_id"], // their own mute / clear-chat settings
   ["chat_hidden_messages", "user_id"],
   // Momentum (2026-09-25): Today's 3, habits and their ticks, focus sessions.
@@ -268,6 +270,16 @@ const SHARED_TABLES = {
   // rows stay, so the totals stay right, but are no longer theirs —
   // user_id is cleared, which leaves nothing that points back at them.
   ai_spend: "user_id",
+  // 2026-11-22: THE WALLET (src/wallet) is a double-entry ledger and a set
+  // of financial records: deleting a person's rows would unbalance it and
+  // destroy records the law asks us to keep. Their rows stay with user_id
+  // cleared — amounts intact, nothing pointing back at them — and their
+  // accounts are closed. (Phase 2 refunds unspent cash before this runs.)
+  wallet_accounts: "user_id",
+  wallet_transactions: "user_id",
+  wallet_topups: "user_id",
+  wallet_refunds: "user_id",
+  wallet_bonus_lots: "user_id",
 };
 
 /**
@@ -495,6 +507,13 @@ async function deleteUserEverywhere(userId, { reason = "" } = {}) {
   // 1) BEFORE the transaction: what needs the rows to still exist.
   report.revoked.google = await revokeGoogle(uid);
   report.revoked.mcpConnections = await closeMcp(uid, cols);
+  // The wallet's unspent cash goes back to the payments it came from before
+  // the account closes (wallet/refunds.js). Best effort: what cannot be
+  // refunded stays in the closed ledger for support.
+  if (cols.has("wallet_topups.user_id")) {
+    report.revoked.walletRefund = await require("../wallet/refunds").refundAllOnErase(uid)
+      .catch((e) => ({ error: String(e.message || e).slice(0, 200) }));
+  }
   // A call still open would carry on (review, 2026-09-25): the live
   // socket checks the account once, when it opens, so a user deleted
   // mid-call kept talking to the assistant, and every turn after this
@@ -583,6 +602,28 @@ async function deleteUserEverywhere(userId, { reason = "" } = {}) {
     if (cols.has("ai_spend.user_id")) {
       const r = await client.query(`UPDATE ai_spend SET user_id = NULL WHERE user_id = $1`, [uid]);
       count("ai_spend (unlinked)", r.rowCount);
+    }
+    // The wallet's ledger stays whole; it just stops pointing at them
+    // (SHARED_TABLES). Accounts are closed first, so nothing can move on
+    // them afterwards.
+    if (cols.has("wallet_accounts.user_id")) {
+      const a = await client.query(
+        `UPDATE wallet_accounts SET status = 'closed', user_id = NULL, updated_at = $2 WHERE user_id = $1`,
+        [uid, Date.now()]);
+      count("wallet_accounts (closed, unlinked)", a.rowCount);
+    }
+    for (const t of ["wallet_transactions", "wallet_topups", "wallet_refunds", "wallet_bonus_lots"]) {
+      if (cols.has(`${t}.user_id`)) {
+        const r = await client.query(`UPDATE ${q(t)} SET user_id = NULL WHERE user_id = $1`, [uid]);
+        count(`${t} (unlinked)`, r.rowCount);
+      }
+    }
+    // Referrals link two people: either side leaving clears only their
+    // own link, so the other person's history keeps its row.
+    if (cols.has("referrals.referee_user_id")) {
+      const a = await client.query(`UPDATE referrals SET referee_user_id = NULL, device_hash = '' WHERE referee_user_id = $1`, [uid]);
+      const b = await client.query(`UPDATE referrals SET referrer_user_id = NULL WHERE referrer_user_id = $1`, [uid]);
+      count("referrals (unlinked)", a.rowCount + b.rowCount);
     }
     if (cols.has("chat_group_messages.deleted")) {
       const r = await client.query(
@@ -1026,6 +1067,34 @@ router.get("/export", async (req, res) => {
       )).map(({ from_user_id: _a, from_document_id: _b, ...row }) => redactRow(row));
     } catch (e) {
       data.agent_messages_received = { error: "could not read: " + e.message };
+    }
+  }
+  // THEIR WALLET: SHARED_TABLES, so not in the loop. Balances, every
+  // transaction and every top-up (Razorpay ids, amounts, status).
+  if (cols.has("wallet_accounts.user_id")) {
+    try {
+      data.wallet = {
+        accounts: (await query(
+          `SELECT kind, balance_paise, status, created_at FROM wallet_accounts WHERE user_id = $1 ORDER BY id`, [uid])),
+        transactions: (await query(
+          `SELECT id, type, status, amount_paise, currency, title, reference_type, reference_id, created_at
+             FROM wallet_transactions WHERE user_id = $1 ORDER BY created_at`, [uid])),
+        topups: (await query(
+          `SELECT id, amount_paise, currency, status, method, refunded_paise, razorpay_order_id, razorpay_payment_id,
+                  created_at, credited_at FROM wallet_topups WHERE user_id = $1 ORDER BY created_at`, [uid])),
+        refunds: (await query(
+          `SELECT id, amount_paise, status, razorpay_refund_id, created_at FROM wallet_refunds
+            WHERE user_id = $1 ORDER BY created_at`, [uid])),
+        bonus_lots: (await query(
+          `SELECT amount_paise, remaining_paise, expires_at, created_at FROM wallet_bonus_lots
+            WHERE user_id = $1 ORDER BY created_at`, [uid])),
+        referral_used: (await query(
+          `SELECT code, status, created_at FROM referrals WHERE referee_user_id = $1`, [uid])),
+        referrals_made: (await query(
+          `SELECT status, referrer_reward_paise, created_at FROM referrals WHERE referrer_user_id = $1 ORDER BY created_at`, [uid])),
+      };
+    } catch (e) {
+      data.wallet = { error: "could not read: " + e.message };
     }
   }
   // What they wrote in group chats: SHARED_TABLES, so not in the loop.

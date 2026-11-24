@@ -304,6 +304,21 @@ const paymentRoutes = require("./payments/routes");
 app.use("/payments", paymentRoutes.webhooks);
 app.use("/payments", appAuth, paymentRoutes.router);
 
+// WALLET — a closed-loop rupee wallet on a double-entry ledger, topped up
+// through Razorpay (src/wallet; credited only after Razorpay confirms the
+// payment, through the signed webhook above or a server-side fetch).
+app.use("/wallet", appAuth, require("./wallet/routes"));
+// REFERRALS — codes, applying one, history (signed in), and the public
+// share link /r/<code> → the Play Store with the code as install referrer.
+{
+  const referrals = require("./wallet/referrals");
+  const walletSecurity = require("./wallet/security");
+  app.use("/referrals", appAuth, (req, res, next) => (walletSecurity.allowed(req.user?.sub)
+    ? next()
+    : res.status(403).json({ error: "not_available", message: "Referrals are not available yet." })), referrals.router);
+  app.use("/r", referrals.publicRouter);
+}
+
 // MEETINGS — record or upload, get back decisions, action items and a
 // drafted follow-up. The user's own action items enter the commitment
 // tracker so they are nudged before they slip.
@@ -319,6 +334,10 @@ app.use("/messages", appAuth, require("./routes/messages"));
 app.use("/feedback", appAuth, perUserLimit, require("./feedback/routes"));
 // A cab booked by voice: its status for the Home strip, and Cancel.
 app.use("/rides", appAuth, perUserLimit, require("./rides/routes"));
+// Real flight results for the app's flight search (Google Flights via SerpApi).
+app.use("/flights", appAuth, perUserLimit, require("./routes/flights"));
+// Real hotel prices for the app's Hotels screen (Google Hotels via SerpApi).
+app.use("/hotels", appAuth, perUserLimit, require("./routes/hotels"));
 // Orders placed by voice (food, groceries, medicines, parcels).
 app.use("/orders", appAuth, perUserLimit, require("./orders/routes"));
 // Link your Uber / Swiggy account (accounts/service.js): the sign-in
@@ -343,6 +362,10 @@ app.use("/email", appAuth, require("./routes/email"));
 // The X-Admin-Key routes: 10 tries per 10 minutes per IP (security
 // review 2026-10-09) — the panel's login was throttled, these were not.
 const adminKeyLimit = rateLimit({ windowMs: 600_000, max: 10, standardHeaders: true });
+// Wallet support tools (src/wallet/admin.js: same ADMIN_KEY check, every
+// action reasoned and audited), mounted first with a limit that fits a
+// support session; a wrong key still answers 404.
+app.use("/admin/wallet", rateLimit({ windowMs: 600_000, max: 60, standardHeaders: true }), require("./wallet/admin"));
 app.use("/admin", adminKeyLimit, require("./routes/admin"));
 
 // Home's weather card and the Calendar extras.
@@ -436,6 +459,9 @@ app.use("/shopping", appAuth, shopping.limiter, shopping.router);
 // chat onboarding, a local sidereal chart, readings from its data (src/jyotish).
 const jyotish = require("./jyotish");
 app.use("/jyotish", appAuth, jyotish.limiter, jyotish.router);
+// PRICE COMPARE PHOTOS (2026-11-24) — real product photos by name for the
+// results grid and product page (src/pricecompare/photos.js).
+app.use("/price", appAuth, perUserLimit, require("./pricecompare/photos").router);
 
 // CONNECTED APPS — THE MY ASSISTANT API (2026-10-14, src/platform). The
 // apps a user builds reach THEIR assistant with an app key (mya_…): /v1 is
@@ -612,12 +638,28 @@ require("./db")
       console.error("  proactive scheduler failed to start:", e.message);
     }
 
+    // WALLET — credit any captured top-up whose webhook was lost (every
+    // 10 min) and audit the ledger + Razorpay once a day. Background only.
+    try {
+      require("./wallet/jobs").start();
+    } catch (e) {
+      console.error("  wallet jobs failed to start:", e.message);
+    }
+
     // THE DAY'S QUOTE — today's and tomorrow's line and pictures, made
     // once for everyone (src/quotecards). Background only.
     try {
       require("./quotecards/service").start();
     } catch (e) {
       console.error("  quote cards failed to start:", e.message);
+    }
+
+    // TODAY'S HOROSCOPE — all twelve signs, written once a day for everyone
+    // and renewed at 4 AM India time (src/jyotish/daily.js). Background only.
+    try {
+      require("./jyotish/daily").start();
+    } catch (e) {
+      console.error("  jyotish daily failed to start:", e.message);
     }
 
     // The durable job queue: document indexing and user-scheduled tasks
