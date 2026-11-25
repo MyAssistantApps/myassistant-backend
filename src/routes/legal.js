@@ -2,6 +2,9 @@
  * PUBLIC LEGAL PAGES — no auth, served at:
  *   GET /legal/privacy   Privacy Policy  (the URL Play Store asks for)
  *   GET /legal/terms     Terms & Conditions
+ *   GET /legal/delete-account   How to delete an account and its data,
+ *                        with or without the app (the "account deletion
+ *                        URL" Google Play's Data safety form asks for)
  *
  * Content is tailored to what the app ACTUALLY collects (voice, contacts,
  * location, documents, screen-time, finance ledger) and the rights the
@@ -48,7 +51,7 @@ function shell(title, body) {
   <div class="brand">${ENTITY}</div>
   <h1>${title}</h1>
   <div class="meta">Effective: ${EFFECTIVE} · Contact: <a href="mailto:${CONTACT}">${CONTACT}</a></div>
-  <nav class="tabs"><a href="/legal/privacy">Privacy Policy</a><a href="/legal/terms">Terms &amp; Conditions</a></nav>
+  <nav class="tabs"><a href="/legal/privacy">Privacy Policy</a><a href="/legal/terms">Terms &amp; Conditions</a><a href="/legal/delete-account">Delete Your Account</a></nav>
 </header>
 ${body}
 <footer>© ${new Date().getFullYear()} ${ENTITY}. Questions or requests: <a href="mailto:${CONTACT}">${CONTACT}</a>.</footer>
@@ -182,6 +185,50 @@ router.get("/terms", (_req, res) => {
   res.setHeader("Content-Security-Policy",
     "default-src 'self'; style-src 'unsafe-inline' https:; font-src https: data:;");
   res.send(shell("Terms & Conditions", TERMS));
+});
+
+// What a person sees who wants their account gone and may no longer have
+// the app (2026-11-25). Google Play requires this page to be public; it
+// states only what routes/privacy.js deleteUserEverywhere() really does.
+const DELETE_ACCOUNT = `
+<p>You can delete your ${ENTITY} account and the data held with it at any time. Deletion is permanent and cannot be undone.</p>
+
+<h2>1. In the app</h2>
+<ul>
+<li>Open ${ENTITY} and go to <strong>You</strong>, then <strong>Account</strong>.</li>
+<li>To keep a copy first, tap <strong>Export My Data</strong>.</li>
+<li>Tap <strong>Delete Account</strong>, then confirm with <strong>Delete Permanently</strong>.</li>
+</ul>
+<p>The account is erased immediately and you are signed out.</p>
+
+<h2>2. Without the app</h2>
+<p>If you have uninstalled the app or cannot sign in, write to <a href="mailto:${CONTACT}?subject=Delete%20my%20account">${CONTACT}</a> from the email address of your account, or state the verified phone number of the account, with the subject "Delete my account". We confirm that the request is yours, erase the account within 30 days and tell you when it is done.</p>
+
+<h2>3. What is deleted</h2>
+<ul>
+<li>Your account details: name, email address, verified phone number and sign-in records.</li>
+<li>Your conversations, the assistant's memory of you, reminders and messages.</li>
+<li>Documents, photos and files you saved, and any voice recordings.</li>
+<li>Contacts you synchronised, finance entries, and professional records such as clients, appointments and invoices.</li>
+<li>Connections to other services (for example Google or linked accounts) and their access tokens.</li>
+<li>Any public page you published.</li>
+</ul>
+
+<h2>4. What may be kept</h2>
+<ul>
+<li>Backups of the database are kept for a limited time and then overwritten. A deleted account can remain inside a backup until that backup is overwritten; backups are used only to restore the service after a failure.</li>
+<li>Payment and order records are financial records and are kept for accounting, for as long as the law requires.</li>
+<li>Messages you sent to other people remain in their accounts.</li>
+</ul>
+
+<h2>5. Deleting some data without deleting the account</h2>
+<p>In the app you can delete single items (a document, a memory, a reminder, a finance entry) at any time, and turning off "Help improve the assistant" deletes your voice recordings straight away. For anything else, write to <a href="mailto:${CONTACT}">${CONTACT}</a>.</p>
+`;
+
+router.get("/delete-account", (_req, res) => {
+  res.setHeader("Content-Security-Policy",
+    "default-src 'self'; style-src 'unsafe-inline' https:; font-src https: data:;");
+  res.send(shell("Delete Your Account", DELETE_ACCOUNT));
 });
 
 router.get("/", (_req, res) => res.redirect("/legal/privacy"));

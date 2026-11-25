@@ -324,6 +324,66 @@ function spendDb({ global = 0, user = 0, sessions = 0, fail = false } = {}) {
     assert.ok(!/0123456789abcdef0123456789abcdef/.test(redactPath("/agent-call/bolna/0123456789abcdef0123456789abcdef/x")));
   });
 
+  // ---- launch readiness, 2026-11-25 ----
+  await atest("the general limit counts a signed-in request against its ACCOUNT; a forged or scoped token stays on the address", async () => {
+    const { rateKey } = require("../src/infra/rateKey");
+    const key = require("../src/infra/jwtKey").sessionKey();
+    const req = (auth, ip = "203.0.113.9") => ({ ip, get: (n) => (String(n).toLowerCase() === "authorization" ? auth : undefined) });
+    const mine = jwt.sign({ uid: 41 }, key, { algorithm: "HS256", expiresIn: "1h" });
+    assert.strictEqual(rateKey(req(`Bearer ${mine}`)), "u:41");
+    assert.strictEqual(rateKey(req(`Bearer ${mine}`, "198.51.100.7")), "u:41", "the same account from another address is one bucket");
+    const forged = jwt.sign({ uid: 41 }, "not-our-key-not-our-key-not-our-key-0001", { algorithm: "HS256" });
+    assert.strictEqual(rateKey(req(`Bearer ${forged}`)), "ip:203.0.113.9", "a token we did not sign cannot pick a bucket");
+    const expired = jwt.sign({ uid: 41, exp: Math.floor(Date.now() / 1000) - 60 }, key, { algorithm: "HS256" });
+    assert.strictEqual(rateKey(req(`Bearer ${expired}`)), "ip:203.0.113.9");
+    const scoped = jwt.sign({ uid: 41, scope: "console" }, key, { algorithm: "HS256" });
+    assert.strictEqual(rateKey(req(`Bearer ${scoped}`)), "ip:203.0.113.9");
+    assert.strictEqual(rateKey(req(undefined)), "ip:203.0.113.9");
+  });
+
+  await atest("phones behind one address no longer share one limit, and health checks are never counted", async () => {
+    const rateLimit = require("express-rate-limit");
+    const { rateKey } = require("../src/infra/rateKey");
+    const key = require("../src/infra/jwtKey").sessionKey();
+    const app = express();
+    const notCounted = (r) => r.path === "/health";
+    app.use(rateLimit({ windowMs: 60_000, max: 3, keyGenerator: rateKey, skip: notCounted }));
+    app.get("/health", (_q, r) => r.json({ ok: true }));
+    app.get("/x", (_q, r) => r.json({ ok: true }));
+    const s = await serve(app);
+    const get = (path, token) => realFetch(`${s.url}${path}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+    try {
+      const a = jwt.sign({ uid: 1 }, key, { algorithm: "HS256" });
+      const b = jwt.sign({ uid: 2 }, key, { algorithm: "HS256" });
+      for (let i = 0; i < 3; i++) assert.strictEqual((await get("/x", a)).status, 200);
+      assert.strictEqual((await get("/x", a)).status, 429, "account 1 is over its own limit");
+      assert.strictEqual((await get("/x", b)).status, 200, "account 2, same address, is not");
+      assert.strictEqual((await get("/x")).status, 200, "nor is someone not signed in yet");
+      for (let i = 0; i < 10; i++) assert.strictEqual((await get("/health", a)).status, 200);
+    } finally { await s.close(); }
+  });
+
+  await atest("pictures are made on a model the account has (gpt-image-1 no longer exists)", async () => {
+    const openai = require("../src/services/ai/openai");
+    const before = [process.env.OPENAI_IMAGE_MODEL, process.env.OPENAI_IMAGE_EDIT_MODEL];
+    delete process.env.OPENAI_IMAGE_MODEL; delete process.env.OPENAI_IMAGE_EDIT_MODEL;
+    try {
+      assert.strictEqual(openai.models.image(), "gpt-image-1.5");
+      assert.strictEqual(openai.models.imageEdit(), "gpt-image-1.5");
+    } finally {
+      if (before[0] !== undefined) process.env.OPENAI_IMAGE_MODEL = before[0];
+      if (before[1] !== undefined) process.env.OPENAI_IMAGE_EDIT_MODEL = before[1];
+    }
+  });
+
+  await atest("after outside content, placing an order, booking a cab or sending a parcel asks first", async () => {
+    const src = require("fs").readFileSync(require("path").join(__dirname, "../src/tools/registry.js"), "utf8");
+    const list = src.slice(src.indexOf("const TAINT_SENSITIVE"), src.indexOf("]);", src.indexOf("const TAINT_SENSITIVE")));
+    for (const t of ["order_food", "order_groceries", "order_medicines", "book_ride", "send_parcel", "pay_by_upi", "place_phone_call"]) {
+      assert.ok(list.includes(`"${t}"`), `${t} is confirmed after outside content`);
+    }
+  });
+
   console.log(`\n${passed} passed${process.exitCode ? ", SOME FAILED" : ""}`);
   // Stray handles (pg pool, timers) must not keep the run alive.
   setTimeout(() => process.exit(process.exitCode || 0), 50).unref();

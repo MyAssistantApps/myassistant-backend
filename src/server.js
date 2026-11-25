@@ -155,7 +155,18 @@ app.use(require("./ops/spend").bind());
 // 60 was close enough that a fast talker hit 429s and the app silently
 // dropped to the robotic on-device voice. 240 keeps abuse out without
 // throttling real use.
-app.use(rateLimit({ windowMs: 60_000, max: 240, standardHeaders: true }));
+//
+// Counted per ACCOUNT when the request is signed in, per address otherwise
+// (infra/rateKey.js, 2026-11-25): per address alone, the phones behind one
+// carrier or office address shared a single 240 and locked each other —
+// and anyone signing up there — out. The liveness probes are not counted:
+// the app's "is the server up?" check read their 429 as "server down" and
+// probed again every 10 s, which kept the address blocked.
+const { rateKey } = require("./infra/rateKey");
+const notCounted = (req) => req.path === "/health" || req.path === "/health/ready";
+app.use(rateLimit({ windowMs: 60_000, max: 240, standardHeaders: true, keyGenerator: rateKey, skip: notCounted }));
+// A flood from one address is still refused, whatever accounts it holds.
+app.use(rateLimit({ windowMs: 60_000, max: 3000, standardHeaders: false, legacyHeaders: false, skip: notCounted }));
 
 // version: the git sha baked into the image (Dockerfile GIT_SHA), so the
 // pipeline can prove production runs the commit it just tested.
@@ -187,11 +198,21 @@ app.use("/app", require("./routes/appUpdate").router);
 // Only the credential routes count: /auth/me runs on every launch and
 // Indian carriers put many phones behind one address (CGNAT), so counting
 // it locked real users out at peak hours (product audit 2026-11-21).
+//
+// Two counts per address (2026-11-25): REFUSED attempts keep the tight 20
+// per 15 minutes that slows password guessing; all credential requests
+// together get 100, so a launch-day crowd behind one carrier address can
+// still sign up and sign in (20 for everything locked them out).
+const notCredential = (req) => req.path === "/me" || req.path === "/logout-all";
 app.use(
   "/auth",
   rateLimit({
     windowMs: 15 * 60_000, max: 20, standardHeaders: true,
-    skip: (req) => req.path === "/me" || req.path === "/logout-all",
+    skipSuccessfulRequests: true, skip: notCredential,
+  }),
+  rateLimit({
+    windowMs: 15 * 60_000, max: 100, standardHeaders: false, legacyHeaders: false,
+    skip: notCredential,
   }),
   authRoute
 );

@@ -44,7 +44,7 @@ async function waitForBoot() {
   await waitForBoot();
   console.log("✓ server boots, /health ok");
 
-  for (const p of ["/legal/privacy", "/legal/terms"]) {
+  for (const p of ["/legal/privacy", "/legal/terms", "/legal/delete-account"]) {
     const r = await get(p);
     if (r.status !== 200 || !/<h1>/.test(r.text)) {
       throw new Error(`${p} → ${r.status} (expected 200 with content)`);
