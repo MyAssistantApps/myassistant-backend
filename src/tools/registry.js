@@ -517,6 +517,10 @@ const TAINT_SENSITIVE = new Set([
   // (Bills by email review, 2026-09-27 — true for email_read and web
   // pages too). Outside content read in the last 10 minutes → a card.
   "schedule_task",
+  // Nor spend the owner's money or send things to an address (2026-11-25):
+  // a web page or an email read a minute ago must not place an order,
+  // book a cab or dispatch a parcel without a card.
+  "order_food", "order_groceries", "order_medicines", "book_ride", "send_parcel",
 ]);
 
 const isUntrustedSource = (tool) =>

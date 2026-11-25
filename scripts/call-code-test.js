@@ -112,6 +112,27 @@ const lastCode = () => calls[calls.length - 1].code;
     assert.strictEqual((await cc.check(A, PHONE, good)).ok, false);
   });
 
+  await test("a burst of guesses sent at once still gets five tries, not one each", async () => {
+    // 2026-11-25: `tries` was read, compared, then incremented, so parallel
+    // guesses all saw "tries < 5". Each try is now claimed before comparing.
+    await db.run("DELETE FROM phone_call_codes WHERE user_id = $1", [A]);
+    await cc.start(A, PHONE);
+    const good = lastCode();
+    const guesses = [];
+    for (let i = 0; guesses.length < 40; i++) {
+      const g = String(100000 + i * 7919).slice(0, 6);
+      if (g !== good) guesses.push(g);
+    }
+    const results = await Promise.all(guesses.map((g) => cc.check(A, PHONE, g)));
+    assert.ok(results.every((r) => !r.ok));
+    const row = await db.one("SELECT tries FROM phone_call_codes WHERE user_id = $1 ORDER BY id DESC LIMIT 1", [A]);
+    assert.strictEqual(Number(row.tries), cc.MAX_TRIES, "no more than five tries were counted, and none were lost");
+    assert.strictEqual(results.filter((r) => /incorrect\. |Too many/.test(r.error)).length, 40);
+    assert.strictEqual(results.filter((r) => /The code is incorrect/.test(r.error)).length, cc.MAX_TRIES - 1,
+      "only the first five guesses were even compared");
+    assert.strictEqual((await cc.check(A, PHONE, good)).ok, false, "the right code is dead after the burst");
+  });
+
   await test("an expired code is refused", async () => {
     await db.run("DELETE FROM phone_call_codes WHERE user_id = $1", [A]);
     const t0 = Date.now();

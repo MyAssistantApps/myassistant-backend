@@ -499,7 +499,8 @@ async function sweepPatientRecalls() {
       });
       // The Calls row is agentCall.start()'s; a second one here was never
       // settled and stayed "in progress" beside it.
-      console.log(`recall: calling ${r.client_name} for user ${r.user_id} (recall ${r.id})`);
+      // Ids, never names: a patient's or client's name does not belong in a log (2026-11-25).
+      console.log(`recall: calling for user ${r.user_id} (recall ${r.id})`);
     } catch (e) {
       // A "failed" start already left (and settled) its own row.
       if (e?.code !== "failed") {
@@ -510,7 +511,7 @@ async function sweepPatientRecalls() {
           status: "failed", reason: String(e?.message || e?.code || "could not start the call"),
         })).catch(() => {});
       }
-      console.error(`recall call to ${r.client_name} failed to start:`, e?.message || e?.code);
+      console.error(`recall call (recall ${r.id}) failed to start:`, e?.message || e?.code);
     }
   }
   return placed;
@@ -568,9 +569,9 @@ async function sweepAppointmentReminders() {
           `If they cannot, say the clinic will call to find a new time.`,
         lang: null,
       });
-      console.log(`appointment: reminding ${a.patient_name} for user ${a.user_id} (appt ${a.id})`);
+      console.log(`appointment: reminding for user ${a.user_id} (appt ${a.id})`);
     } catch (e) {
-      console.error(`appointment reminder to ${a.patient_name} failed:`, e?.message || e?.code);
+      console.error(`appointment reminder (appt ${a.id}) failed:`, e?.message || e?.code);
     }
   }
 }
@@ -611,9 +612,9 @@ async function sweepHearingReminders() {
           `documents they were asked for. Do not discuss the case itself; if they have questions, say the advocate will call back.`,
         lang: null,
       });
-      console.log(`hearing: reminding ${h.client_name} for user ${h.user_id} (hearing ${h.id})`);
+      console.log(`hearing: reminding for user ${h.user_id} (hearing ${h.id})`);
     } catch (e) {
-      console.error(`hearing reminder to ${h.client_name} failed:`, e?.message || e?.code);
+      console.error(`hearing reminder (hearing ${h.id}) failed:`, e?.message || e?.code);
     }
   }
 }

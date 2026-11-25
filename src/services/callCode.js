@@ -218,12 +218,18 @@ async function check(uid, phone, code, { now = Date.now() } = {}) {
     [uid, phone, now]
   );
   if (!row) return { ok: false, error: "This code has expired. Please request a new call." };
-  if (Number(row.tries) >= MAX_TRIES) return { ok: false, error: "Too many incorrect codes have been entered. Please request a new call." };
+  // The try is CLAIMED before the code is compared (2026-11-25): reading
+  // `tries`, comparing, then adding one let a burst of parallel guesses all
+  // see "tries < 5" and turned five guesses into as many as the burst held.
+  const claim = await one(
+    "UPDATE phone_call_codes SET tries = tries + 1 WHERE id = $1 AND tries < $2 RETURNING tries",
+    [row.id, MAX_TRIES]
+  );
+  if (!claim) return { ok: false, error: "Too many incorrect codes have been entered. Please request a new call." };
   const want = Buffer.from(row.code_hash, "hex");
   const got = Buffer.from(hashCode(c, phone), "hex");
   if (want.length !== got.length || !crypto.timingSafeEqual(want, got)) {
-    await run("UPDATE phone_call_codes SET tries = tries + 1 WHERE id = $1", [row.id]);
-    const left = MAX_TRIES - Number(row.tries) - 1;
+    const left = MAX_TRIES - Number(claim.tries);
     return { ok: false, error: left > 0 ? `The code is incorrect. ${left} ${left === 1 ? "attempt" : "attempts"} remaining.` : "Too many incorrect codes have been entered. Please request a new call." };
   }
   const done = await one(

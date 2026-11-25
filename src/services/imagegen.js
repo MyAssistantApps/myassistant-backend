@@ -140,7 +140,7 @@ async function tryOpenAI(prompt, { shape, timeoutMs = 90_000 } = {}) {
     return { ...img, provider: `openai:${openai.models.image()}` };
   } catch (e) {
     console.warn("imagegen openai:", e.message);
-    if (e.status === 429) require("../ops/alerts").imageQuota(`gpt-image-1: 429`).catch(() => {});
+    if (e.status === 429) require("../ops/alerts").imageQuota(`${openai.models.image()}: 429`).catch(() => {});
     return null;
   }
 }

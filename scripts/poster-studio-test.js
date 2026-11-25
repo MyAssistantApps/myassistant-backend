@@ -330,12 +330,12 @@ function withEnv(vars, fn) {
       return json(200, { data: [{ b64_json: png.toString("base64") }] });
     };
     const img = await imagegen.generateImage("a festival of lights", { aspect: "poster" });
-    assert.strictEqual(seen.model, "gpt-image-1");
+    assert.strictEqual(seen.model, "gpt-image-1.5");
     assert.strictEqual(seen.body.size, "1024x1536", "a poster is a tall canvas");
     assert.strictEqual(seen.body.n, 1);
     assert.strictEqual(seen.headers.get("authorization"), "Bearer gem-key");
     assert.ok(!/key=/.test(seen.url), "no key in the URL");
-    assert.strictEqual(img.provider, "openai:gpt-image-1");
+    assert.strictEqual(img.provider, "openai:gpt-image-1.5");
     assert.ok(img.buffer.equals(png));
   }));
 

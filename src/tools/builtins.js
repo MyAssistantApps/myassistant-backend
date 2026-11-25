@@ -4355,10 +4355,9 @@ function registerBuiltins() {
       // while opening fine in the phone's browser.
       for (const c of scored.slice(0, 3)) {
         try {
-          const ac = new AbortController();
-          const t = setTimeout(() => ac.abort(), 4000);
-          const head = await fetch(c.u.href, { method: "HEAD", redirect: "follow", signal: ac.signal })
-            .finally(() => clearTimeout(t));
+          // safeFetch (2026-11-25): a search result's link is outside
+          // content and must not reach this server's own network.
+          const head = await safeFetch(c.u.href, { method: "HEAD" }, { timeoutMs: 4000 });
           const type = String(head.headers.get("content-type") || "");
           if (head.status === 404 || head.status === 410) continue;
           if (head.ok && /text\/html/i.test(type)) continue;

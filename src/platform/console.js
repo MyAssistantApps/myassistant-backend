@@ -167,16 +167,18 @@ auth.post("/verify", async (req, res) => {
     `SELECT * FROM platform_console_codes
       WHERE user_id=$1 AND used=false AND expires_at > $2 ORDER BY id DESC LIMIT 1`, [user.id, Date.now()]);
   if (!row) return bad();
-  if (row.tries >= MAX_TRIES) {
+  // The try is claimed BEFORE the compare (2026-11-25): read-compare-add
+  // let parallel guesses all pass "tries < MAX" (see services/callCode.js).
+  const claim = await one(
+    `UPDATE platform_console_codes SET tries = tries + 1 WHERE id=$1 AND tries < $2 RETURNING tries`,
+    [row.id, MAX_TRIES]);
+  if (!claim) {
     await run(`UPDATE platform_console_codes SET used=true WHERE id=$1`, [row.id]);
     return bad();
   }
   const want = Buffer.from(row.code_hash, "hex");
   const got = Buffer.from(hashCode(user.id, code), "hex");
-  if (want.length !== got.length || !crypto.timingSafeEqual(want, got)) {
-    await run(`UPDATE platform_console_codes SET tries = tries + 1 WHERE id=$1`, [row.id]);
-    return bad();
-  }
+  if (want.length !== got.length || !crypto.timingSafeEqual(want, got)) return bad();
   await run(`UPDATE platform_console_codes SET used=true WHERE id=$1`, [row.id]);
   if (user.status === "paused") return res.status(403).json({ error: "This account is paused." });
   try { require("../audit/log").record(user.id, "console.signin", "Signed in to the developer console (code from your phone)"); } catch (_) {}
