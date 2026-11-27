@@ -56,12 +56,19 @@ async function test(name, fn) {
     assert.strictEqual(service.rupees(10000000), "₹1,00,000");
   });
 
-  await test("a network's word for the state of a purchase", () => {
-    for (const w of ["pending", "new", "tracked", ""]) assert.strictEqual(service.statusOf(w), "pending", w);
+  await test("a network's word for the state of a purchase: whole words, and an unknown word confirms nothing", () => {
+    for (const w of ["pending", "new", "tracked", "", "in_process", "Pending Approval"]) assert.strictEqual(service.statusOf(w), "pending", w);
     for (const w of ["validated", "Approved", "confirmed", "payable", "paid"]) assert.strictEqual(service.statusOf(w), "confirmed", w);
     for (const w of ["rejected", "Cancelled", "declined", "invalid", "returned", "refunded"]) assert.strictEqual(service.statusOf(w), "rejected", w);
-    // "invalid" must not read as "valid".
-    assert.strictEqual(service.statusOf("invalid"), "rejected");
+    // Pieces of words used to match: each of these read as "confirmed".
+    for (const w of ["unpaid", "unapproved", "unsuccessful", "not approved", "approval pending", "invalidated"]) {
+      assert.notStrictEqual(service.statusOf(w), "confirmed", w);
+    }
+    assert.deepStrictEqual(service.readStatus("something-new"), { status: "pending", known: false });
+    assert.deepStrictEqual(service.readStatus("approved"), { status: "confirmed", known: true });
+    process.env.CASHBACK_STATUS_WORDS = JSON.stringify({ confirmed: ["credited"] });
+    assert.strictEqual(service.statusOf("Credited"), "confirmed", "a network's own word can be added");
+    delete process.env.CASHBACK_STATUS_WORDS;
   });
 
   await test("a report is read under the network's own field names", () => {
@@ -117,6 +124,9 @@ async function test(name, fn) {
     assert.strictEqual(routes._secretOk(""), false);
     env({ CASHBACK_HOOK_SECRET: "short" });
     assert.strictEqual(routes._secretOk("short"), false, "a weak secret is no secret");
+    env({ CASHBACK_HOOK_SECRET: "has spaces and symbols !! but is long enough to pass" });
+    assert.strictEqual(routes._secretOk("has spaces and symbols !! but is long enough to pass"), false,
+      "a secret the access log could not mask is no secret");
     const s = "a".repeat(40);
     env({ CASHBACK_HOOK_SECRET: s });
     assert.strictEqual(routes._secretOk(s), true);
@@ -234,6 +244,73 @@ async function test(name, fn) {
     await store.setTxnStatus(big.txn.id, "rejected", { note: "test over" });
   });
 
+  await test("a purchase held for a person is not released by a later report", async () => {
+    const c = await click(ravi);
+    const held = await report(c, "S1", 5000, "pending");
+    assert.deepStrictEqual([held.txn.review, held.txn.status], [true, "pending"]);
+    const before = await store.balance(ravi);
+    // The network says "approved" with no amounts at all.
+    const again = await service.recordConversion(
+      { network: "sandbox", networkTxnId: `${tag}-S1`, clickId: c, status: "confirmed" }, { notifyUser: false });
+    assert.deepStrictEqual([again.txn.status, again.txn.review], ["pending", true], "only a person confirms a held purchase");
+    assert.deepStrictEqual(await store.balance(ravi), before);
+    await store.setTxnStatus(held.txn.id, "rejected", { note: "test over" });
+  });
+
+  await test("a report moves a purchase one way only: a cancelled one is not brought back", async () => {
+    const c = await click(ravi);
+    await report(c, "S2", 60);
+    await report(c, "S2", 60, "rejected");
+    const back = await report(c, "S2", 60, "confirmed");
+    assert.strictEqual(back.txn.status, "rejected", "a late or replayed approval does not restore it");
+    assert.strictEqual(back.txn.review, true, "and a person is shown the attempt");
+    assert.match(back.txn.note, /after "rejected": not applied/);
+    assert.strictEqual(back.changed, false, "the user is told nothing");
+    // A stale "pending" after validation is just an old report: ignored quietly.
+    const c2 = await click(ravi);
+    await report(c2, "S3", 40, "confirmed");
+    const stale = await report(c2, "S3", 40, "pending");
+    assert.deepStrictEqual([stale.txn.status, stale.txn.review, stale.changed], ["confirmed", false, false]);
+    // Confirmed → rejected (a return after validation) is the one way back down.
+    assert.strictEqual((await report(c2, "S3", 40, "rejected")).txn.status, "rejected");
+  });
+
+  await test("two first reports arriving together make one row, and neither one's news is lost", async () => {
+    const c = await click(ravi);
+    const both = await Promise.all([report(c, "S4", 30, "pending"), report(c, "S4", 30, "confirmed")]);
+    assert.strictEqual(both.filter((b) => b.created).length, 1);
+    const rows = (await store.listTxns({ userId: ravi })).filter((t) => t.networkTxnId === `${tag}-S4`);
+    assert.strictEqual(rows.length, 1);
+    assert.strictEqual(rows[0].status, "confirmed");
+    await store.setTxnStatus(rows[0].id, "rejected", { note: "test over" });
+  });
+
+  await test("the store the network names decides; an unknown status word, network or absurd amount pays nobody", async () => {
+    env({ ...ON, AMAZON_ASSOCIATE_TAG: "ours-21" });
+    const c = await click(ravi, "myntra");
+    // Opened Myntra, but the purchase was at a store that never earns cashback.
+    const amazon = await report(c, "S5", 90, "pending", { merchantName: "Amazon" });
+    assert.deepStrictEqual([amazon.txn.merchant, amazon.txn.cashbackPaise, amazon.txn.review], ["amazon", 0, true]);
+    assert.match(amazon.txn.note, /opened myntra, bought at amazon/);
+    // Another earning store: judged by ITS rule (25% for Nykaa, set above), and looked at.
+    const c2 = await click(ravi, "myntra");
+    const nykaa = await report(c2, "S6", 80, "confirmed", { merchantName: "Nykaa" });
+    assert.deepStrictEqual([nykaa.txn.merchant, nykaa.txn.cashbackPaise, nykaa.txn.status, nykaa.txn.review],
+      ["nykaa", 2000, "pending", true]);
+    env(ON);
+    const c3 = await click(ravi);
+    const odd = await service.recordConversion(service.readReport("sandbox",
+      { subid: c3, transaction_id: `${tag}-S7`, commission: "50", status: "kinda-approved" }), { notifyUser: false });
+    assert.deepStrictEqual([odd.txn.status, odd.txn.review], ["pending", true]);
+    assert.match(odd.txn.note, /status word not recognised/);
+    await assert.rejects(report(c3, "S8", 10, "pending", { network: "made-up" }), /unknown network/);
+    await assert.rejects(report(c3, "S9", 20_000_000, "pending"), /out of range/);
+    // The click was on one network; a report from another is looked at.
+    const cross = await report(c3, "S10", 10, "confirmed", { network: "cuelinks" });
+    assert.deepStrictEqual([cross.txn.review, cross.txn.status], [true, "pending"]);
+    for (const t of await store.listTxns({ userId: ravi, review: true })) await store.setTxnStatus(t.id, "rejected", { note: "test over" });
+  });
+
   await test("with cashback switched off a purchase is still recorded, and nothing accrues", async () => {
     env({ CASHBACK_SANDBOX: "on" });
     const c = await click(ravi);
@@ -286,6 +363,40 @@ async function test(name, fn) {
     await store.setTxnStatus(first.id, "rejected", { note: "returned after payout" });
     b = await store.balance(asha);
     assert.strictEqual(b.availablePaise, 4000, "₹120 new − ₹80 clawed back");
+  });
+
+  await test("a withdrawal is not paid once its purchase has been cancelled", async () => {
+    const meena = await mkUser("meena");
+    const c = await click(meena);
+    await report(c, "M1", 300, "confirmed");
+    const p = await service.requestPayout(meena, { upiId: "meena.r@okaxis" });
+    assert.strictEqual(p.amountPaise, 30000);
+    // The order is returned after the request, before the owner pays.
+    await report(c, "M1", 300, "rejected");
+    await assert.rejects(service.decidePayout(p.id, { status: "paid", reference: "UTR-X" }), (e) => {
+      assert.ok(e instanceof store.PayoutError);
+      assert.strictEqual(e.code, "short");
+      return true;
+    });
+    assert.strictEqual((await store.listPayouts({ userId: meena }))[0].status, "requested", "nothing was marked paid");
+    const refused = await service.decidePayout(p.id, { status: "rejected", note: "order returned" });
+    assert.strictEqual(refused.status, "rejected");
+  });
+
+  await test("deleting the account closes an unpaid withdrawal and forgets its UPI ID; a paid one stays on record", async () => {
+    const dev = await mkUser("dev");
+    const c = await click(dev);
+    await report(c, "D1", 200, "confirmed");
+    const first = await service.requestPayout(dev, { upiId: "dev.k@okaxis" });
+    await service.decidePayout(first.id, { status: "paid", reference: "UTR-D1" });
+    const c2 = await click(dev);
+    await report(c2, "D2", 150, "confirmed");
+    const second = await service.requestPayout(dev, { upiId: "dev.k@okaxis" });
+    await store.onAccountErased(dev);
+    const rows = await store.listPayouts({ userId: dev });
+    const paid = rows.find((r) => r.id === first.id), open = rows.find((r) => r.id === second.id);
+    assert.deepStrictEqual([paid.status, paid.upiId], ["paid", "dev.k@okaxis"]);
+    assert.deepStrictEqual([open.status, open.upiId, open.note], ["rejected", "", "account deleted"]);
   });
 
   await test("what the phone sees: its own rows, never our commission or the network", async () => {
@@ -350,6 +461,13 @@ async function test(name, fn) {
       body: { subid: last.click_id, transaction_id: `${tag}-H1`, commission: "90", status: "validated" } });
     assert.deepStrictEqual([ok.status, ok.json.status, ok.json.id], [200, "confirmed", made.json.id]);
     assert.strictEqual((await call(`/cashback/sandbox/hook/${"s".repeat(40)}?commission=5`)).status, 400, "no transaction id");
+    assert.strictEqual((await call(`/cashback/nobody/hook/${"s".repeat(40)}?${q}`)).status, 404, "a network we do not use");
+    // A network that posts a form, not JSON.
+    const form = await fetch(`${base}/cashback/sandbox/hook/${"s".repeat(40)}`, { method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: `subid=${last.click_id}&transaction_id=${tag}-H2&sale_amount=800&commission=40&status=pending` });
+    assert.strictEqual(form.status, 200);
+    assert.strictEqual((await store.txnById((await form.json()).id)).cashbackPaise, 4000);
     env({ CASHBACK: "on", CASHBACK_SANDBOX: "on" });
     assert.strictEqual((await call(`/cashback/sandbox/hook/${"s".repeat(40)}?${q}`)).status, 404, "no secret set, no URL");
     env(ON);

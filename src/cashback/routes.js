@@ -19,6 +19,8 @@ const service = require("./service");
 
 /* ---------------- the network's reports (no sign-in) ---------------- */
 const hooks = express.Router();
+// Networks post reports as JSON or as a form; both are read.
+hooks.use(express.urlencoded({ extended: false, limit: "64kb" }));
 
 function secretOk(given) {
   const want = service.cfg.hookSecret();
@@ -31,6 +33,9 @@ function secretOk(given) {
 async function report(req, res) {
   // A wrong secret looks exactly like a URL that does not exist.
   if (!secretOk(req.params.secret)) return res.status(404).json({ error: "not found" });
+  if (!service.networks().includes(String(req.params.network).toLowerCase())) {
+    return res.status(404).json({ error: "not found" });
+  }
   const src = { ...(req.query || {}), ...(req.body && typeof req.body === "object" ? req.body : {}) };
   try {
     const r = service.readReport(req.params.network, src);

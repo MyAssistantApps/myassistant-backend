@@ -293,6 +293,8 @@ const NOT_PERSONAL = {
   ondc_orders: "order record kept for reconciliation; the owner decides when it may go",
   // 2026-11-27: money paid (or asked to be paid) to a person's UPI ID. The
   // same reasoning as payments: a record of money that left the company.
+  // An open request is refused and unpaid rows lose their UPI ID at erase
+  // (cashback/store.js onAccountErased); only paid rows keep it.
   cashback_payouts: "record of money paid out, kept for accounting; the owner decides when it may go",
 };
 
@@ -509,6 +511,10 @@ async function deleteUserEverywhere(userId, { reason = "" } = {}) {
   // Known limit: a tool already running when the call is cut can still
   // finish and write its one row; the Leftovers card finds that.
   report.revoked.liveSessions = await closeLiveSessions(uid);
+  // Cashback (2026-11-27): the record of money PAID is kept for accounting
+  // (NOT_PERSONAL); a withdrawal never paid is closed and loses its UPI ID.
+  await require("../cashback/store").onAccountErased(uid).catch((e) =>
+    console.error("erase: cashback payouts not settled:", e.message));
   // The one in-process cache keyed by user: their shortcut names.
   try { require("../shortcuts/match").forgetUser(uid); } catch (_) {}
 

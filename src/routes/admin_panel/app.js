@@ -2632,7 +2632,9 @@ async function viewCashback() {
   const payoutRow = (p) => h("tr", {},
     h("td", { class: "sub" }, h("div", {}, fmtDate(p.requestedAt)), h("div", { class: "faint" }, timeAgo(p.requestedAt))),
     h("td", {}, userCell(p.userId)),
-    h("td", { class: "num" }, inr(p.amountPaise)),
+    h("td", { class: "num" }, inr(p.amountPaise),
+      p.short ? h("div", { class: "sub", style: "color:var(--danger);" },
+        `only ${inr(p.coveredPaise)} is still confirmed: refuse it`) : null),
     h("td", {}, h("code", {}, p.upiId)),
     h("td", {},
       h("button", { class: "btn sm primary", onclick: () => {

@@ -41,7 +41,13 @@ const cfg = {
   sharePct: () => Math.min(100, Math.round(num(process.env.CASHBACK_SHARE_PCT, 100))),
   minPayoutPaise: () => Math.round(num(process.env.CASHBACK_MIN_PAYOUT_INR, 100) * 100),
   reviewAbovePaise: () => Math.round(num(process.env.CASHBACK_REVIEW_ABOVE_INR, 1000) * 100),
-  hookSecret: () => String(process.env.CASHBACK_HOOK_SECRET || "").trim(),
+  // 32+ characters of letters, digits, _ or -: anything else is treated as
+  // unset, so a weak or oddly formed secret can never be the only guard on
+  // money (and the access log's masking always recognises it).
+  hookSecret: () => {
+    const s = String(process.env.CASHBACK_HOOK_SECRET || "").trim();
+    return /^[A-Za-z0-9_-]{32,}$/.test(s) ? s : "";
+  },
 };
 
 /** Rupees as a network writes them ("1,299.50", "₹ 45") → paise, or null. */
@@ -123,13 +129,39 @@ function pick(src, names) {
   return "";
 }
 
-/** A network's word for where a purchase stands → ours. */
-function statusOf(word) {
-  const w = String(word || "").toLowerCase();
-  if (/reject|cancel|declin|invalid|fail|return|refund/.test(w)) return "rejected";
-  if (/valid|approv|confirm|payable|paid|success/.test(w)) return "confirmed";
-  return "pending";
+/**
+ * A network's word for where a purchase stands → ours.
+ *
+ * WHOLE WORDS ONLY (security review, 2026-11-27). Matching pieces of words
+ * read "unpaid", "unapproved", "unsuccessful" and "pending approval" as
+ * confirmed. A word that is not on a list is `pending`, and `known: false`
+ * puts the purchase in front of a person: money is never confirmed on a
+ * word nobody has seen before. CASHBACK_STATUS_WORDS (JSON: {confirmed:[…],
+ * rejected:[…], pending:[…]}) adds a network's own vocabulary.
+ */
+const STATUS_WORDS = {
+  confirmed: ["validated", "valid", "approved", "confirmed", "payable", "paid", "success", "successful", "settled"],
+  rejected: ["rejected", "cancelled", "canceled", "declined", "invalid", "failed", "returned", "refunded", "reversed", "void"],
+  pending: ["pending", "new", "tracked", "open", "processing", "in process", "awaiting validation", "pending approval", "unpaid", ""],
+};
+function statusWords() {
+  const out = { confirmed: [...STATUS_WORDS.confirmed], rejected: [...STATUS_WORDS.rejected], pending: [...STATUS_WORDS.pending] };
+  try {
+    const j = JSON.parse(process.env.CASHBACK_STATUS_WORDS || "{}");
+    for (const k of Object.keys(out)) if (Array.isArray(j[k])) out[k].push(...j[k].map((x) => String(x).toLowerCase().trim()));
+  } catch (_) { /* the built-in words stand */ }
+  return out;
 }
+function readStatus(word) {
+  const w = String(word || "").toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  const words = statusWords();
+  // Rejected is looked up first: when in doubt, nobody is paid.
+  for (const status of ["rejected", "pending", "confirmed"]) {
+    if (words[status].includes(w)) return { status, known: true };
+  }
+  return { status: "pending", known: false };
+}
+const statusOf = (word) => readStatus(word).status;
 
 function whenOf(v) {
   if (!v) return 0;
@@ -149,9 +181,39 @@ function readReport(network, src) {
     merchantName: pick(src, f.merchant),
     salePaise: toPaise(pick(src, f.sale)),
     commissionPaise: toPaise(pick(src, f.commission)),
-    status: statusOf(pick(src, f.status)),
+    status: readStatus(pick(src, f.status)).status,
+    statusWord: readStatus(pick(src, f.status)).known ? "" : pick(src, f.status).slice(0, 40),
     occurredAt: whenOf(pick(src, f.when)),
   };
+}
+
+/** ₹1 crore: no single order or commission here is ever larger. */
+const MAX_PAISE = 1_000_000_000;
+
+/** Entered by a person in the admin panel, not reported by a network. */
+const HAND_ENTERED = ["manual"];
+
+/**
+ * The networks a purchase may come from: the affiliate network, a person
+ * (admin panel), the sandbox on a development server, and any named in
+ * CASHBACK_NETWORKS (comma-separated) when a second network is added.
+ */
+function networks() {
+  const extra = String(process.env.CASHBACK_NETWORKS || "").toLowerCase().split(",")
+    .map((x) => x.trim()).filter((x) => /^[a-z0-9_-]{2,24}$/.test(x));
+  const list = ["cuelinks", ...HAND_ENTERED, ...extra];
+  if (sandboxOn()) list.push("sandbox");
+  return [...new Set(list)];
+}
+
+let sandboxWarned = false;
+function sandboxOn() {
+  const on = String(process.env.CASHBACK_SANDBOX || "").toLowerCase() === "on";
+  if (on && !sandboxWarned) {
+    sandboxWarned = true;
+    console.warn("⚠️  CASHBACK_SANDBOX is ON: partners are pretend-tracked and test purchases are accepted. Development only — MUST be off on production.");
+  }
+  return on;
 }
 
 class ReportError extends Error {
@@ -181,7 +243,9 @@ function merchantByName(name) {
  */
 async function recordConversion(r, { notifyUser = true } = {}) {
   const network = String(r.network || "").toLowerCase();
-  if (!/^[a-z0-9_-]{2,24}$/.test(network)) throw new ReportError("unknown network");
+  // One purchase is one row: a network has ONE name here, from a short
+  // list, so the same purchase cannot be credited again under another.
+  if (!networks().includes(network)) throw new ReportError("unknown network");
   const networkTxnId = String(r.networkTxnId || "").trim().slice(0, 120);
   if (!networkTxnId) throw new ReportError("a transaction id is required");
   const commission = r.commissionPaise == null ? null : Number(r.commissionPaise);
@@ -189,13 +253,26 @@ async function recordConversion(r, { notifyUser = true } = {}) {
   if ((commission != null && commission < 0) || (sale != null && sale < 0)) {
     throw new ReportError("amounts cannot be negative");
   }
+  // An absurd amount is a mistake in the report, not a purchase: refused
+  // (400, so the network does not retry it for ever), never stored.
+  if ((commission != null && commission > MAX_PAISE) || (sale != null && sale > MAX_PAISE)) {
+    throw new ReportError("amount out of range");
+  }
 
   // Who and where: the click the sub-id names. A report can also name the
   // user outright (a person entering it in the admin panel).
   const click = await store.clickById(r.clickId);
   const userId = r.userId != null ? Number(r.userId) : (click && click.user_id != null ? Number(click.user_id) : null);
-  const m = merchants.BY_ID.get(String(r.merchant || (click && click.merchant) || ""))
-    || merchantByName(r.merchantName);
+  const clicked = merchants.BY_ID.get(String(r.merchant || (click && click.merchant) || "")) || null;
+  // THE STORE THE NETWORK NAMES DECIDES, NOT ONLY THE CLICK (security
+  // review, 2026-11-27). A sub-id can be carried to another store on the
+  // same network; if the report names a store we know and it is not the
+  // one that was opened, eligibility is judged for the store actually
+  // bought from, and a person looks at it.
+  const reported = merchantByName(r.merchantName);
+  const m = reported || clicked;
+  const storeMismatch = Boolean(reported && clicked && reported.id !== clicked.id);
+  const networkMismatch = Boolean(click && click.network && !HAND_ENTERED.includes(network) && click.network !== network);
   const rule = m ? (await store.rules()).get(m.id) : null;
 
   const share = rule && rule.sharePct != null ? rule.sharePct : cfg.sharePct();
@@ -211,6 +288,9 @@ async function recordConversion(r, { notifyUser = true } = {}) {
   if (sale != null && commission != null && sale > 0 && commission > sale) {
     review = true; note = note || "commission is larger than the order";
   }
+  if (storeMismatch) { review = true; note = note || `opened ${clicked.id}, bought at ${reported.id}`; }
+  if (networkMismatch) { review = true; note = note || `the click was on ${click.network}, the report came from ${network}`; }
+  if (r.statusWord) { review = true; note = note || `status word not recognised: "${r.statusWord}"`; }
   if (!earns && userId != null) note = note || (cfg.on() ? "partner not eligible for cashback" : "cashback is switched off");
 
   // Money that needs a person's eyes is never confirmed by a report alone.
@@ -346,6 +426,7 @@ async function requestPayout(userId, { upiId }) {
 
 /** The owner paid it (or refused it): record it and tell the user. */
 async function decidePayout(id, { status, reference, note }) {
+  // store.PayoutError("short") passes through: the panel shows its words.
   const p = await store.decidePayout(id, { status, reference, note });
   if (!p) return null;
   if (status === "paid") {
@@ -359,7 +440,7 @@ async function decidePayout(id, { status, reference, note }) {
 }
 
 module.exports = {
-  cfg, toPaise, rupees, eligible, stores, readReport, statusOf, recordConversion, ReportError,
+  cfg, toPaise, rupees, eligible, stores, readReport, statusOf, readStatus, networks, recordConversion, ReportError,
   summary, requestPayout, decidePayout, WithdrawError, maskUpi, merchantByName, FIELDS,
   _tell: tell,
 };

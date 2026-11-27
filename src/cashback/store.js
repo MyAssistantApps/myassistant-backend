@@ -161,9 +161,10 @@ async function upsertTxn(t) {
   if (!TXN_STATUSES.has(t.status)) throw new Error(`bad status ${t.status}`);
   const now = Date.now();
   return tx(async (c) => {
-    const found = (await c.query(
+    const find = async () => (await c.query(
       "SELECT * FROM cashback_txns WHERE network = $1 AND network_txn_id = $2 FOR UPDATE",
       [t.network, t.networkTxnId])).rows[0];
+    let found = await find();
     if (!found) {
       const made = (await c.query(
         `INSERT INTO cashback_txns
@@ -176,18 +177,43 @@ async function upsertTxn(t) {
           t.status, t.review ? 1 : 0, t.note || "", t.occurredAt || now,
           t.status === "confirmed" ? now : 0, now])).rows[0];
       if (made) return { txn: txnShape(made), created: true, changed: true, from: null };
-      // Lost a race with the same report: fall through to "found".
-      const again = (await c.query(
-        "SELECT * FROM cashback_txns WHERE network = $1 AND network_txn_id = $2 FOR UPDATE",
-        [t.network, t.networkTxnId])).rows[0];
-      return { txn: txnShape(again), created: false, changed: false, from: again.status };
+      // The same purchase arrived twice at the same moment and the other
+      // report made the row: this one is applied to it like any later
+      // report, so its news (a validation, say) is not dropped.
+      found = await find();
     }
-    // An existing row: the status may move, and a still-pending amount may
-    // be corrected (a partly returned order). A confirmed amount is what
-    // the user was told they have; a report may reject it, never resize it.
+
+    // AN EXISTING ROW. What a REPORT may do to it (security review,
+    // 2026-11-27 — each of these was a way to be paid for nothing):
+    //
+    //   pending   → confirmed | rejected
+    //   confirmed → rejected            (a return after validation)
+    //
+    // and nothing else. A cancelled purchase is not brought back by a late
+    // or replayed "approved", and a row a PERSON must look at (review) is
+    // confirmed only by that person (setTxnStatus). A report that asks for
+    // anything else changes nothing and puts the row in front of a person.
     const from = found.status;
-    const amounts = { sale: found.sale_paise, commission: found.commission_paise,
-      cashback: found.cashback_paise, review: Number(found.review) };
+    let to = t.status;
+    let review = Number(found.review);
+    let note = t.note || "";
+    const allowed = (from === "pending" && (to === "confirmed" || to === "rejected"))
+      || (from === "confirmed" && to === "rejected");
+    if (to !== from && !allowed) {
+      // A stale "pending" after a decision is only an old report arriving
+      // late: ignored quietly. Asking to confirm what was cancelled is not.
+      if (to !== "pending") {
+        note = `a report asked for "${to}" after "${from}": not applied`;
+        review = 1;
+      }
+      to = from;
+    }
+    if (review === 1 && from === "pending" && to === "confirmed") to = "pending";
+
+    // A still-pending amount may be corrected (a partly returned order). A
+    // confirmed amount is what the user was told they have; a report may
+    // reject it, never resize it.
+    const amounts = { sale: found.sale_paise, commission: found.commission_paise, cashback: found.cashback_paise };
     if (from === "pending" && t.commissionPaise != null
         && Number(t.commissionPaise) !== Number(found.commission_paise)) {
       // The share and the eligibility are the ones the purchase was first
@@ -201,19 +227,24 @@ async function upsertTxn(t) {
       amounts.sale = t.salePaise ?? found.sale_paise;
       amounts.cashback = wasEarning || (firstAmount && t.earns)
         ? Math.floor((Number(t.commissionPaise) * pct) / 100) : 0;
-      if (t.review) amounts.review = 1;
+      if (t.review) {
+        review = 1;
+        if (to === "confirmed") to = "pending";
+      }
     }
-    const changed = from !== t.status || Number(amounts.cashback) !== Number(found.cashback_paise);
-    if (!changed) return { txn: txnShape(found), created: false, changed: false, from };
+
+    // `changed` is what the USER is told about: the state or the amount.
+    const changed = from !== to || Number(amounts.cashback) !== Number(found.cashback_paise);
+    const dirty = changed || review !== Number(found.review) || (note && note !== found.note);
+    if (!dirty) return { txn: txnShape(found), created: false, changed: false, from };
     const row = (await c.query(
       `UPDATE cashback_txns
           SET status = $2, sale_paise = $3, commission_paise = $4, cashback_paise = $5, review = $6,
               confirmed_at = CASE WHEN $2 = 'confirmed' AND confirmed_at = 0 THEN $7 ELSE confirmed_at END,
               note = CASE WHEN $8 <> '' THEN $8 ELSE note END, updated_at = $7
         WHERE id = $1 RETURNING *`,
-      [found.id, t.status, amounts.sale, amounts.commission, amounts.cashback, amounts.review, now,
-        t.note || ""])).rows[0];
-    return { txn: txnShape(row), created: false, changed: true, from };
+      [found.id, to, amounts.sale, amounts.commission, amounts.cashback, review, now, note])).rows[0];
+    return { txn: txnShape(row), created: false, changed, from };
   });
 }
 
@@ -223,7 +254,7 @@ async function txnById(id) {
 }
 
 /** A person's decision on one row (the admin panel). */
-async function setTxnStatus(id, status, { note = "", userId } = {}) {
+async function setTxnStatus(id, status, { note = "", userId, cashbackPaise } = {}) {
   await migrate();
   if (!TXN_STATUSES.has(status)) throw new Error(`bad status ${status}`);
   const now = Date.now();
@@ -231,10 +262,12 @@ async function setTxnStatus(id, status, { note = "", userId } = {}) {
     `UPDATE cashback_txns
         SET status = $2, review = 0,
             user_id = COALESCE($5, user_id),
+            cashback_paise = COALESCE($6, cashback_paise),
             confirmed_at = CASE WHEN $2 = 'confirmed' AND confirmed_at = 0 THEN $3 ELSE confirmed_at END,
             note = CASE WHEN $4 <> '' THEN $4 ELSE note END, updated_at = $3
       WHERE id = $1 RETURNING *`,
-    [Number(id), status, now, String(note || "").slice(0, 300), userId ?? null]);
+    [Number(id), status, now, String(note || "").slice(0, 300), userId ?? null,
+      cashbackPaise == null ? null : Math.max(0, Math.round(Number(cashbackPaise)))]);
   return txnShape(row);
 }
 
@@ -332,15 +365,54 @@ async function requestPayout(userId, { upiId, minPaise }) {
   });
 }
 
-/** The owner's decision: paid (with the bank's reference) or rejected. Once. */
+/**
+ * The owner's decision: paid (with the bank's reference) or rejected. Once.
+ *
+ * PAID ONLY WHILE THE MONEY IS STILL THERE (security review, 2026-11-27).
+ * The amount was fixed when the user asked. A purchase cancelled between
+ * the request and the payment used to be paid anyway; now marking it paid
+ * re-reads the balance under the same lock a request takes, and refuses
+ * (PayoutError "short") when confirmed cashback no longer covers it. The
+ * owner then refuses the withdrawal and the user asks again for what is left.
+ */
 async function decidePayout(id, { status, reference = "", note = "" }) {
   await migrate();
   if (status !== "paid" && status !== "rejected") throw new Error(`bad status ${status}`);
-  const row = await one(
-    `UPDATE cashback_payouts SET status = $2, reference = $3, note = $4, decided_at = $5
-      WHERE id = $1 AND status = 'requested' RETURNING *`,
-    [Number(id), status, String(reference).slice(0, 80), String(note).slice(0, 300), Date.now()]);
-  return payoutShape(row);
+  const peek = await one("SELECT user_id FROM cashback_payouts WHERE id = $1", [Number(id)]);
+  if (!peek) return null;
+  return tx(async (c) => {
+    // The user's row first, then the payout: the same order a request uses.
+    await c.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [Number(peek.user_id)]);
+    const p = (await c.query(
+      "SELECT * FROM cashback_payouts WHERE id = $1 AND status = 'requested' FOR UPDATE", [Number(id)])).rows[0];
+    if (!p) return null;
+    if (status === "paid") {
+      const b = await balance(p.user_id, { one: async (sql, params) => (await c.query(sql, params)).rows[0] });
+      if (b.confirmedPaise - b.paidPaise < Number(p.amount_paise)) {
+        throw new PayoutError("short",
+          "A purchase was cancelled after this withdrawal was requested, so the confirmed cashback no longer covers it. Refuse it; the user can ask again for what is left.");
+      }
+    }
+    const row = (await c.query(
+      `UPDATE cashback_payouts SET status = $2, reference = $3, note = $4, decided_at = $5
+        WHERE id = $1 AND status = 'requested' RETURNING *`,
+      [Number(id), status, String(reference).slice(0, 80), String(note).slice(0, 300), Date.now()])).rows[0];
+    return payoutShape(row);
+  });
+}
+
+/**
+ * The account is being erased (routes/privacy.js). cashback_payouts is kept
+ * as a record of money PAID; what was never paid has no reason to keep a
+ * person's UPI ID: an open request is closed and unpaid rows lose the ID.
+ */
+async function onAccountErased(userId) {
+  await migrate();
+  const uid = Number(userId);
+  await run(
+    `UPDATE cashback_payouts SET status = 'rejected', note = 'account deleted', decided_at = $2
+      WHERE user_id = $1 AND status = 'requested'`, [uid, Date.now()]);
+  await run("UPDATE cashback_payouts SET upi_id = '' WHERE user_id = $1 AND status <> 'paid'", [uid]);
 }
 
 async function listPayouts({ userId, status, limit = 50 } = {}) {
@@ -412,7 +484,7 @@ async function totals() {
 module.exports = {
   migrate, newClickId, recordClick, clickById,
   upsertTxn, txnById, setTxnStatus, listTxns,
-  balance, requestPayout, decidePayout, listPayouts, PayoutError,
+  balance, requestPayout, decidePayout, listPayouts, PayoutError, onAccountErased,
   rules, setRule, totals,
   TXN_STATUSES, PAYOUT_STATUSES,
 };

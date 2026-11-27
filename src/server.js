@@ -163,7 +163,10 @@ app.use(require("./ops/spend").bind());
 // the app's "is the server up?" check read their 429 as "server down" and
 // probed again every 10 s, which kept the address blocked.
 const { rateKey } = require("./infra/rateKey");
-const notCounted = (req) => req.path === "/health" || req.path === "/health/ready";
+// A network's purchase reports (cashback) come from one server in bursts:
+// they have their own limit beside their route, not the phones' 240.
+const notCounted = (req) => req.path === "/health" || req.path === "/health/ready"
+  || /^\/cashback\/[a-z0-9_-]+\/hook\//i.test(req.path);
 app.use(rateLimit({ windowMs: 60_000, max: 240, standardHeaders: true, keyGenerator: rateKey, skip: notCounted }));
 // A flood from one address is still refused, whatever accounts it holds.
 app.use(rateLimit({ windowMs: 60_000, max: 3000, standardHeaders: false, legacyHeaders: false, skip: notCounted }));
@@ -357,7 +360,10 @@ app.use("/go", appAuth, require("./routes/go"));
 // Cashback (2026-11-27): the affiliate network's purchase reports come in
 // without a sign-in (a secret in the URL), the user's own view with one.
 const cashbackRoutes = require("./cashback/routes");
-app.use("/cashback", cashbackRoutes.hooks);
+app.use("/cashback", rateLimit({
+  windowMs: 60_000, max: 1200, standardHeaders: false, legacyHeaders: false,
+  skip: (req) => !/^\/[a-z0-9_-]+\/hook\//i.test(req.path),
+}), cashbackRoutes.hooks);
 app.use("/cashback", appAuth, perUserLimit, cashbackRoutes.router);
 // NEWS CARDS (2026-09-25) — Hub → News reads its deck from here.
 app.use("/news", appAuth, require("./routes/news"));
