@@ -156,6 +156,9 @@ const USER_TABLES = [
   // 2026-11-14: which partner links they tapped — the erase guard found
   // this was left behind.
   ["affiliate_clicks", "user_id"],
+  // 2026-11-27: cashback tracked for their purchases. Erased with the
+  // account, unpaid cashback included (cashback_payouts: NOT_PERSONAL).
+  ["cashback_txns", "user_id"],
   ...require("../services/callCode").USER_TABLES, // verification-call codes (hashed)
   ["pending_pushes", "user_id"], // notifications still waiting for a device
   ["user_devices", "user_id"], // phone model, OS, permissions
@@ -288,6 +291,9 @@ const NOT_PERSONAL = {
   // ask us to reconcile. Kept until the owner decides otherwise. (ONDC
   // ordering was removed on 2026-11-21; the table was never DROPped.)
   ondc_orders: "order record kept for reconciliation; the owner decides when it may go",
+  // 2026-11-27: money paid (or asked to be paid) to a person's UPI ID. The
+  // same reasoning as payments: a record of money that left the company.
+  cashback_payouts: "record of money paid out, kept for accounting; the owner decides when it may go",
 };
 
 /** The column names the schema guard treats as "this row is a user's". */

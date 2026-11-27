@@ -354,6 +354,11 @@ app.use("/finance", appAuth, require("./routes/finance").router);
 app.use("/brief", appAuth, require("./routes/brief"));
 // EVERYDAY SERVICES (2026-11-04): partner links with our affiliate tracking.
 app.use("/go", appAuth, require("./routes/go"));
+// Cashback (2026-11-27): the affiliate network's purchase reports come in
+// without a sign-in (a secret in the URL), the user's own view with one.
+const cashbackRoutes = require("./cashback/routes");
+app.use("/cashback", cashbackRoutes.hooks);
+app.use("/cashback", appAuth, perUserLimit, cashbackRoutes.router);
 // NEWS CARDS (2026-09-25) — Hub → News reads its deck from here.
 app.use("/news", appAuth, require("./routes/news"));
 // The home-screen widget's fire-and-forget job (POST /tasks/quick).

@@ -250,6 +250,7 @@ const ICONS = {
   file: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6",
   video: "M23 7l-7 5 7 5zM1 5h15v14H1z",
   list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
+  wallet: "M3 7h18v12H3zM3 7l2-3h12l2 3M15.5 13h2.5",
   check: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11",
   bell: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0",
   flag: "M4 22V4M4 15s1-1 4-1 5 2 8 2 4-1 4-1V4s-1 1-4 1-5-2-8-2-4 1-4 1",
@@ -290,7 +291,8 @@ const NAV = [
   ["Content", [["#/conversations", "Conversations", "chat"], ["#/recordings", "Recordings", "mic"],
     ["#/documents", "Documents", "file"], ["#/video-notes", "Video notes", "video"]]],
   ["Operations", [["#/activity", "Activity", "list"], ["#/outcomes", "Task outcomes", "check"],
-    ["#/broadcast", "Notifications", "bell"], ["#/flags", "App updates", "flag"], ["#/debug", "System & debug", "cpu"]]],
+    ["#/broadcast", "Notifications", "bell"], ["#/cashback", "Cashback", "wallet"],
+    ["#/flags", "App updates", "flag"], ["#/debug", "System & debug", "cpu"]]],
 ];
 const NAV_FLAT = NAV.flatMap(([, items]) => items);
 
@@ -420,6 +422,7 @@ async function render() {
     if (hash.startsWith("#/feedback")) return await viewFeedback();
     if (hash.startsWith("#/outcomes")) return await viewOutcomes();
     if (hash.startsWith("#/broadcast")) return await viewBroadcast();
+    if (hash.startsWith("#/cashback")) return await viewCashback();
     if (hash.startsWith("#/flags")) return await viewFlags();
     if (hash.startsWith("#/debug")) return await viewDebug();
     return await viewOverview();
@@ -2600,6 +2603,145 @@ async function viewVideoNotes() {
         body),
       moreBtn)));
   await load(false);
+}
+
+/* ------------------------------------------------------------------ */
+/* Cashback (2026-11-27): withdrawals to pay, purchases to confirm      */
+/* ------------------------------------------------------------------ */
+
+const inr = (paise) => "₹" + (Number(paise || 0) / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+async function viewCashback() {
+  shell("#/cashback", loading());
+  const d = await api("/cashback");
+  const again = () => viewCashback().catch((e) => toast(e.message, true));
+  const act = async (path, body, done) => {
+    try {
+      await api(path, { method: path.startsWith("/cashback/rules") ? "PUT" : "POST", body });
+      toast(done);
+      again();
+    } catch (e) { toast(e.message, true); }
+  };
+  const userCell = (id) => id == null
+    ? h("span", { class: "badge warn" }, "no user matched")
+    : h("a", { href: "#/user/" + id }, "#" + id);
+  const STATUS = { pending: "neutral", confirmed: "good", rejected: "danger", requested: "warn", paid: "good" };
+  const badge = (st) => h("span", { class: "badge " + (STATUS[st] || "neutral") }, st);
+  const empty = (cols, text) => h("tr", {}, h("td", { colspan: cols, class: "chart-empty" }, text));
+
+  const payoutRow = (p) => h("tr", {},
+    h("td", { class: "sub" }, h("div", {}, fmtDate(p.requestedAt)), h("div", { class: "faint" }, timeAgo(p.requestedAt))),
+    h("td", {}, userCell(p.userId)),
+    h("td", { class: "num" }, inr(p.amountPaise)),
+    h("td", {}, h("code", {}, p.upiId)),
+    h("td", {},
+      h("button", { class: "btn sm primary", onclick: () => {
+        const ref = prompt(`Pay ${inr(p.amountPaise)} to ${p.upiId} first.\nThen enter the payment reference (UTR):`);
+        if (ref && ref.trim()) act(`/cashback/payouts/${p.id}`, { status: "paid", reference: ref.trim() }, "Marked as paid; the user was told.");
+      } }, "Mark paid"), " ",
+      h("button", { class: "btn sm", onclick: () => {
+        const why = prompt("Why is this withdrawal refused? The user sees this.");
+        if (why !== null) act(`/cashback/payouts/${p.id}`, { status: "rejected", note: why.trim() }, "Refused; the amount is back in their balance.");
+      } }, "Refuse")));
+
+  const txnRow = (t, withActions) => h("tr", {},
+    h("td", { class: "sub" }, fmtDate(t.occurredAt || t.createdAt)),
+    h("td", {}, userCell(t.userId)),
+    h("td", {}, t.merchant || "—", h("div", { class: "sub" }, `${t.network} · ${t.networkTxnId}`)),
+    h("td", { class: "num" }, inr(t.salePaise)),
+    h("td", { class: "num" }, inr(t.commissionPaise)),
+    h("td", { class: "num" }, inr(t.cashbackPaise), h("div", { class: "sub" }, t.sharePct + "%")),
+    h("td", {}, badge(t.status), t.review ? h("span", { class: "badge warn", style: "margin-left:4px;" }, "review") : null,
+      t.note ? h("div", { class: "sub", style: "margin-top:4px;" }, t.note) : null),
+    h("td", {}, !withActions ? null : [
+      h("button", { class: "btn sm primary", onclick: () => {
+        let userId;
+        if (t.userId == null) {
+          const typed = prompt("No click matched this purchase. Enter the user id it belongs to:");
+          if (!typed) return;
+          userId = parseInt(typed, 10);
+          if (!Number.isInteger(userId) || userId <= 0) return toast("That is not a user id.", true);
+        }
+        if (confirm(`Confirm ${inr(t.cashbackPaise)} cashback for this purchase?`)) {
+          act(`/cashback/txns/${t.id}`, { status: "confirmed", userId, note: "confirmed by hand" }, "Confirmed.");
+        }
+      } }, "Confirm"), " ",
+      h("button", { class: "btn sm", onclick: () => {
+        const why = prompt("Why is it rejected?");
+        if (why !== null) act(`/cashback/txns/${t.id}`, { status: "rejected", note: why.trim() }, "Rejected.");
+      } }, "Reject")]));
+
+  const waiting = [...d.review, ...d.unmatched.filter((u) => !d.review.some((r) => r.id === u.id))];
+
+  const partnerRow = (m) => h("tr", {},
+    h("td", {}, m.name, h("div", { class: "sub" }, m.category)),
+    h("td", {}, m.program),
+    h("td", {}, m.tracked ? h("span", { class: "badge good" }, m.network || "tracked") : h("span", { class: "badge neutral" }, "not earning")),
+    h("td", {}, m.eligible ? h("span", { class: "badge good" }, "cashback") : h("span", { class: "badge neutral" }, "no cashback")),
+    h("td", {}, (m.rule && m.rule.rateText) || "—"),
+    h("td", { class: "num" }, m.rule && m.rule.sharePct != null ? m.rule.sharePct + "%" : "default"),
+    h("td", {}, h("button", { class: "btn sm", onclick: () => {
+      const on = confirm(`Should ${m.name} earn cashback?\nOK = yes, Cancel = no.`);
+      const rate = prompt(`What should the app show for ${m.name}? (for example "Up to 6%"; blank shows nothing)`, (m.rule && m.rule.rateText) || "");
+      if (rate === null) return;
+      const share = prompt("Share of our commission given to the user, in percent (blank = the default):", m.rule && m.rule.sharePct != null ? String(m.rule.sharePct) : "");
+      if (share === null) return;
+      act(`/cashback/rules/${m.id}`, { enabled: on, rateText: rate.trim(), sharePct: share.trim() }, "Saved.");
+    } }, "Edit")));
+
+  const addByHand = h("button", { class: "btn sm", onclick: () => {
+    const userId = prompt("User id the purchase belongs to:");
+    if (!userId) return;
+    const merchant = prompt("Partner id (for example myntra, flipkart, makemytrip):");
+    if (!merchant) return;
+    const sale = prompt("Order amount in rupees:", "0");
+    const commission = prompt("Our commission in rupees:");
+    if (!commission) return;
+    const confirmed = confirm("Is it already validated by the store?\nOK = confirmed, Cancel = pending.");
+    act("/cashback/txns", { userId: userId.trim(), merchant: merchant.trim(), saleInr: sale, commissionInr: commission,
+      status: confirmed ? "confirmed" : "pending" }, "Purchase recorded.");
+  } }, "Add a purchase by hand");
+
+  const s = d.settings;
+  shell("#/cashback", h("div", {},
+    h("div", { class: "page-head" },
+      h("div", {},
+        h("div", { class: "page-title" }, "Cashback"),
+        h("div", { class: "page-sub" },
+          `Cashback is ${s.on ? "ON" : "OFF"}. Users receive ${s.sharePct}% of our commission; ` +
+          `the smallest withdrawal is ${inr(s.minPayoutPaise)}; a single cashback above ${inr(s.reviewAbovePaise)} waits here for you. ` +
+          `Purchase reports from the network are ${s.hookReady ? "accepted" : "NOT accepted (no hook secret set)"}.` +
+          (s.sandbox ? " SANDBOX is on: partners are pretend-tracked on this server." : ""))),
+      addByHand),
+    h("div", { class: "grid kpis" },
+      kpi("Commission earned", inr(d.totals.commissionPaise), `${d.totals.txns} purchases`),
+      kpi("Cashback pending", inr(d.totals.pendingPaise)),
+      kpi("Cashback confirmed", inr(d.totals.confirmedPaise)),
+      kpi("Paid to users", inr(d.totals.paidPaise), `${inr(d.totals.requestedPaise)} asked for`),
+      kpi("Partner clicks (30d)", d.totals.clicks30d, `${d.totals.trackedClicks30d} on links that earn`)),
+    h("div", { class: "card table-card" },
+      h("div", { style: "padding:14px 16px 0; font-weight:600;" }, `Withdrawals to pay (${d.payouts.length})`),
+      h("table", {},
+        h("thead", {}, h("tr", {}, h("th", {}, "Asked"), h("th", {}, "User"), h("th", {}, "Amount"), h("th", {}, "UPI ID"), h("th", {}, ""))),
+        h("tbody", {}, d.payouts.length ? d.payouts.map(payoutRow) : empty(5, "No withdrawals waiting.")))),
+    h("div", { class: "card table-card", style: "margin-top:16px;" },
+      h("div", { style: "padding:14px 16px 0; font-weight:600;" }, `Purchases waiting for you (${waiting.length})`),
+      h("table", {},
+        h("thead", {}, h("tr", {}, h("th", {}, "Date"), h("th", {}, "User"), h("th", {}, "Partner"), h("th", {}, "Order"),
+          h("th", {}, "Commission"), h("th", {}, "Cashback"), h("th", {}, "Status"), h("th", {}, ""))),
+        h("tbody", {}, waiting.length ? waiting.map((t) => txnRow(t, true)) : empty(8, "Nothing needs a decision.")))),
+    h("div", { class: "card table-card", style: "margin-top:16px;" },
+      h("div", { style: "padding:14px 16px 0; font-weight:600;" }, "Recent purchases"),
+      h("table", {},
+        h("thead", {}, h("tr", {}, h("th", {}, "Date"), h("th", {}, "User"), h("th", {}, "Partner"), h("th", {}, "Order"),
+          h("th", {}, "Commission"), h("th", {}, "Cashback"), h("th", {}, "Status"), h("th", {}, ""))),
+        h("tbody", {}, d.recent.length ? d.recent.map((t) => txnRow(t, t.status === "pending")) : empty(8, "No purchases reported yet.")))),
+    h("div", { class: "card table-card", style: "margin-top:16px;" },
+      h("div", { style: "padding:14px 16px 0; font-weight:600;" }, "Partners"),
+      h("table", {},
+        h("thead", {}, h("tr", {}, h("th", {}, "Partner"), h("th", {}, "Programme"), h("th", {}, "Link"), h("th", {}, "Cashback"),
+          h("th", {}, "Shown rate"), h("th", {}, "Share"), h("th", {}, ""))),
+        h("tbody", {}, d.partners.map(partnerRow))))));
 }
 
 /* ------------------------------------------------------------------ */

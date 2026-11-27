@@ -37,3 +37,13 @@ BOLNA_AGENT_ID_MALE=cb752bce-9896-44ff-9442-3f54f7b22955
 # REALTIME_DAILY_SESSIONS_USER=150, LOGIN_MAX_FAILS=10. Set them in the
 # server's .env (and here) to change. DEV_PHONE_VERIFY_USERS is unset:
 # typed phone claims stay open to every account while the flag above is on.
+# Cashback (2026-11-27, src/cashback/) — not set on the server, so the code
+# defaults apply: CASHBACK=off (nothing is shown in the app, nothing accrues,
+# no withdrawal can be asked for), CASHBACK_SHARE_PCT=100,
+# CASHBACK_MIN_PAYOUT_INR=100, CASHBACK_REVIEW_ABOVE_INR=1000.
+# To go live, set on the server (and add the names here in the same PR):
+#   CUELINKS_CID=<secret>          the affiliate network account id
+#   CASHBACK_HOOK_SECRET=<secret>  40 random characters; the network reports
+#                                  purchases to /cashback/cuelinks/hook/<it>
+#   CASHBACK=on
+# NEVER set CASHBACK_SANDBOX on production: it pretends partners are tracked.
