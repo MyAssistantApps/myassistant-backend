@@ -306,8 +306,10 @@ function maskUpi(upi) {
   return `${name.slice(0, 2)}${"•".repeat(Math.max(3, Math.min(6, name.length - 2)))}@${bank}`;
 }
 
+// 409 for every refusal the user can act on: the app shows a 409's own
+// words (ApiService.sendJson) and treats any other failure as "try again".
 class WithdrawError extends Error {
-  constructor(code, message, status = 400) {
+  constructor(code, message, status = 409) {
     super(message);
     this.code = code;
     this.status = status;
@@ -320,7 +322,7 @@ async function requestPayout(userId, { upiId }) {
   if (!UPI.test(upi)) throw new WithdrawError("upi", "Please enter a valid UPI ID, for example name@bank.");
   const u = await require("../db").one("SELECT phone_verified_at FROM users WHERE id = $1", [Number(userId)]);
   if (!u || !u.phone_verified_at) {
-    throw new WithdrawError("phone", "Please verify your phone number before withdrawing cashback.", 403);
+    throw new WithdrawError("phone", "Please verify your phone number before withdrawing cashback.");
   }
   try {
     const p = await store.requestPayout(userId, { upiId: upi, minPaise: cfg.minPayoutPaise() });

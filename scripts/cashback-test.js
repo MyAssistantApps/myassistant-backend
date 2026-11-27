@@ -361,7 +361,8 @@ async function test(name, fn) {
     assert.strictEqual(s.json.enabled, true);
     assert.ok(s.json.balance.confirmedPaise >= 9000);
     const bad = await call("/cashback/payouts", { method: "POST", user: ravi, body: { upiId: "nope" } });
-    assert.deepStrictEqual([bad.status, bad.json.code], [400, "upi"]);
+    assert.deepStrictEqual([bad.status, bad.json.code], [409, "upi"]);
+    assert.match(bad.json.error, /valid UPI ID/, "the words the app shows");
     const none = await mkUser("empty");
     const low = await call("/cashback/payouts", { method: "POST", user: none, body: { upiId: "empty@okaxis" } });
     assert.deepStrictEqual([low.status, low.json.code], [409, "below_min"]);
