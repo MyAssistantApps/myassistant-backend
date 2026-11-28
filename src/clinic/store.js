@@ -418,8 +418,8 @@ async function appointmentsNeedingReminder(now = Date.now()) {
        FROM clinic_appointments a JOIN users u ON u.id = a.user_id
       WHERE a.status = 'booked' AND a.remind_patient = 1 AND a.reminded_at = 0
         AND a.patient_phone <> ''
-        AND a.starts_at >= $1 + 2 * 3600 * 1000
-        AND a.starts_at <= $1 + 16 * 3600 * 1000
+        AND a.starts_at >= $1::bigint + 2 * 3600 * 1000
+        AND a.starts_at <= $1::bigint + 16 * 3600 * 1000
       ORDER BY a.starts_at ASC LIMIT 25`,
     [now]
   );
