@@ -7,6 +7,10 @@
  * in the queue, and a restart that orphans half-finished rows. The model
  * is stubbed — a test that paid for tokens would be the bug it guards.
  */
+// These tests drive the call machinery with bare accounts. The rule that an
+// account must have a verified phone before a call is placed for it has its
+// own tests (scripts/readiness-test.js); here it is switched off.
+process.env.AGENT_CALL_REQUIRE_VERIFIED = "off";
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ||
   "postgres://myassistant:localdev@localhost:5432/myassistant";

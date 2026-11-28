@@ -163,6 +163,106 @@ async function atest(name, fn) {
     assert.deepStrictEqual(ask("my documents"), [4, 3, 5], "a generic ask keeps the ranking");
   });
 
+  // ---- launch batch, 2026-11-28 ----
+  console.log("\nlaunch hardening");
+  await atest("a call is placed only for an account that has proved its phone number", async () => {
+    const keep = { ...process.env };
+    Object.assign(process.env, { PUBLIC_BASE_URL: "https://example.test", BOLNA_API_KEY: "k", BOLNA_FROM_NUMBER: "+911234567890", BOLNA_AGENT_ID: "a" });
+    delete process.env.AGENT_CALL_REQUIRE_VERIFIED;
+    const stamp = Date.now();
+    const bare = await db.one(
+      `INSERT INTO users (email, name, created_at) VALUES ($1,'Bare',$2) RETURNING id`, [`bare-${stamp}@example.test`, stamp]);
+    try {
+      assert.strictEqual(await agentCall._phoneVerified(bare.id), false);
+      await assert.rejects(
+        agentCall.start({ userId: Number(bare.id), toNumber: "+919845000001", contactName: "Ravi", task: "say hello" }),
+        (e) => e.code === "failed" && e.reason === "caller_rejected" && /verify your phone number/.test(e.message));
+      await db.run("UPDATE users SET phone_verified_at = $2, phone_number = $3 WHERE id = $1",
+        [bare.id, stamp, `+9198${String(stamp).slice(-8)}`]);
+      assert.strictEqual(await agentCall._phoneVerified(bare.id), true);
+    } finally {
+      for (const k of ["PUBLIC_BASE_URL", "BOLNA_API_KEY", "BOLNA_FROM_NUMBER", "BOLNA_AGENT_ID"]) {
+        if (keep[k] === undefined) delete process.env[k]; else process.env[k] = keep[k];
+      }
+    }
+  });
+
+  await atest("reminder calls ring people in the daytime only (India time)", () => {
+    const { reminderCallHours } = require("../src/proactive/scheduler");
+    const at = (istHour) => Date.UTC(2026, 10, 28, istHour, 0) - 5.5 * 3600_000;
+    for (const h of [9, 12, 19]) assert.strictEqual(reminderCallHours(at(h)), true, `${h}:00`);
+    for (const h of [0, 3, 8, 20, 23]) assert.strictEqual(reminderCallHours(at(h)), false, `${h}:00`);
+    process.env.REMINDER_CALL_HOURS = "10-18";
+    assert.strictEqual(reminderCallHours(at(9)), false);
+    assert.strictEqual(reminderCallHours(at(17)), true);
+    delete process.env.REMINDER_CALL_HOURS;
+    // What the caller is told to say: automated, on whose behalf, and no private reason.
+    const src = require("fs").readFileSync(require("path").join(__dirname, "../src/proactive/scheduler.js"), "utf8");
+    assert.ok(src.includes("This is an automated reminder call on behalf of Dr."));
+    assert.ok(!/\$\{a\.reason \? /.test(src), "the reason for the visit is not read out");
+    assert.ok(!/case "\$\{h\.case_title\}"/.test(src), "nor the title of the case");
+  });
+
+  await atest("all calls together have a daily ceiling, whatever accounts place them", async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    agentCall._dayCounts.delete(`global:${day}`);
+    assert.strictEqual(await agentCall._reserveGlobal(0), true, "0 switches the ceiling off");
+    agentCall._dayCounts.set(`global:${day}`, 0);
+    assert.strictEqual(await agentCall._reserveGlobal(2), true);
+    assert.strictEqual(await agentCall._reserveGlobal(2), true);
+    assert.strictEqual(await agentCall._reserveGlobal(2), false, "the third call of the day is refused");
+    agentCall._dayCounts.delete(`global:${day}`);
+  });
+
+  await atest("a name search returns only the caller's own contacts, never another user's number", async () => {
+    const stamp = Date.now();
+    const mk = async (name, phone) => Number((await db.one(
+      `INSERT INTO users (email, name, phone_number, phone_verified_at, created_at) VALUES ($1,$2,$3,$4,$4) RETURNING id`,
+      [`ns-${stamp}-${name.replace(/\W/g, "")}@example.test`, name, phone, stamp])).id);
+    const me = await mk("Searcher", `+9197${String(stamp).slice(-8)}`);
+    await mk(`Zubin Unlisted${stamp}`, `+9196${String(stamp).slice(-8)}`);
+    await require("../src/routes/contacts").migrate();
+    const express = require("express");
+    const app = express();
+    app.use((req, _res, next) => { req.user = { sub: String(me) }; next(); });
+    app.use("/contacts", require("../src/routes/contacts"));
+    const server = await new Promise((r) => { const sv = app.listen(0, "127.0.0.1", () => r(sv)); });
+    try {
+      const get = async (name) => (await fetch(
+        `http://127.0.0.1:${server.address().port}/contacts/resolve?name=${encodeURIComponent(name)}`)).json();
+      const stranger = await get(`Zubin Unlisted${stamp}`);
+      assert.strictEqual(stranger.match, null, "an app user who is not in my contacts is not found");
+      assert.ok(!JSON.stringify(stranger).includes("+9196"), "and their number is nowhere in the answer");
+      await db.run(`INSERT INTO contacts (user_id, name, phone, updated_at) VALUES ($1,$2,$3,$4)`,
+        [me, "Asha Saved", "+919845011111", stamp]);
+      const mine = await get("Asha Saved");
+      assert.strictEqual(mine.match && mine.match.phone, "+919845011111", "my own saved contact still resolves");
+    } finally { server.close(); }
+  });
+
+  await atest("publishing a build has its own key once one is set", () => {
+    const { requirePublishKey } = require("../src/middleware/adminKey");
+    const keep = [process.env.ADMIN_KEY, process.env.APK_PUBLISH_KEY];
+    const run = (key) => {
+      let out = "refused";
+      requirePublishKey({ get: (h) => (h === "X-Admin-Key" ? key : undefined) },
+        { status() { return { json() {} }; } }, () => { out = "ok"; });
+      return out;
+    };
+    try {
+      process.env.ADMIN_KEY = "admin-key-admin-key-0001";
+      delete process.env.APK_PUBLISH_KEY;
+      assert.strictEqual(run("admin-key-admin-key-0001"), "ok", "unset: the admin key publishes, as before");
+      process.env.APK_PUBLISH_KEY = "publish-key-publish-0002";
+      assert.strictEqual(run("publish-key-publish-0002"), "ok");
+      assert.strictEqual(run("admin-key-admin-key-0001"), "refused", "the admin key no longer publishes");
+      assert.strictEqual(run("wrong"), "refused");
+    } finally {
+      if (keep[0] === undefined) delete process.env.ADMIN_KEY; else process.env.ADMIN_KEY = keep[0];
+      if (keep[1] === undefined) delete process.env.APK_PUBLISH_KEY; else process.env.APK_PUBLISH_KEY = keep[1];
+    }
+  });
+
   console.log(`\n${passed} passed${process.exitCode ? ", some FAILED" : ""}`);
   process.exit(process.exitCode || 0);
 })().catch((e) => {

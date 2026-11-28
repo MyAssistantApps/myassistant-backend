@@ -20,7 +20,14 @@ function cfg() {
   return {
     base: (process.env.PUBLIC_BASE_URL || "").replace(/\/$/, ""),
     dailyLimit: Number(process.env.AGENT_CALL_DAILY_LIMIT || 20),
-    systemDailyLimit: Number(process.env.AGENT_CALL_SYSTEM_DAILY_LIMIT || 150),
+    // Reminder calls a professional's schedule places by itself. 40 a day
+    // per practice (was 150): enough for a full clinic day, and a ceiling
+    // on what a made-up schedule can make us dial (2026-11-28).
+    systemDailyLimit: Number(process.env.AGENT_CALL_SYSTEM_DAILY_LIMIT || 40),
+    // EVERY call the service places in a day, all users together. Each
+    // limit above is per account, and accounts are free to create: without
+    // this, the number of calls we pay for had no ceiling (2026-11-28).
+    globalDailyLimit: Number(process.env.AGENT_CALL_GLOBAL_DAILY_LIMIT || 300),
     bolnaKey: process.env.BOLNA_API_KEY || "",
     bolnaFrom: process.env.BOLNA_FROM_NUMBER || "",
     bolnaAgent: process.env.BOLNA_AGENT_ID || "",
@@ -118,6 +125,44 @@ async function reserveDaily(key0, limit, userId) {
   dayCounts.set(key, n + 1);
   return true;
 }
+/**
+ * The whole service's calls today. Seeded from what was filed today, like a
+ * user's own allowance, so a restart does not hand out a fresh day.
+ */
+async function reserveGlobal(limit) {
+  if (!(limit > 0)) return true; // 0 = no service-wide ceiling
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `global:${day}`;
+  if (!dayCounts.has(key)) {
+    let filed = 0;
+    try {
+      const r = await require("../db").one(
+        `SELECT COUNT(*)::int AS n FROM task_outcomes
+          WHERE kind = 'agent_call' AND created_at >= $1 AND status <> 'failed'`,
+        [Date.parse(`${day}T00:00:00Z`)]);
+      filed = Number(r?.n) || 0;
+    } catch { /* table not there yet */ }
+    if (!dayCounts.has(key)) dayCounts.set(key, filed);
+  }
+  const n = dayCounts.get(key);
+  if (n >= limit) return false;
+  dayCounts.set(key, n + 1);
+  return true;
+}
+
+/** On unless AGENT_CALL_REQUIRE_VERIFIED=off (suites that test the call machinery with bare accounts). */
+const requireVerified = () => String(process.env.AGENT_CALL_REQUIRE_VERIFIED || "on").toLowerCase() !== "off";
+
+/** Whether this account has proved a phone number is theirs. */
+async function phoneVerified(userId) {
+  try {
+    const u = await require("../db").one("SELECT phone_verified_at FROM users WHERE id = $1", [Number(userId)]);
+    return Boolean(u && u.phone_verified_at);
+  } catch {
+    return true; // the check cannot be made: the per-user and service limits still hold
+  }
+}
+
 function refundDaily(key0) {
   const key = `${key0}:${new Date().toISOString().slice(0, 10)}`;
   const n = dayCounts.get(key) || 0;
@@ -987,9 +1032,25 @@ async function start({ userId, userName, toNumber, contactName, task, lang, self
   // hearing) have their own, larger allowance: a busy clinic sees more
   // than 20 patients a day, and a reminder dropped for the quota was
   // never retried (audit 2026-11-21).
+  // ONLY FOR AN ACCOUNT THAT PROVED ITS NUMBER (2026-11-28). A call is
+  // placed from our caller ID, on our bill, in the user's words: an account
+  // with no verified phone does not get that. The answer is the documented
+  // refusal, so the phone dials the contact itself, as on any failure.
+  if (userId && requireVerified() && !(await phoneVerified(userId))) {
+    throw { code: "failed", reason: "caller_rejected",
+      message: "Please verify your phone number before the assistant places calls for you." };
+  }
   const quotaKey = system ? `sys:${userId}` : userId;
   const limit = system ? cfg().systemDailyLimit : cfg().dailyLimit;
   if (userId && !(await reserveDaily(quotaKey, limit, userId))) throw { code: "quota" };
+  if (!(await reserveGlobal(cfg().globalDailyLimit))) {
+    if (userId) refundDaily(quotaKey);
+    console.warn(`agent call: the service-wide daily limit (${cfg().globalDailyLimit}) is reached`);
+    require("../feedback/store").alert("AI phone calls have reached today's service-wide limit",
+      { details: "Raise AGENT_CALL_GLOBAL_DAILY_LIMIT if this is real demand; check Activity for one account placing many." })
+      .catch(() => {});
+    throw { code: "quota" };
+  }
 
   const rec = {
     id: crypto.randomBytes(12).toString("hex"),
@@ -1182,6 +1243,10 @@ module.exports = {
   tool,
   relayDown,
   closeStale,
+  // For tests: the limits (service-wide, verified phone) and the day's counts.
+  _reserveGlobal: reserveGlobal,
+  _phoneVerified: phoneVerified,
+  _dayCounts: dayCounts,
   // For tests: the live call map and the completion step.
   _calls: calls,
   _finishCompleted: finishCompleted,

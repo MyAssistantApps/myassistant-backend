@@ -13,6 +13,10 @@
  *     with the message given as written.
  * The calling service is stubbed: no call is ever placed.
  */
+// These tests drive the call machinery with bare accounts. The rule that an
+// account must have a verified phone before a call is placed for it has its
+// own tests (scripts/readiness-test.js); here it is switched off.
+process.env.AGENT_CALL_REQUIRE_VERIFIED = "off";
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ||
   "postgres://myassistant:localdev@localhost:5432/myassistant";

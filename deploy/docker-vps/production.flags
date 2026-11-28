@@ -47,3 +47,8 @@ BOLNA_AGENT_ID_MALE=cb752bce-9896-44ff-9442-3f54f7b22955
 #                                  purchases to /cashback/cuelinks/hook/<it>
 #   CASHBACK=on
 # NEVER set CASHBACK_SANDBOX on production: it pretends partners are tracked.
+# Launch hardening (2026-11-28) — not set on the server, so the code defaults
+# apply: AGENT_CALL_GLOBAL_DAILY_LIMIT=300 (all AI calls, all users, per day),
+# AGENT_CALL_SYSTEM_DAILY_LIMIT=40 (reminder calls per practice per day).
+# APK_PUBLISH_KEY=<secret> when set is the ONLY key that can publish an app
+# build (POST /admin/apk); until then the admin key publishes as before.

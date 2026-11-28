@@ -22,6 +22,10 @@
  * runs in UTC. The test pins the same so date parsing behaves as it does
  * in production, not as it does on a laptop in India.
  */
+// These tests drive the call machinery with bare accounts. The rule that an
+// account must have a verified phone before a call is placed for it has its
+// own tests (scripts/readiness-test.js); here it is switched off.
+process.env.AGENT_CALL_REQUIRE_VERIFIED = "off";
 process.env.TZ = "UTC";
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ||

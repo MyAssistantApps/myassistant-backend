@@ -86,9 +86,8 @@ router.post("/sync", async (req, res) => {
 
 // GET /contacts/resolve?name=… — server-side name→number resolution, used
 // by the app when the DEVICE contact lookup finds nothing (contact saved
-// under a nickname, or the caller spoke a registered user's name). Checks
-// the synced address book + clients first, then falls back to a single
-// unambiguous verified app user by name.
+// under a nickname). Checks the caller's own synced address book and their
+// clients, and nothing else.
 router.get("/resolve", async (req, res) => {
   const uid = Number(req.user?.sub);
   const name = String(req.query.name || "").trim();
@@ -97,21 +96,11 @@ router.get("/resolve", async (req, res) => {
   }
   try {
     const out = await require("../users/resolve").resolveContact(uid, name, { limit: 4 });
-    // A name, not a pattern: unescaped, "%" or "a_" matched every user and
-    // handed back the number of whichever one it singled out.
-    if (!out.match && !out.candidates.length && /\p{L}{2,}/u.test(name)) {
-      const literal = name.replace(/[\\%_]/g, (c) => `\\${c}`);
-      const users = await db.query(
-        `SELECT name, phone_number AS phone FROM users
-          WHERE phone_verified_at IS NOT NULL AND phone_number IS NOT NULL
-            AND id <> $2
-            AND (lower(name) = lower($1) OR lower(name) LIKE lower($3) || ' %' ESCAPE '\\')`,
-        [name, uid, literal]
-      );
-      if (users.length === 1) {
-        return res.json({ match: { name: users[0].name, phone: users[0].phone, source: "app-user" }, candidates: [] });
-      }
-    }
+    // ONLY THE CALLER'S OWN CONTACTS AND CLIENTS (owner, 2026-11-28). There
+    // used to be a fallback here to every app user: a name that matched
+    // exactly one account returned that person's mobile number to anyone
+    // who asked. A number is given out by the person it belongs to, when
+    // they share their contact — never by a search.
     res.json(out);
   } catch (e) {
     console.error("contacts resolve failed:", e.message);
