@@ -43,6 +43,21 @@ function localHour(tzOffsetMin = 330) {
   return new Date(Date.now() + tzOffsetMin * 60_000).getUTCHours();
 }
 
+/**
+ * WHEN A REMINDER CALL MAY RING SOMEONE (2026-11-28). The appointment,
+ * hearing and recall sweeps place calls to people who are not our users;
+ * until now nothing stopped one going out at 3 a.m. Calls go out between
+ * 9:00 and 20:00 India time (REMINDER_CALL_HOURS="9-20" to change). Outside
+ * that the sweep does nothing and CLAIMS nothing, so the call is placed
+ * when the window opens, if it is still early enough to be a reminder.
+ */
+function reminderCallHours(now = Date.now()) {
+  const m = /^(\d{1,2})-(\d{1,2})$/.exec(String(process.env.REMINDER_CALL_HOURS || "9-20").trim());
+  const from = m ? Number(m[1]) : 9, to = m ? Number(m[2]) : 20;
+  const hour = new Date(now + 5.5 * 3600_000).getUTCHours();
+  return hour >= from && hour < to;
+}
+
 function inQuietHours(tzOffsetMin) {
   const h = localHour(tzOffsetMin);
   return QUIET_START > QUIET_END
@@ -463,6 +478,7 @@ async function sweepFares() {
 async function sweepPatientRecalls() {
   const agentCall = require("../agents/agentCall");
   if (!agentCall.enabled()) return;
+  if (!reminderCallHours()) return;
   const practice = require("../practice/store");
   const outcomes = require("../outcomes/store");
   const db = require("../db");
@@ -539,6 +555,7 @@ async function sweepMomentum() {
 async function sweepAppointmentReminders() {
   const agentCall = require("../agents/agentCall");
   if (!agentCall.enabled()) return;
+  if (!reminderCallHours()) return;
   const clinic = require("../clinic/store");
   let due = [];
   try {
@@ -564,8 +581,12 @@ async function sweepAppointmentReminders() {
         contactName: a.patient_name,
         system: true,
         task:
-          `Remind them of their appointment with Dr. ${first || "the doctor"} on ${whenTxt}` +
-          `${a.reason ? ` (${a.reason})` : ""}. Ask whether they will be able to come. ` +
+          // The reason for the visit is NOT said (2026-11-28): whoever picks
+          // up the phone would hear it, and on a booking made from the public
+          // page it is text a stranger typed.
+          `This is an automated reminder call on behalf of Dr. ${first || "the doctor"}'s clinic; say so first. ` +
+          `Remind them of their appointment with Dr. ${first || "the doctor"} on ${whenTxt}. ` +
+          `Ask whether they will be able to come. ` +
           `If they cannot, say the clinic will call to find a new time.`,
         lang: null,
       });
@@ -584,6 +605,7 @@ async function sweepAppointmentReminders() {
 async function sweepHearingReminders() {
   const agentCall = require("../agents/agentCall");
   if (!agentCall.enabled()) return;
+  if (!reminderCallHours()) return;
   const pro = require("../pro/store");
   let due = [];
   try {
@@ -607,8 +629,9 @@ async function sweepHearingReminders() {
         contactName: h.client_name,
         system: true,
         task:
-          `Remind them that their case "${h.case_title}" has a hearing${h.court ? ` at ${h.court}` : ""} on ${whenTxt}` +
-          `${h.purpose ? ` (${h.purpose})` : ""}. Their advocate asks them to be on time and to bring any ` +
+          `This is an automated reminder call on behalf of their advocate${first ? `, ${first}` : ""}; say so first. ` +
+          `Remind them that their case has a hearing${h.court ? ` at ${h.court}` : ""} on ${whenTxt}. ` +
+          `Their advocate asks them to be on time and to bring any ` +
           `documents they were asked for. Do not discuss the case itself; if they have questions, say the advocate will call back.`,
         lang: null,
       });
@@ -691,5 +714,5 @@ module.exports = {
   sweepCommitments, sweepPatientRecalls, sweepMeetings, sweepFares, sweepMorningBriefs,
   sweepPersonDates, sweepMomentum, everyUser,
   buildBrief, morningBody,
-  inQuietHours, localHour,
+  inQuietHours, localHour, reminderCallHours,
 };

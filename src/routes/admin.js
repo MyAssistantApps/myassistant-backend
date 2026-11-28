@@ -5,7 +5,8 @@
  */
 const router = require("express").Router();
 
-router.use(require("../middleware/adminKey").requireAdminKey);
+// Publishing a build: its own key when one is set (middleware/adminKey.js).
+router.use(require("../middleware/adminKey").requirePublishKey);
 
 // ---- APK publishing (self-hosted update channel, see routes/appUpdate.js) ----
 // Usage:

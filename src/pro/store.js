@@ -256,7 +256,7 @@ async function hearingsNeedingReminder(now = Date.now()) {
        JOIN users u ON u.id = h.user_id
       WHERE h.status = 'upcoming' AND h.remind_client = 1 AND h.reminded_at = 0
         AND cl.phone <> ''
-        AND h.at >= $1 + 2 * 3600 * 1000 AND h.at <= $1 + 20 * 3600 * 1000
+        AND h.at >= $1::bigint + 2 * 3600 * 1000 AND h.at <= $1::bigint + 20 * 3600 * 1000
       ORDER BY h.at ASC LIMIT 25`,
     [now]
   );

@@ -227,6 +227,29 @@ async function test(name, fn) {
     const up = await clinic.listAppointments(doc, { from: Date.now() - 86_400_000, to: Date.now() + 30 * 86_400_000, includeClosed: false });
     assert.ok(up.some((x) => Number(x.id) === Number(appt.id)));
   });
+  await test("the reminder-call sweeps find an appointment and a hearing a few hours away (today's clock is not an INTEGER)", async () => {
+    // Live, 2026-11-24: both queries failed on every sweep with "value
+    // 1795504669597 is out of range for type integer" — Postgres read
+    // `$1 + 2 * 3600 * 1000` as INTEGER arithmetic — so no patient or client
+    // was ever rung. Run with the real clock, as the scheduler does.
+    const clinic = require("../src/clinic/store");
+    const pro = require("../src/pro/store");
+    const clients = require("../src/clients/store");
+    const soon = Date.now() + 5 * 3600_000;
+    const doc = await mk("Dr Remind", P("31"), { persona: "doctor", profession: "Physician" });
+    const appt = await clinic.createAppointment(doc, { patientName: "Ravi", patientPhone: P("32"), startsAt: soon, source: "app" });
+    const dueA = await clinic.appointmentsNeedingReminder();
+    assert.ok(dueA.some((a) => Number(a.id) === Number(appt.id)), "the appointment is due a reminder");
+    assert.strictEqual(await clinic.markReminded(appt.id), true);
+    assert.ok(!(await clinic.appointmentsNeedingReminder()).some((a) => Number(a.id) === Number(appt.id)), "one reminder, ever");
+
+    const adv = await mk("Adv Remind", P("33"), { persona: "advocate", profession: "Advocate" });
+    const client = await clients.createClient(adv, { name: "Sunita", kind: "client", phone: P("34") });
+    const kase = await pro.createCase(adv, { title: "Sunita v. Landlord", clientId: client.id });
+    const hearing = await pro.addHearing(adv, kase.id, { at: soon, purpose: "Arguments" });
+    const dueH = await pro.hearingsNeedingReminder();
+    assert.ok(dueH.some((h) => Number(h.id) === Number(hearing.id)), "the hearing is due a reminder");
+  });
   console.log("\nbookings with professionals, end to end");
   await test("an ADVOCATE: booked on their real slots, confirmed back to the caller, on the caller's Home", async () => {
     const bookings = require("../src/connect/bookings");

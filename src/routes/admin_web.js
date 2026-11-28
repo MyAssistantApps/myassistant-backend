@@ -144,6 +144,9 @@ router.use("/api", (req, res, next) => {
 
 router.get("/api/session", (_req, res) => res.json({ ok: true }));
 
+// Cashback: purchases waiting for a person, withdrawals to pay, partners.
+router.use("/api/cashback", require("../cashback/admin"));
+
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */

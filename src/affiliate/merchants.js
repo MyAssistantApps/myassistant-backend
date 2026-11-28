@@ -86,23 +86,38 @@ function deepLink(m, target) {
   }
 }
 
-/** The tracked link for [m], and whether we earn on it right now. */
-function trackedUrl(m, target) {
+/**
+ * The tracked link for [m], whether we earn on it right now, and through
+ * which network.
+ *
+ * [clickId] (2026-11-27, cashback) rides on a network link as its SUB-ID:
+ * the network hands it back with every purchase it reports, which is how a
+ * purchase is matched to the person who made it (cashback/store.js). The
+ * parameter is "subid" unless CUELINKS_SUBID_PARAM says otherwise. Amazon's
+ * own tag carries no sub-id — and Amazon purchases earn no cashback.
+ */
+function trackedUrl(m, target, { clickId } = {}) {
   const dest = deepLink(m, target) || m.url;
   m = { ...m, url: dest };
   if (m.program === "amazon" && process.env.AMAZON_ASSOCIATE_TAG) {
     const u = new URL(m.url);
     u.searchParams.set("tag", process.env.AMAZON_ASSOCIATE_TAG);
-    return { url: u.toString(), tracked: true };
+    return { url: u.toString(), tracked: true, network: "amazon" };
   }
   if ((m.program === "network" || m.program === "amazon") && process.env.CUELINKS_CID) {
     const u = new URL("https://linksredirect.com/");
     u.searchParams.set("cid", process.env.CUELINKS_CID);
     u.searchParams.set("source", "linkkit");
     u.searchParams.set("url", m.url);
-    return { url: u.toString(), tracked: true };
+    if (clickId) u.searchParams.set(process.env.CUELINKS_SUBID_PARAM || "subid", clickId);
+    return { url: u.toString(), tracked: true, network: "cuelinks" };
   }
-  return { url: m.url, tracked: false };
+  // A development server with no affiliate account: network partners count
+  // as tracked and open plainly, so cashback can be tried end to end.
+  if (m.program === "network" && String(process.env.CASHBACK_SANDBOX || "").toLowerCase() === "on") {
+    return { url: m.url, tracked: true, network: "sandbox" };
+  }
+  return { url: m.url, tracked: false, network: "" };
 }
 
 /** The list the app shows (no tracking ids in it). */
